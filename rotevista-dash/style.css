@@ -67,6 +67,7 @@ body {
     width: 100%;
     box-sizing: border-box;
     flex: 1;
+    container-type: size; /* TRUCCO MAGICO: Rende il box misurabile per i suoi figli */
 }
 
 /* ==========================================================================
@@ -86,7 +87,17 @@ body {
 .label { color: #666; font-size: 0.6rem; font-weight: bold; text-transform: uppercase; }
 .unit { color: #888; font-size: 0.55rem; font-weight: bold; }
 
-.value { color: #fff; font-size: 2.4rem; font-weight: 600; line-height: 0.9; letter-spacing: -1px; transition: color 0.3s ease; padding-bottom: 5px; }
+/* Numeri standard (con grafico) */
+.value {
+    color: #fff;
+    /* clamp: minimo 1.8rem, preferito 30% altezza box, massimo 3.5rem */
+    font-size: clamp(1.8rem, 30cqh, 3.5rem);
+    font-weight: 600;
+    line-height: 0.9;
+    letter-spacing: -1px;
+    transition: color 0.3s ease;
+    padding-bottom: 5px;
+}
 .value-large { margin-top: auto; font-size: clamp(2.4rem, 7.5vh, 4.5rem); line-height: 0.85; }
 
 /* ==========================================================================
