@@ -1,22 +1,17 @@
 {
-  "name": "@rotevista/rotevista-dash",
-  "version": "1.0.0",
-  "description": "Dashboard privata per la Bavaria 39 Rotevista",
+  "name": "@sailingrotevista/rotevista-dash",
+  "version": "1.0.4",
+  "description": "Dashboard pubblica per Bavaria 39 Rotevista",
+  "main": "index.html",
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "signalk-webapp"
   ],
+  "author": "sailingrotevista",
   "license": "MIT",
-  "author": "rotevista",
-  "type": "commonjs",
-  "main": "index.html",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "publishConfig": {
-    "access": "restricted"
-  },
   "signalk": {
-    "displayName": "Rotevista Dash",
-    "appIcon": "./icon.png"
+    "displayName": "Rotevista Dash"
   }
 }

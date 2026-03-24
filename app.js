@@ -460,3 +460,24 @@ startDisplayLoop();
 window.addEventListener('load', () => {
     setTimeout(connect, 500);
 });
+
+// ==========================================================================
+// 11. GESTIONE FULLSCREEN (Al primo tocco)
+// ==========================================================================
+function requestFullScreen() {
+    const docElm = document.documentElement; // Prende l'intero tag <html>
+    
+    // Controlla se siamo già in fullscreen
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        // Tenta di attivare il fullscreen (con fallback per vari browser)
+        if (docElm.requestFullscreen) {
+            docElm.requestFullscreen().catch(err => console.log("Fullscreen bloccato:", err));
+        } else if (docElm.webkitRequestFullscreen) { // Chrome/Safari (se supportato)
+            docElm.webkitRequestFullscreen();
+        }
+    }
+}
+
+// Ascolta il primissimo click o tocco ovunque nello schermo per attivare il fullscreen
+document.addEventListener('click', requestFullScreen, { once: true });
+document.addEventListener('touchstart', requestFullScreen, { once: true });
