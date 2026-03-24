@@ -1,0 +1,269 @@
+/* ==========================================================================
+   1. BASE E STRUTTURA GENERALE
+   ========================================================================== */
+body {
+    background-color: #000;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    overflow: hidden;
+}
+
+.main-container {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    padding: 5px;
+    box-sizing: border-box;
+    align-items: stretch; /* Estende le colonne per tutta l'altezza */
+}
+
+/* ==========================================================================
+   2. PANNELLI LATERALI E DATA-BOX (Riquadri)
+   ========================================================================== */
+.side-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 10px;
+    z-index: 10;
+}
+
+.right-panel {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.data-box {
+    position: relative; /* Necessario per posizionare gli elementi assoluti interni */
+    border-bottom: 1px solid #222;
+    padding: 8px 8px;
+    display: flex;
+    flex-direction: column;
+    min-height: 82px;
+    width: 100%;
+    box-sizing: border-box;
+    flex: 1; /* Distribuisce lo spazio equamente in altezza */
+}
+
+/* ==========================================================================
+   3. TIPOGRAFIA ED ETICHETTE
+   ========================================================================== */
+.label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 2px;
+    width: 100%;
+}
+
+.label {
+    color: #666;
+    font-size: 0.6rem;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.unit {
+    color: #888;
+    font-size: 0.55rem;
+    font-weight: bold;
+}
+
+/* Valore Numerico Base (usato per i riquadri con grafici) */
+.value {
+    color: #fff;
+    font-size: 2.4rem;
+    font-weight: 600;
+    line-height: 0.9;
+    letter-spacing: -1px;
+    transition: color 0.3s ease;
+    padding-bottom: 5px;
+}
+
+/* Valore Numerico Dinamico (usato per i riquadri SENZA grafici) */
+.value-large {
+    margin-top: auto; /* Spinge il numero verso il basso */
+    /*
+       clamp(min, preferito, max)
+       Minimo: 2.4rem (come i grafici)
+       Preferito: 7.5vh (scala molto in base all'altezza schermo)
+       Massimo: 4.5rem (font molto grande ma sicuro per non sbordare)
+    */
+    font-size: clamp(2.4rem, 7.5vh, 4.5rem);
+    line-height: 0.85; /* Evita che il font grande sposti il layout */
+}
+
+/* Etichetta periodo media (es. per future implementazioni) */
+.period-label {
+    position: absolute;
+    bottom: 4px;
+    left: 8px;
+    font-size: 0.5rem;
+    color: #444;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+.right-panel .period-label { left: auto; right: 8px; }
+
+/* ==========================================================================
+   4. LAYOUT SPECIALI (TACK e TWD COMPASS)
+   ========================================================================== */
+/* Layout a doppia colonna per il riquadro TACK */
+.dual-value-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    width: 100%;
+    margin-top: auto;
+    padding-bottom: 5px;
+}
+
+.dual-value-col {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between; /* Spinge l'etichetta su e il numero giù */
+    width: 48%; /* Lascia un piccolo margine al centro */
+    height: 100%; /* Prende tutta l'altezza disponibile nel contenitore */
+}
+
+.dual-value-col.right-col {
+    align-items: flex-end;
+    text-align: right;
+}
+
+.dual-label {
+    color: #666;
+    font-size: 0.55rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-bottom: auto; /* Mantiene l'etichetta schiacciata verso l'alto */
+}
+
+.value.dual-val {
+    font-size: 1.8rem; /* Font leggermente più piccolo per farne stare due */
+    padding-bottom: 0;
+}
+
+/* Layout Bussolina TWD */
+.value-with-compass {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-top: auto;
+}
+
+.mini-compass {
+    width: 38px;
+    height: 38px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.value-with-compass .value-large {
+    margin-top: 0; /* Annulla il margin-top perché gestito dal padre flex */
+}
+
+/* ==========================================================================
+   5. GRAFICI STORICI (SPARKLINES)
+   ========================================================================== */
+.graph-wrapper {
+    position: relative;
+    width: 100%;
+    flex-grow: 1; /* Il contenitore si espande in altezza */
+    min-height: 20px;
+    margin-top: 4px;
+}
+
+.sparkline {
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+}
+
+.scale-labels {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    font-size: 8px;
+    color: #555;
+    padding: 1px 5px;
+    font-weight: bold;
+}
+.scale-labels.right { right: 0; text-align: right; }
+.scale-labels.left { left: 0; text-align: left; }
+
+/* Colori specifici delle linee dei grafici */
+#stw-graph { stroke: #2ecc71; fill: rgba(46, 204, 113, 0.15); }
+#sog-graph { stroke: #f39c12; fill: rgba(243, 156, 18, 0.15); }
+#depth-graph { stroke: #3498db; fill: rgba(52, 152, 219, 0.15); }
+#tws-graph { stroke: #f1c40f; fill: rgba(241, 196, 15, 0.15); }
+
+/* ==========================================================================
+   6. PANNELLO CENTRALE (STRUMENTO VENTO SVG)
+   ========================================================================== */
+.center-panel {
+    flex: 3.5;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+}
+
+#wind-gauge {
+    width: 100%;
+    height: auto;
+    max-height: 95vh;
+    object-fit: contain;
+}
+
+/* ==========================================================================
+   7. STATI, ALLARMI E ANIMAZIONI
+   ========================================================================== */
+/* Stato Connessione */
+#status {
+    position: absolute;
+    top: 5px;
+    right: 15px;
+    font-size: 0.5rem;
+    text-transform: uppercase;
+    z-index: 1000;
+}
+.online { color: #2ecc71; opacity: 0.5; }
+.offline { color: #e74c3c; font-weight: bold; }
+
+/* Animazione fluidità lancette SVG */
+#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow {
+    transition: all 0.6s cubic-bezier(0.1, 0.7, 0.1, 1);
+}
+#leeway-mask-rect { transition: none; } /* Deve essere istantaneo */
+
+/* Allarmi Profondità */
+.alarm-warning { color: #f1c40f !important; }
+.alarm-danger { color: #e74c3c !important; font-weight: 900; animation: blink-unstable 1s infinite; }
+
+/* Lampeggio dati instabili / Ricalcolo buffer */
+@keyframes blink-unstable {
+    0% { opacity: 1; }
+    50% { opacity: 0.3; }
+    100% { opacity: 1; }
+}
+.unstable-data {
+    animation: blink-unstable 1.5s infinite ease-in-out;
+    color: #f39c12 !important; /* Arancione per evidenziare il ricalcolo */
+}

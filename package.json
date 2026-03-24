@@ -1,0 +1,22 @@
+{
+  "name": "@rotevista/rotevista-dash",
+  "version": "1.0.0",
+  "description": "Dashboard privata per la Bavaria 39 Rotevista",
+  "keywords": [
+    "signalk-webapp"
+  ],
+  "license": "MIT",
+  "author": "rotevista",
+  "type": "commonjs",
+  "main": "index.html",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "signalk": {
+    "displayName": "Rotevista Dash",
+    "appIcon": "./icon.png"
+  }
+}

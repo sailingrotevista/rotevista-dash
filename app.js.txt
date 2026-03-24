@@ -1,0 +1,311 @@
+const SIGNALK_SERVER_IP = "192.168.111.240:3000";
+const ALARM_DANGER_DEPTH = 2.5;
+const ALARM_WARNING_DEPTH = 5.0;
+
+const SMOOTH_WINDOW_MS = 2000;
+const LONG_AVG_WINDOW_MS = 60000;
+const RENDER_INTERVAL_MS = 1000;  
+const TIMEOUT_MS = 5000;
+
+const MAX_HISTORY_SAMPLES = 60;
+const REAL_SAMPLE_INTERVAL = 5000;
+const SIM_SAMPLE_INTERVAL = 1000;
+
+let simulationMode = false;
+let socket;
+let renderInterval = null;
+let simInterval = null;
+let lastAvgUIUpdate = 0;
+let audioCtx = null, lastAlarmTime = 0;
+
+let curAwaRot = 0, curTwaRot = 0, curTrackRot = 0, curTwdRoseRot = 0;
+
+const store = {
+    raw: {},
+    timestamps: {},
+    smoothBuf: { hdg: [], awa: [], twa: [], twd: [], leeway: [] },
+    longBuf: { awa: [], twa: [], twd: [] },
+    histories: { stw: [], sog: [], depth: [], tws: [] },
+    lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0 }
+};
+
+const ui = {
+    stw: document.getElementById('stw'), sog: document.getElementById('sog'),
+    hdg: document.getElementById('hdg'), cog: document.getElementById('cog'),
+    awsSvg: document.getElementById('aws-val-svg'), awa: document.getElementById('awa-pointer'),
+    twa: document.getElementById('twa-pointer'), track: document.getElementById('track-pointer'),
+    tws: document.getElementById('tws'), depth: document.getElementById('depth'),
+    twaAvg: document.getElementById('twa-avg'), awaAvg: document.getElementById('awa-avg'),
+    twdAvg: document.getElementById('twd-avg'), twdArrow: document.getElementById('twd-arrow'),
+    leewayMask: document.getElementById('leeway-mask-rect'), leewayVal: document.getElementById('leeway-val'),
+    status: document.getElementById('status')
+};
+
+function radToDeg(rad) { return rad * (180 / Math.PI); }
+function degToRad(deg) { return deg * (Math.PI / 180); }
+function msToKts(ms) { return ms * 1.94384; }
+function ktsToMs(kts) { return kts / 1.94384; }
+
+function getShortestRotation(curr, target) {
+    let diff = (target - curr) % 360;
+    if (diff > 180) diff -= 360; else if (diff < -180) diff += 360;
+    return curr + diff;
+}
+
+function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
+    const now = Date.now();
+    const validData = bufferArray.filter(item => (now - item.time) <= windowMs);
+    if (validData.length === 0) return null;
+    let sumSin = 0, sumCos = 0;
+    validData.forEach(item => { sumSin += Math.sin(item.val); sumCos += Math.cos(item.val); });
+    let avgRad = Math.atan2(sumSin, sumCos);
+    let avgDeg = Math.round(radToDeg(avgRad));
+    return signed ? avgDeg : (avgDeg + 360) % 360;
+}
+
+function cleanBuffer(bufferArray, windowMs) {
+    const now = Date.now();
+    while (bufferArray.length > 0 && (now - bufferArray[0].time) > windowMs) bufferArray.shift();
+}
+
+function processIncomingData(path, val) {
+    const now = Date.now();
+    store.timestamps[path] = now;
+    store.raw[path] = val;
+
+    if (path === "navigation.headingMagnetic") store.smoothBuf.hdg.push({ val: val, time: now });
+    if (path === "environment.wind.angleApparent") { store.smoothBuf.awa.push({ val: val, time: now }); store.longBuf.awa.push({ val: val, time: now }); }
+    if (path === "environment.wind.angleTrueWater") { store.smoothBuf.twa.push({ val: val, time: now }); store.longBuf.twa.push({ val: val, time: now }); }
+
+    if (path === "environment.wind.angleTrueWater" || path === "navigation.headingMagnetic") {
+        if (store.raw["navigation.headingMagnetic"] !== undefined && store.raw["environment.wind.angleTrueWater"] !== undefined) {
+            let twdRad = (store.raw["navigation.headingMagnetic"] + store.raw["environment.wind.angleTrueWater"]) % (2 * Math.PI);
+            if (twdRad < 0) twdRad += (2 * Math.PI);
+            store.raw["environment.wind.directionTrue"] = twdRad;
+            store.timestamps["environment.wind.directionTrue"] = now;
+        }
+    }
+
+    if (store.raw["environment.wind.directionTrue"] !== undefined) {
+        store.smoothBuf.twd.push({ val: store.raw["environment.wind.directionTrue"], time: now });
+        store.longBuf.twd.push({ val: store.raw["environment.wind.directionTrue"], time: now });
+    }
+
+    if (path === "environment.wind.angleTrueWater" || path === "environment.wind.speedTrue" || path === "navigation.speedThroughWater") {
+        if (store.raw["environment.wind.angleTrueWater"] !== undefined && store.raw["environment.wind.speedTrue"] !== undefined && store.raw["navigation.speedThroughWater"] !== undefined) {
+            const twsKts = msToKts(store.raw["environment.wind.speedTrue"]);
+            const stwKts = msToKts(store.raw["navigation.speedThroughWater"]);
+            const stwSafe = Math.max(stwKts, 0.1);
+            let leewayDeg = - (12 * twsKts / (stwSafe * stwSafe)) * Math.sin(store.raw["environment.wind.angleTrueWater"]);
+            leewayDeg = Math.max(-20, Math.min(20, leewayDeg));
+            store.raw["navigation.leewayAngle"] = degToRad(leewayDeg);
+            store.timestamps["navigation.leewayAngle"] = now;
+            store.smoothBuf.leeway.push({ val: degToRad(leewayDeg), time: now });
+        }
+    } else if (path === "navigation.leewayAngle") {
+        store.smoothBuf.leeway.push({ val: val, time: now });
+    }
+}
+
+// --- RENDER ENGINE PRINCIPALE (1Hz) ---
+function startDisplayLoop() {
+    if (renderInterval) clearInterval(renderInterval);
+    
+    renderInterval = setInterval(() => {
+        const now = Date.now();
+
+        // 1. Watchdog Timeout
+        const pathsToWatch = {
+            "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog,
+            "navigation.headingMagnetic": ui.hdg, "environment.wind.speedApparent": ui.awsSvg,
+            "environment.depth.belowTransducer": ui.depth, "environment.wind.speedTrue": ui.tws
+        };
+        for (let p in pathsToWatch) {
+            if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) {
+                pathsToWatch[p][pathsToWatch[p] === ui.awsSvg ? 'textContent' : 'innerText'] = "---";
+                if (p === "environment.depth.belowTransducer") ui.depth.classList.remove('alarm-warning', 'alarm-danger');
+                delete store.raw[p];
+            }
+        }
+
+        // 2. Render Istantanei
+        if (store.raw["navigation.speedThroughWater"] !== undefined) {
+            const stw = msToKts(store.raw["navigation.speedThroughWater"]); ui.stw.innerText = stw.toFixed(1); manageHistory('stw', stw);
+        }
+        if (store.raw["navigation.speedOverGround"] !== undefined) {
+            const sog = msToKts(store.raw["navigation.speedOverGround"]); ui.sog.innerText = sog.toFixed(1); manageHistory('sog', sog);
+        }
+        if (store.raw["environment.depth.belowTransducer"] !== undefined) {
+            const d = store.raw["environment.depth.belowTransducer"]; ui.depth.innerText = d.toFixed(1); checkDepthAlarm(d); manageHistory('depth', d);
+        }
+        if (store.raw["environment.wind.speedTrue"] !== undefined) {
+            const tws = msToKts(store.raw["environment.wind.speedTrue"]); ui.tws.innerText = tws.toFixed(1); manageHistory('tws', tws);
+        }
+        if (store.raw["environment.wind.speedApparent"] !== undefined) ui.awsSvg.textContent = msToKts(store.raw["environment.wind.speedApparent"]).toFixed(1);
+
+        // 3. Render Smussati (2s)
+        const smoothHdg = getCircularAverageFromBuffer(store.smoothBuf.hdg, SMOOTH_WINDOW_MS, false);
+        const smoothLeeway = getCircularAverageFromBuffer(store.smoothBuf.leeway, SMOOTH_WINDOW_MS, true);
+        
+        if (smoothHdg !== null) {
+            ui.hdg.innerHTML = `${Math.round(smoothHdg).toString().padStart(3, '0')}&deg;`; // Aggiunto gradi in chiaro
+            if (smoothLeeway !== null) {
+                let cog = (smoothHdg + smoothLeeway + 360) % 360;
+                ui.cog.innerHTML = `${Math.round(cog).toString().padStart(3, '0')}&deg;`;
+            }
+        }
+
+        const smoothAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, SMOOTH_WINDOW_MS, true);
+        if (smoothAwa !== null) { curAwaRot = getShortestRotation(curAwaRot, smoothAwa); ui.awa.setAttribute('transform', `rotate(${curAwaRot}, 200, 200)`); }
+
+        const smoothTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, SMOOTH_WINDOW_MS, true);
+        if (smoothTwa !== null) { curTwaRot = getShortestRotation(curTwaRot, smoothTwa); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
+
+        if (smoothLeeway !== null) {
+            updateLeewayDisplay(smoothLeeway);
+            curTrackRot = getShortestRotation(curTrackRot, smoothLeeway); ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
+        }
+
+        // 4. Render Medie Lunghe (60s)
+        if (now - lastAvgUIUpdate > 3000) {
+            let awA = getCircularAverageFromBuffer(store.longBuf.awa, LONG_AVG_WINDOW_MS, true);
+            let twA = getCircularAverageFromBuffer(store.longBuf.twa, LONG_AVG_WINDOW_MS, true);
+            let twD = getCircularAverageFromBuffer(store.longBuf.twd, LONG_AVG_WINDOW_MS, false);
+
+            ui.awaAvg.innerHTML = awA === null ? `---&deg;` : `${awA.toString().padStart(3, '0')}&deg;`;
+            ui.twaAvg.innerHTML = twA === null ? `---&deg;` : `${twA.toString().padStart(3, '0')}&deg;`;
+            ui.twdAvg.innerHTML = twD === null ? `---&deg;` : `${twD.toString().padStart(3, '0')}&deg;`;
+            
+            if (twD !== null) { curTwdRoseRot = getShortestRotation(curTwdRoseRot, twD); ui.twdArrow.setAttribute('transform', `rotate(${curTwdRoseRot}, 20, 20)`); }
+            lastAvgUIUpdate = now;
+        }
+
+        cleanBuffer(store.smoothBuf.hdg, SMOOTH_WINDOW_MS); cleanBuffer(store.smoothBuf.awa, SMOOTH_WINDOW_MS);
+        cleanBuffer(store.smoothBuf.twa, SMOOTH_WINDOW_MS); cleanBuffer(store.smoothBuf.twd, SMOOTH_WINDOW_MS);
+        cleanBuffer(store.smoothBuf.leeway, SMOOTH_WINDOW_MS); cleanBuffer(store.longBuf.awa, LONG_AVG_WINDOW_MS);
+        cleanBuffer(store.longBuf.twa, LONG_AVG_WINDOW_MS); cleanBuffer(store.longBuf.twd, LONG_AVG_WINDOW_MS);
+
+    }, RENDER_INTERVAL_MS);
+}
+
+document.addEventListener('click', () => { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }, { once: true });
+function playBingBing() {
+    if (!audioCtx) return; const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n;
+    function b(f, s) {
+        const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+        o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f;
+        g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4);
+        o.start(s); o.stop(s + 0.5);
+    }
+    b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6);
+}
+function checkDepthAlarm(m) {
+    ui.depth.classList.remove('alarm-warning', 'alarm-danger');
+    if (m < ALARM_DANGER_DEPTH) { ui.depth.classList.add('alarm-danger'); playBingBing(); }
+    else if (m < ALARM_WARNING_DEPTH) ui.depth.classList.add('alarm-warning');
+}
+
+function connect() {
+    if (simulationMode) return;
+    socket = new WebSocket(`ws://${SIGNALK_SERVER_IP}/signalk/v1/stream?subscribe=all`);
+    socket.onopen = () => { ui.status.className = "online"; ui.status.innerText = "ONLINE"; };
+    socket.onmessage = (e) => {
+        if (simulationMode) return;
+        const d = JSON.parse(e.data);
+        if (d.updates) d.updates.forEach(u => u.values && u.values.forEach(v => processIncomingData(v.path, v.value)));
+    };
+    socket.onclose = () => !simulationMode && setTimeout(connect, 5000);
+}
+
+const physicsEngine = {
+    time: 0,
+    config: { hdgStart: Math.random() * 360, hdgDir: Math.random() > 0.5 ? 1 : -1, twdBase: Math.random() * 360, rotSpeed: 360 / 600 },
+    getPolars: function(twaDeg, twsKts) {
+        let eff = 0; const aT = Math.abs(twaDeg);
+        if (aT < 30) eff = 0.1; else if (aT < 45) eff = 0.75; else if (aT < 90) eff = 1.0; else if (aT < 150) eff = 0.85; else eff = 0.65;
+        return Math.min(Math.sqrt(twsKts) * 2.2 * eff, 11.0);
+    },
+    step: function() {
+        this.time++;
+        const hdgDeg = (this.config.hdgStart + (this.time * this.config.rotSpeed * this.config.hdgDir) + 360) % 360;
+        const twdDeg = (this.config.twdBase + Math.sin(this.time / 20) * 15 + 360) % 360;
+        const twsKts = 14 + Math.sin(this.time / 40) * 6;
+        const depthM = 20 + Math.sin(this.time / 25) * 18;
+        let twaDeg = (twdDeg - hdgDeg + 360) % 360; if (twaDeg > 180) twaDeg -= 360;
+        const stwKts = this.getPolars(twaDeg, twsKts);
+        const stwMs = ktsToMs(stwKts), twsMs = ktsToMs(twsKts), twaRad = degToRad(twaDeg);
+        const vAx = twsMs * Math.sin(twaRad), vAy = twsMs * Math.cos(twaRad) + stwMs;
+        const awsMs = Math.sqrt(vAx*vAx + vAy*vAy), awaRad = Math.atan2(vAx, vAy);
+
+        return {
+            "navigation.headingMagnetic": degToRad(hdgDeg),
+            "navigation.speedThroughWater": stwMs, "navigation.speedOverGround": stwMs * 1.05,
+            "environment.wind.speedTrue": twsMs, "environment.wind.directionTrue": degToRad(twdDeg),
+            "environment.wind.angleTrueWater": twaRad, "environment.wind.speedApparent": awsMs,
+            "environment.wind.angleApparent": awaRad, "environment.depth.belowTransducer": depthM
+        };
+    }
+};
+
+let dC = 0, lC = 0;
+ui.depth.closest('.data-box').addEventListener('click', () => {
+    const n = Date.now(); if (n - lC < 500) dC++; else dC = 1; lC = n;
+    if (dC === 3) {
+        simulationMode = !simulationMode;
+        if (simulationMode) {
+            if (socket) socket.close(); ui.status.innerText = "SIM ENGINE ATTIVO";
+            if(simInterval) clearInterval(simInterval);
+            simInterval = setInterval(() => { const simulatedData = physicsEngine.step(); for (let path in simulatedData) processIncomingData(path, simulatedData[path]); }, 200);
+        } else location.reload();
+        dC = 0;
+    }
+});
+
+function updateLeewayDisplay(deg) {
+    const c = 125, px = 125/20; let w = Math.min(Math.abs(deg)*px, 125);
+    ui.leewayMask.setAttribute('x', deg >= 0 ? c : c - w); ui.leewayMask.setAttribute('width', w);
+    ui.leewayVal.textContent = `LEEWAY: ${deg.toFixed(1)}°`;
+}
+
+function manageHistory(t, v) {
+    const n = Date.now(), i = simulationMode ? SIM_SAMPLE_INTERVAL : REAL_SAMPLE_INTERVAL;
+    if (n - store.lastUpdates[t] > i || store.histories[t].length === 0) {
+        store.histories[t].push(v); if (store.histories[t].length > MAX_HISTORY_SAMPLES) store.histories[t].shift(); store.lastUpdates[t] = n;
+    }
+    const m = Math.max(...store.histories[t], 1); const c = getDynamicScale(t, m);
+    updateScaleLabels(t, c.scale); drawGraph(store.histories[t], t + '-graph', c.scale, c.gridLines);
+}
+
+function getDynamicScale(t, m) {
+    if (t === 'stw' || t === 'sog') return { scale: 12, gridLines: [3, 6, 9] };
+    const s = { tws: [10, 25, 45, 60], depth: [10, 20, 50, 200] };
+    const av = s[t] || [10, 20, 50]; let sel = av[av.length - 1];
+    for (let x of av) if (m <= x) { sel = x; break; }
+    return { scale: sel, gridLines: [sel/4, sel/2, (sel/4)*3] };
+}
+
+function updateScaleLabels(t, s) { const el = document.getElementById(t + '-scale'); if (el) el.innerHTML = `<span>${s}</span><span>${s/2}</span><span>0</span>`; }
+
+function drawGraph(d, id, s, gl) {
+    const svg = document.getElementById(id); if (!svg || d.length < 2) return;
+    const w = 200, h = 40; let gH = "";
+    gl.forEach(v => { const y = h - (v / s) * h; gH += `<line x1="0" y1="${y}" x2="${w}" y2="${y}" stroke="rgba(255,255,255,0.08)" stroke-width="0.5" />`; });
+    let p = ""; d.forEach((v, i) => { const x = (i/(MAX_HISTORY_SAMPLES - 1))*w; const y = h - (Math.min(v, s)/s)*h; p += `${i===0?'M':'L'} ${x} ${y} `; });
+    const aP = p + ` L ${((d.length-1)/(MAX_HISTORY_SAMPLES - 1))*w} ${h} L 0 ${h} Z`;
+    const clrs = { 'stw-graph': { s: '#2ecc71', f: 'rgba(46, 204, 113, 0.15)' }, 'sog-graph': { s: '#f39c12', f: 'rgba(243, 156, 18, 0.15)' }, 'depth-graph': { s: '#3498db', f: 'rgba(52, 152, 219, 0.15)' }, 'tws-graph': { s: '#f1c40f', f: 'rgba(241, 196, 15, 0.15)' } };
+    svg.innerHTML = `${gH}<path d="${aP}" fill="${clrs[id].f}" stroke="none" /><path d="${p}" fill="none" stroke="${clrs[id].s}" stroke-width="1.5" />`;
+}
+
+function generateTicks() {
+    const c = document.getElementById('ticks');
+    for (let i = 0; i < 360; i += 10) {
+        const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        const m = i % 30 === 0; l.setAttribute("x1", "200"); l.setAttribute("y1", "40");
+        l.setAttribute("x2", "200"); l.setAttribute("y2", (m ? 60 : 50));
+        l.setAttribute("stroke", m ? "#fff" : "#666");
+        l.setAttribute("stroke-width", m ? "2" : "1");
+        l.setAttribute("transform", `rotate(${i}, 200, 200)`);
+        c.appendChild(l);
+    }
+}
+generateTicks(); startDisplayLoop(); connect();
