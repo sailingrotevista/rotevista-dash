@@ -170,7 +170,7 @@ body {
 /* ==========================================================================
    8. RESPONSIVE LAYOUT (Schermi < 960px - Tablet Verticali e Smartphone)
    ========================================================================== */
-@media (max-width: 959px) {
+@media (max-aspect-ratio: 40/50) {
     /* Il Vento viene forzato come primo elemento e occupa mezza altezza */
     .center-panel {
         order: 1;
