@@ -1,7 +1,7 @@
 // ==========================================================================
 // 1. CONFIGURAZIONE E COSTANTI
 // ==========================================================================
-const SIGNALK_SERVER_IP = "192.168.111.240:3000"; // Indirizzo IP e porta server SignalK
+const DEFAULT_FALLBACK_IP = "192.168.111.240:3000"; // Indirizzo IP e porta server SignalK
 const ALARM_DANGER_DEPTH = 2.5;                   // Allarme rosso + suono (metri)
 const ALARM_WARNING_DEPTH = 5.0;                  // Pre-allarme giallo (metri)
 
@@ -294,28 +294,29 @@ function checkDepthAlarm(m) {
 }
 
 // ==========================================================================
-// 7. CONNESSIONE SIGNALK (SAFARI FRIENDLY)
+// 7. CONNESSIONE SIGNALK (Dinamica e Auto-scoperta)
 // ==========================================================================
-let isConnecting = false;
-
 function connect() {
-    // Se siamo in simulazione o se c'è già un tentativo in corso, ci fermiamo
-    if (simulationMode || isConnecting) return;
+    if (simulationMode) return;
     
-    // Se il socket esiste ed è già aperto o in fase di apertura, non facciamo nulla
-    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-        return;
+    // Auto-scoperta dell'indirizzo del server SignalK
+    let serverAddress = "";
+    
+    // Se la pagina è servita da SignalK o un vero server web (http/https)
+    if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+        serverAddress = window.location.host; // Es: "192.168.111.240:3000"
+    } else {
+        // Se la pagina è aperta da file locale (file:///)
+        serverAddress = DEFAULT_FALLBACK_IP;
     }
 
-    isConnecting = true;
-
     try {
-        socket = new WebSocket(`ws://${SIGNALK_SERVER_IP}/signalk/v1/stream?subscribe=all`);
+        socket = new WebSocket(`ws://${serverAddress}/signalk/v1/stream?subscribe=all`);
         
         socket.onopen = () => {
-            isConnecting = false;
             ui.status.className = "online";
             ui.status.innerText = "ONLINE";
+            console.log("Connesso a SignalK:", serverAddress);
         };
         
         socket.onmessage = (e) => {
@@ -323,24 +324,21 @@ function connect() {
             const d = JSON.parse(e.data);
             if (d.updates) d.updates.forEach(u => u.values && u.values.forEach(v => processIncomingData(v.path, v.value)));
         };
-
-        socket.onerror = (err) => {
-            // Non forziamo la chiusura qui. Lasciamo che Safari gestisca l'errore
-            // in modo nativo e faccia scattare onclose da solo.
-            isConnecting = false;
-        };
-
+        
         socket.onclose = () => {
-            isConnecting = false;
             if (!simulationMode) {
                 ui.status.className = "offline";
                 ui.status.innerText = "OFFLINE";
-                // Attendiamo ben 5 secondi prima di riprovare, per non infastidire Safari
-                setTimeout(connect, 5000);
+                setTimeout(connect, 5000); // Riprova dopo 5 secondi
             }
         };
+        
+        socket.onerror = (err) => {
+            console.warn("Errore WebSocket. Attesa per onclose...");
+        };
+        
     } catch (e) {
-        isConnecting = false;
+        console.error("Connessione fallita. Riprovo in 5 sec...", e);
         setTimeout(connect, 5000);
     }
 }
