@@ -1,6 +1,6 @@
 {
   "name": "@sailingrotevista/rotevista-dash",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Dashboard pubblica per Bavaria 39 Rotevista",
   "main": "index.html",
   "publishConfig": {
