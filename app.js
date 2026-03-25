@@ -92,8 +92,7 @@ function cleanBuffer(bufferArray, windowMs) {
 // ==========================================================================
 // 4. GESTIONE DATI IN INGRESSO (SIGNALK / SIMULATORE)
 // ==========================================================================
-function processIncomingData(path, val) {
-    const now = Date.now();
+function processIncomingData(path, val) {    const now = Date.now();
     store.timestamps[path] = now;
     store.raw[path] = val;
 
@@ -115,22 +114,6 @@ function processIncomingData(path, val) {
     if (store.raw["environment.wind.directionTrue"] !== undefined) {
         store.smoothBuf.twd.push({ val: store.raw["environment.wind.directionTrue"], time: now });
         store.longBuf.twd.push({ val: store.raw["environment.wind.directionTrue"], time: now });
-    }
-
-    // Calcolo Leeway in locale
-    if (path === "environment.wind.angleTrueWater" || path === "environment.wind.speedTrue" || path === "navigation.speedThroughWater") {
-        if (store.raw["environment.wind.angleTrueWater"] !== undefined && store.raw["environment.wind.speedTrue"] !== undefined && store.raw["navigation.speedThroughWater"] !== undefined) {
-            const twsKts = msToKts(store.raw["environment.wind.speedTrue"]);
-            const stwKts = msToKts(store.raw["navigation.speedThroughWater"]);
-            const stwSafe = Math.max(stwKts, 0.1);
-            let leewayDeg = - (12 * twsKts / (stwSafe * stwSafe)) * Math.sin(store.raw["environment.wind.angleTrueWater"]);
-            leewayDeg = Math.max(-20, Math.min(20, leewayDeg));
-            store.raw["navigation.leewayAngle"] = degToRad(leewayDeg);
-            store.timestamps["navigation.leewayAngle"] = now;
-            store.smoothBuf.leeway.push({ val: degToRad(leewayDeg), time: now });
-        }
-    } else if (path === "navigation.leewayAngle") {
-        store.smoothBuf.leeway.push({ val: val, time: now });
     }
 }
 
@@ -158,37 +141,64 @@ function startDisplayLoop() {
             }
         }
 
-        // --- RENDER DATI ISTANTANEI ---
+        // --- RENDER DATI ISTANTANEI E STORICI ---
         if (store.raw["navigation.speedThroughWater"] !== undefined) {
             const stw = msToKts(store.raw["navigation.speedThroughWater"]); ui.stw.innerText = stw.toFixed(1); manageHistory('stw', stw);
         }
+        
+        let currentSogKts = 0; // Serve per bloccare allarmi e frecce a barca ferma
         if (store.raw["navigation.speedOverGround"] !== undefined) {
-            const sog = msToKts(store.raw["navigation.speedOverGround"]); ui.sog.innerText = sog.toFixed(1); manageHistory('sog', sog);
+            currentSogKts = msToKts(store.raw["navigation.speedOverGround"]); ui.sog.innerText = currentSogKts.toFixed(1); manageHistory('sog', currentSogKts);
         }
+        
         if (store.raw["environment.depth.belowTransducer"] !== undefined) {
             const d = store.raw["environment.depth.belowTransducer"]; ui.depth.innerText = d.toFixed(1); checkDepthAlarm(d); manageHistory('depth', d);
         }
+        
         if (store.raw["environment.wind.speedTrue"] !== undefined) {
             const tws = msToKts(store.raw["environment.wind.speedTrue"]); ui.tws.innerText = tws.toFixed(1); manageHistory('tws', tws);
         }
+        
         if (store.raw["environment.wind.speedApparent"] !== undefined) {
             ui.awsSvg.textContent = msToKts(store.raw["environment.wind.speedApparent"]).toFixed(1);
         }
 
-        // --- RENDER QUADRANTE VENTO (SMOOTHING 2s) ---
-        const smoothLeewayObj = getCircularAverageFromBuffer(store.smoothBuf.leeway, SMOOTH_WINDOW_MS, true);
-        const smoothLeeway = smoothLeewayObj ? smoothLeewayObj.val : null;
-        
+        // --- RENDER QUADRANTE VENTO (Frecce SVG) ---
+        // Vento Apparente e Reale (Smoothed a 2s per stabilità visiva)
         const smoothAwaObj = getCircularAverageFromBuffer(store.smoothBuf.awa, SMOOTH_WINDOW_MS, true);
         if (smoothAwaObj !== null) { curAwaRot = getShortestRotation(curAwaRot, smoothAwaObj.val); ui.awa.setAttribute('transform', `rotate(${curAwaRot}, 200, 200)`); }
         
         const smoothTwaObj = getCircularAverageFromBuffer(store.smoothBuf.twa, SMOOTH_WINDOW_MS, true);
         if (smoothTwaObj !== null) { curTwaRot = getShortestRotation(curTwaRot, smoothTwaObj.val); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
         
-        if (smoothLeeway !== null) {
-            updateLeewayDisplay(smoothLeeway);
-            curTrackRot = getShortestRotation(curTrackRot, smoothLeeway); ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
-        }
+        // --- FRECCIA BLU E BARRA LEEWAY (Basati sul COG reale) ---
+                if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
+                    let instCog = radToDeg(store.raw["navigation.courseOverGroundTrue"]);
+                    let instHdg = radToDeg(store.raw["navigation.headingTrue"]);
+                    
+                    // Angolo circolare (0-360) per ruotare la freccia sul quadrante
+                    let driftAngle = (instCog - instHdg + 360) % 360;
+                    
+                    // Se barca ferma (< 0.5 kts), forza la deriva a zero per evitare falsi allarmi del GPS
+                    if (currentSogKts < MIN_SPEED_FOR_STABILITY_KTS) {
+                        driftAngle = 0;
+                    }
+                    
+                    // Posiziona la freccia blu
+                    curTrackRot = getShortestRotation(curTrackRot, driftAngle);
+                    ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
+
+                    // Converti l'angolo in formato "Dritta/Sinistra" (-180 a +180) per la barra orizzontale in basso
+                    let driftSigned = driftAngle;
+                    if (driftSigned > 180) driftSigned -= 360;
+                    
+                    // Limita visivamente la barra a un massimo di +/- 20 gradi
+                    driftSigned = Math.max(-20, Math.min(20, driftSigned));
+                    updateLeewayDisplay(driftSigned);
+                } else {
+                    // Se mancano i dati, azzera la barra
+                    updateLeewayDisplay(0);
+                }
         
         // --- RENDER MEDIE LUNGHE E TACK (Ogni 3s su buffer di 60s) ---
         if (now - lastAvgUIUpdate > 3000) {
@@ -198,20 +208,13 @@ function startDisplayLoop() {
             let twObj = getCircularAverageFromBuffer(store.longBuf.twa, LONG_AVG_WINDOW_MS, true);
             let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, LONG_AVG_WINDOW_MS, false);
 
-            // Lettura velocità per soppressione allarmi stabilità all'ormeggio
-            let currentSogKts = 0;
-            if (store.histories.sog && store.histories.sog.length > 0) {
-                currentSogKts = store.histories.sog[store.histories.sog.length - 1];
-            } else if (store.raw["navigation.speedOverGround"] !== undefined) {
-                currentSogKts = msToKts(store.raw["navigation.speedOverGround"]);
-            }
-
             const updateMeanUI = (el, obj) => {
                 if (!obj) {
                     el.innerHTML = `---&deg;`;
                     el.classList.remove('unstable-data');
                 } else {
                     el.innerHTML = `${obj.val.toString().padStart(3, '0')}&deg;`;
+                    // Soppressione allarme instabilità se barca quasi ferma
                     let isEffectivelyStable = obj.stable || (currentSogKts < MIN_SPEED_FOR_STABILITY_KTS);
                     if (isEffectivelyStable) el.classList.remove('unstable-data');
                     else el.classList.add('unstable-data');
@@ -237,7 +240,6 @@ function startDisplayLoop() {
                     ui.tackCog.innerHTML = `---&deg;`;
                 }
 
-                // Lampeggio TACK con esenzione per barca ferma applicata
                 let tackMathStable = hdgObj.stable && twObj.stable && (!cogObj || cogObj.stable);
                 let tackEffectivelyStable = tackMathStable || (currentSogKts < MIN_SPEED_FOR_STABILITY_KTS);
                 
@@ -262,7 +264,7 @@ function startDisplayLoop() {
             lastAvgUIUpdate = now;
         }
 
-        // Pulizia ciclica dei buffer per evitare memory leak
+        // Pulizia ciclica dei buffer
         cleanBuffer(store.smoothBuf.hdg, SMOOTH_WINDOW_MS); cleanBuffer(store.smoothBuf.cog, SMOOTH_WINDOW_MS);
         cleanBuffer(store.smoothBuf.awa, SMOOTH_WINDOW_MS); cleanBuffer(store.smoothBuf.twa, SMOOTH_WINDOW_MS);
         cleanBuffer(store.smoothBuf.twd, SMOOTH_WINDOW_MS); cleanBuffer(store.smoothBuf.leeway, SMOOTH_WINDOW_MS);
@@ -460,22 +462,41 @@ window.addEventListener('load', () => {
 });
 
 // ==========================================================================
-// 11. GESTIONE FULLSCREEN (Al primo tocco)
+// 11. GESTIONE FULLSCREEN (Click Singolo sull'Icona Barca)
 // ==========================================================================
-function requestFullScreen() {
-    const docElm = document.documentElement; // Prende l'intero tag <html>
+function toggleFullScreen() {
+    const docElm = document.documentElement;
     
-    // Controlla se siamo già in fullscreen
-    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-        // Tenta di attivare il fullscreen (con fallback per vari browser)
+    // Controlla lo stato attuale (Supporto Cross-Browser)
+    const isFullScreen = document.fullscreenElement || document.webkitFullscreenElement;
+    
+    if (!isFullScreen) {
+        // ENTRA in Fullscreen
         if (docElm.requestFullscreen) {
-            docElm.requestFullscreen().catch(err => console.log("Fullscreen bloccato:", err));
-        } else if (docElm.webkitRequestFullscreen) { // Chrome/Safari (se supportato)
+            docElm.requestFullscreen().catch(err => console.log("Impossibile entrare in Fullscreen:", err));
+        } else if (docElm.webkitRequestFullscreen) { // Safari/iOS
             docElm.webkitRequestFullscreen();
+        }
+    } else {
+        // ESCI dal Fullscreen
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) { // Safari/iOS
+            document.webkitExitFullscreen();
         }
     }
 }
 
-// Ascolta il primissimo click o tocco ovunque nello schermo per attivare il fullscreen
-document.addEventListener('click', requestFullScreen, { once: true });
-document.addEventListener('touchstart', requestFullScreen, { once: true });
+// Selezioniamo l'icona della barca al centro dell'SVG
+const boatIcon = document.getElementById('boat-icon');
+
+if (boatIcon) {
+    // Rendiamo chiaro che è un pulsante interattivo
+    boatIcon.style.cursor = 'pointer';
+    
+    // Evento Click nativo (infallibile su tutti i dispositivi)
+    boatIcon.addEventListener('click', (e) => {
+        e.preventDefault(); // Previene comportamenti indesiderati (scroll, zoom)
+        toggleFullScreen();
+    });
+}
