@@ -487,15 +487,12 @@ function toggleFullScreen() {
     }
 }
 
-// Selezioniamo l'icona della barca al centro dell'SVG
-const boatIcon = document.getElementById('boat-icon');
+// Selezioniamo la grande area sensibile al tocco (Hotspot circolare)
+const fullscreenHotspot = document.getElementById('fullscreen-hotspot');
 
-if (boatIcon) {
-    // Rendiamo chiaro che è un pulsante interattivo
-    boatIcon.style.cursor = 'pointer';
-    
+if (fullscreenHotspot) {
     // Evento Click nativo (infallibile su tutti i dispositivi)
-    boatIcon.addEventListener('click', (e) => {
+    fullscreenHotspot.addEventListener('click', (e) => {
         e.preventDefault(); // Previene comportamenti indesiderati (scroll, zoom)
         toggleFullScreen();
     });
