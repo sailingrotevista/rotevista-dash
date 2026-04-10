@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SignalK Data Debugger & Logger CSV</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #eee;
+            font-family: monospace;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        h1 { color: #4CAF50; border-bottom: 1px solid #333; padding-bottom: 10px; margin-top: 0; flex-shrink: 0; }
+        
+        /* Controlli in alto */
+        .controls { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
+        input[type="text"], select { padding: 8px; background: #222; color: #fff; border: 1px solid #444; }
+        input[type="text"] { width: 200px; }
+        button { padding: 8px 15px; background: #4CAF50; color: white; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
+        button:hover { opacity: 0.8; }
+        button.stop { background: #f44336; }
+        button.secondary { background: #555; }
+        button.action { background: #2196F3; } /* Tasto Copia Blu */
+        #status { font-weight: bold; color: #f44336; margin-left: auto; }
+        #status.online { color: #4CAF50; }
+        
+        /* Layout a due pannelli (Sopra Tabella, Sotto Log) */
+        .panels-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            flex-grow: 1;
+            min-height: 0; /* Essenziale per far funzionare lo scroll nel flexbox */
+        }
+
+        /* Pannello Superiore: Tabella Valori Attuali */
+        .summary-panel {
+            flex: 0 0 auto;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 10px;
+            overflow-x: auto;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { border: 1px solid #333; padding: 8px; text-align: left; }
+        th { background-color: #222; color: #aaa; text-transform: uppercase; position: sticky; top: 0; }
+        .val-cell { min-width: 120px; }
+        
+        /* Stili Testo Tabella */
+        .value { color: #64ffda; font-weight: bold; font-size: 16px; }
+        .unit { color: #888; font-size: 12px; margin-left: 5px; }
+        .source { color: #ffb74d; font-size: 12px; }
+        .time { color: #90caf9; font-size: 12px; }
+        .raw { color: #777; font-size: 11px; display: block; margin-top: 4px; }
+
+        /* Pannello Inferiore: Log Sequenziale in Formato Testo (simil-CSV) */
+        .log-panel {
+            flex: 1 1 auto;
+            background: #0a0a0a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            min-height: 200px;
+        }
+        .log-header {
+            background: #222;
+            padding: 8px 15px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+            font-size: 14px;
+            font-weight: bold;
+            color: #aaa;
+        }
+        
+        /* Area di testo del Log (Non più div separati, ma un unico blocco di testo preformattato) */
+        textarea#log-container {
+            flex-grow: 1;
+            background: transparent;
+            color: #ddd;
+            border: none;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            resize: none;
+            outline: none;
+            white-space: pre;
+            overflow-wrap: normal;
+            overflow-x: auto;
+        }
+        
+        /* Notifica di Copia Riuscita */
+        #copy-notification {
+            color: #4CAF50;
+            font-size: 12px;
+            margin-right: 10px;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>SignalK Data Debugger & Logger CSV</h1>
+    
+    <div class="controls">
+        <label>Server IP:</label>
+        <input type="text" id="server-ip" value="192.168.111.240:3000">
+        <button id="btn-connect" onclick="toggleConnection()">Connetti</button>
+        
+        <span style="margin-left: 20px; color:#aaa;">Filtra Log:</span>
+        <select id="log-filter">
+            <option value="all">Tutti i dati monitorati</option>
+            <option value="navigation.speedOverGround">Solo SOG (Velocità sul fondo)</option>
+            <option value="navigation.courseOverGroundTrue">Solo COG (Rotta sul fondo)</option>
+            <option value="wind">Solo Vento (TWS/TWA/AWS/AWA)</option>
+            <option value="depth">Solo Profondità</option>
+        </select>
+        
+        <span id="status">DISCONNESSO</span>
+    </div>
+
+    <div class="panels-container">
+        
+        <!-- PANNELLO TABELLA RIASSUNTIVA -->
+        <div class="summary-panel">
+            <table>
+                <thead>
+                    <tr>
+                        <th width="30%">Path (Percorso)</th>
+                        <th width="20%">Valore Convertito</th>
+                        <th width="30%">Sorgente (Sensore)</th>
+                        <th width="20%">Ultimo Ricevuto</th>
+                    </tr>
+                </thead>
+                <tbody id="data-table">
+                    <!-- Generate via JS -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- PANNELLO LOG SEQUENZIALE (CSV) -->
+        <div class="log-panel">
+            <div class="log-header">
+                <span>Event Log CSV (Timestamp, Path, Value, Unit, Source, Spike)</span>
+                <div style="display: flex; align-items: center;">
+                    <span id="copy-notification">Copiato!</span>
+                    <button class="action" onclick="copyLogCSV()" style="padding: 4px 10px; font-size: 11px; margin-right: 10px;">Copia CSV</button>
+                    <button class="secondary" onclick="clearLog()" style="padding: 4px 10px; font-size: 11px;">Pulisci</button>
+                </div>
+            </div>
+            
+            <!-- Usiamo una textarea readonly per permettere la selezione e lo scroll perfetto di testi lunghi -->
+            <textarea id="log-container" readonly></textarea>
+        </div>
+
+    </div>
+
+    <script>
+        // Percorsi da monitorare
+        const pathsToWatch = [
+            "navigation.speedThroughWater",
+            "navigation.speedOverGround",
+            "navigation.headingTrue",
+            "navigation.courseOverGroundTrue",
+            "environment.wind.speedApparent",
+            "environment.wind.angleApparent",
+            "environment.wind.speedTrue",
+            "environment.wind.angleTrueWater",
+            "environment.depth.belowTransducer"
+        ];
+
+        let socket = null;
+        let logLinesArray = []; // Array per conservare le righe in memoria
+        const MAX_LOG_LINES = 1000; // Aumentato a 1000 righe per analisi lunghe in Excel
+        
+        // Memoria per rilevare i picchi anomali (Spikes)
+        let lastValues = { "navigation.speedOverGround": 0, "navigation.courseOverGroundTrue": 0 };
+
+        // Funzioni di conversione matematica
+        const radToDeg = (rad) => rad * (180 / Math.PI);
+        const msToKts = (ms) => ms * 1.94384;
+
+        // Inizializza la Tabella Riassuntiva
+        const tbody = document.getElementById('data-table');
+        pathsToWatch.forEach(path => {
+            const tr = document.createElement('tr');
+            tr.id = `row-${path.replace(/\./g, '-')}`;
+            
+            tr.innerHTML = `
+                <td><strong>${path}</strong></td>
+                <td id="val-${path.replace(/\./g, '-')}" class="val-cell"><span class="value">---</span></td>
+                <td id="src-${path.replace(/\./g, '-')}"><span class="source">---</span></td>
+                <td id="time-${path.replace(/\./g, '-')}"><span class="time">---</span></td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // Intestazione fissa del file CSV nel Log
+        const csvHeader = "Timestamp,Path,Value,Unit,Source,IsSpike";
+        document.getElementById('log-container').value = csvHeader + "\n";
+
+        // =========================================================
+        // GESTIONE CONNESSIONE WEBSOCKET
+        // =========================================================
+        function toggleConnection() {
+            const btn = document.getElementById('btn-connect');
+            const status = document.getElementById('status');
+            const ip = document.getElementById('server-ip').value;
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+                btn.innerText = "Connetti";
+                btn.className = "";
+                status.innerText = "DISCONNESSO";
+                status.className = "";
+                return;
+            }
+
+            btn.innerText = "Disconnetti";
+            btn.className = "stop";
+            status.innerText = "CONNESSIONE IN CORSO...";
+            status.className = "";
+
+            // Resetting spike logic on new connection
+            lastValues = { "navigation.speedOverGround": 0, "navigation.courseOverGroundTrue": 0 };
+
+            socket = new WebSocket(`ws://${ip}/signalk/v1/stream?subscribe=self`);
+
+            socket.onopen = () => {
+                status.innerText = "CONNESSO (In ascolto...)";
+                status.className = "online";
+                addLogEntry(new Date().toISOString(), "SYSTEM", "Connected", "-", ip, false);
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.updates) {
+                    data.updates.forEach(update => {
+                        const sourceName = update.source ? update.source.label : "Unknown";
+                        // ISO String è lo standard perfetto per i file CSV ed Excel (es. 2023-10-25T17:00:56.123Z)
+                        const timeISO = new Date(update.timestamp).toISOString();
+                        const timeUI = new Date(update.timestamp).toLocaleTimeString() + '.' + new Date(update.timestamp).getMilliseconds().toString().padStart(3, '0');
+
+                        if (update.values) {
+                            update.values.forEach(v => {
+                                if (pathsToWatch.includes(v.path)) {
+                                    processData(v.path, v.value, sourceName, timeISO, timeUI);
+                                }
+                            });
+                        }
+                    });
+                }
+            };
+
+            socket.onclose = () => {
+                btn.innerText = "Connetti";
+                btn.className = "";
+                status.innerText = "DISCONNESSO";
+                status.className = "";
+                addLogEntry(new Date().toISOString(), "SYSTEM", "Disconnected", "-", "-", false);
+            };
+            
+            socket.onerror = (error) => {
+                status.innerText = "ERRORE";
+                addLogEntry(new Date().toISOString(), "SYSTEM", "Error", "-", "-", true);
+            };
+        }
+
+        // =========================================================
+        // ELABORAZIONE DATI E SPIKE DETECTION
+        // =========================================================
+        function processData(path, rawValue, source, timeISO, timeUI) {
+            let formattedVal = rawValue;
+            let unit = "";
+            let isSpike = false;
+
+            // Conversioni
+            if (rawValue !== null && rawValue !== undefined) {
+                if (path.includes("speed")) {
+                    formattedVal = msToKts(rawValue).toFixed(3);
+                    unit = "kts";
+                    
+                    // Rilevamento Spike SOG (> 5 nodi in un colpo solo)
+                    if (path === "navigation.speedOverGround") {
+                        let diff = Math.abs(formattedVal - lastValues[path]);
+                        if (diff > 5.0 && lastValues[path] > 0) isSpike = true;
+                        lastValues[path] = formattedVal;
+                    }
+
+                } else if (path.includes("angle") || path.includes("heading") || path.includes("course")) {
+                    formattedVal = radToDeg(rawValue).toFixed(2);
+                    unit = "deg";
+                    
+                    // Rilevamento Spike COG (> 45 gradi improvviso)
+                    if (path === "navigation.courseOverGroundTrue") {
+                        let diff = Math.abs(formattedVal - lastValues[path]);
+                        if (diff > 180) diff = 360 - diff;
+                        if (diff > 45 && lastValues[path] > 0) isSpike = true;
+                        lastValues[path] = formattedVal;
+                    }
+
+                } else if (path.includes("depth")) {
+                    formattedVal = rawValue.toFixed(2);
+                    unit = "m";
+                }
+            }
+
+            // 1. Aggiorna la Tabella in alto
+            updateTableRow(path, formattedVal, unit, rawValue, source, timeUI);
+
+            // 2. Aggiungi riga al Log CSV (rispettando il filtro della Dropdown)
+            const filter = document.getElementById('log-filter').value;
+            if (filter === "all" || path.includes(filter)) {
+                addLogEntry(timeISO, path, formattedVal, unit, source, isSpike);
+            }
+        }
+
+        function updateTableRow(path, val, unit, raw, source, timeUI) {
+            const safeId = path.replace(/\./g, '-');
+            document.getElementById(`val-${safeId}`).innerHTML = `<span class="value">${val}</span><span class="unit">${unit}</span><span class="raw">Raw: ${raw.toFixed(4)}</span>`;
+            document.getElementById(`src-${safeId}`).innerHTML = `<span class="source">${source}</span>`;
+            document.getElementById(`time-${safeId}`).innerHTML = `<span class="time">${timeUI}</span>`;
+            
+            const row = document.getElementById(`row-${safeId}`);
+            row.style.backgroundColor = "#334a33";
+            setTimeout(() => row.style.backgroundColor = "", 150);
+        }
+
+        // =========================================================
+        // GESTIONE DEL LOG CSV E COPIA APPUNTI
+        // =========================================================
+        function addLogEntry(timeISO, path, value, unit, source, isSpike) {
+            // Formattazione stringa CSV pulita (niente spazi inutili)
+            // Se c'è una virgola nel nome della sorgente, la mettiamo tra virgolette per non rompere il CSV
+            const safeSource = source.includes(',') ? `"${source}"` : source;
+            const spikeFlag = isSpike ? "TRUE" : "FALSE";
+            
+            const csvLine = `${timeISO},${path},${value},${unit},${safeSource},${spikeFlag}`;
+            
+            logLinesArray.push(csvLine);
+
+            // Mantieni la memoria leggera
+            if (logLinesArray.length > MAX_LOG_LINES) {
+                logLinesArray.shift(); // Rimuove la più vecchia
+            }
+
+            renderLogTextArea();
+        }
+
+        function renderLogTextArea() {
+            const textArea = document.getElementById('log-container');
+            
+            // Ricostruisci il testo unendo l'intestazione e l'array con \n (a capo)
+            textArea.value = csvHeader + "\n" + logLinesArray.join("\n");
+            
+            // Auto-scroll verso il basso
+            textArea.scrollTop = textArea.scrollHeight;
+        }
+
+        function clearLog() {
+            logLinesArray = [];
+            renderLogTextArea();
+        }
+
+        function copyLogCSV() {
+            const textArea = document.getElementById('log-container');
+            const notif = document.getElementById('copy-notification');
+            
+            // Seleziona il testo
+            textArea.select();
+            textArea.setSelectionRange(0, 999999); // Per mobile
+            
+            try {
+                // Copia negli appunti (API moderna Navigator o execCommand classico)
+                if (navigator.clipboard) {
+                    navigator.clipboard.writeText(textArea.value).then(() => showCopyNotif());
+                } else {
+                    document.execCommand('copy');
+                    showCopyNotif();
+                }
+            } catch (err) {
+                console.error("Copia fallita: ", err);
+                alert("Errore nella copia degli appunti. Usa CTRL+C / CMD+C manualmente.");
+            }
+        }
+        
+        function showCopyNotif() {
+            const notif = document.getElementById('copy-notification');
+            notif.style.opacity = 1;
+            setTimeout(() => notif.style.opacity = 0, 2000);
+            
+            // Deseleziona il testo
+            window.getSelection().removeAllRanges();
+        }
+
+    </script>
+</body>
+</html>
