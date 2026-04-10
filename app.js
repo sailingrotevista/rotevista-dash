@@ -313,7 +313,7 @@ function connect() {
     }
 
     try {
-        socket = new WebSocket(`ws://${serverAddress}/signalk/v1/stream?subscribe=all`);
+        socket = new WebSocket(`ws://${serverAddress}/signalk/v1/stream?subscribe=self`);
         
         socket.onopen = () => {
             ui.status.className = "online";
