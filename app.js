@@ -1,10 +1,10 @@
 // ==========================================================================
-// 1. CONFIGURAZIONE E COSTANTI
+// 1. CONFIGURAZIONE E DEFAULT
 // ==========================================================================
 let CONFIG = {
     alarms: { depthDanger: 2.5, depthWarning: 5.0 },
     averages: { smoothWindow: 2000, longWindow: 60000, stabilityTolerance: 2000, stabilityThreshold: 0.90, minSpeed: 0.5 },
-    graphs: { reef1: 15.0, reef2: 20.0, realInterval: 5000, samples: 60 },
+    graphs: { reef1: 15.0, reef2: 20.0, historyMinutes: 5, samples: 60 },
     scales: {
         stw: { stdMax: 12, hercSpan: 4, step: 2 },
         sog: { stdMax: 12, hercSpan: 4, step: 2 },
@@ -33,14 +33,7 @@ const graphModes = {
     depth: localStorage.getItem('mode_depth') || 'standard'
 };
 
-const store = {
-    raw: {},
-    timestamps: {},
-    smoothBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
-    longBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
-    histories: { stw: [], sog: [], depth: [], tws: [] },
-    lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0 }
-};
+const store = { raw: {}, timestamps: {}, smoothBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] }, longBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] }, histories: { stw: [], sog: [], depth: [], tws: [] }, lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0 } };
 
 const ui = {
     stw: document.getElementById('stw'), sog: document.getElementById('sog'),
@@ -56,7 +49,7 @@ const ui = {
 };
 
 // ==========================================================================
-// 3. CARICAMENTO CONFIGURAZIONE (SK-SERVER CONFIG)
+// 3. CARICAMENTO CONFIGURAZIONE
 // ==========================================================================
 async function fetchServerConfig() {
     if (!window.location.protocol.includes("http")) return;
@@ -70,8 +63,6 @@ async function fetchServerConfig() {
                 const data = await response.json();
                 const actual = data.configuration || data;
                 if (actual && typeof actual === 'object') {
-                    
-                    // Funzione per pulire e convertire i numeri
                     const parseNumbers = (obj) => {
                         for (let k in obj) {
                             if (typeof obj[k] === 'object') parseNumbers(obj[k]);
@@ -79,18 +70,11 @@ async function fetchServerConfig() {
                         }
                     };
                     parseNumbers(actual);
-
-                    // Merge intelligente dei blocchi
                     if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
                     if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
-                    if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging }; // Nota: mappiamo averaging -> averages
-                    if (actual.scales) {
-                        for (let key in actual.scales) {
-                            CONFIG.scales[key] = { ...CONFIG.scales[key], ...actual.scales[key] };
-                        }
-                    }
-                    
-                    console.log("SUCCESS: Dashboard Config updated from Server:", CONFIG);
+                    if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging }; // Mapping averaging -> averages
+                    if (actual.scales) { for (let key in actual.scales) { CONFIG.scales[key] = { ...CONFIG.scales[key], ...actual.scales[key] }; } }
+                    console.log("SUCCESS: Config loaded from Server:", CONFIG);
                     return;
                 }
             }
@@ -99,7 +83,7 @@ async function fetchServerConfig() {
 }
 
 // ==========================================================================
-// 4. MATEMATICA VETTORIALE (CIRCULAR AVERAGING)
+// 4. MATEMATICA VETTORIALE
 // ==========================================================================
 function radToDeg(rad) { return rad * (180 / Math.PI); }
 function degToRad(deg) { return deg * (Math.PI / 180); }
@@ -107,7 +91,6 @@ function msToKts(ms) { return ms * 1.94384; }
 function ktsToMs(kts) { return kts / 1.94384; }
 function getShortestRotation(curr, target) { let diff = (target - curr) % 360; if (diff > 180) diff -= 360; else if (diff < -180) diff += 360; return curr + diff; }
 
-// Calcolo media basato su componenti Seno/Coseno (Vettoriale)
 function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
     const now = Date.now();
     const validData = bufferArray.filter(item => (now - item.time) <= windowMs);
@@ -131,7 +114,6 @@ function processIncomingData(path, val) {
     if (path === "environment.wind.angleApparent") { store.smoothBuf.awa.push({ val: val, time: now }); store.longBuf.awa.push({ val: val, time: now }); }
     if (path === "environment.wind.angleTrueWater") { store.smoothBuf.twa.push({ val: val, time: now }); store.longBuf.twa.push({ val: val, time: now }); }
     
-    // Calcolo o ricezione TWD (True Wind Direction)
     if (path === "navigation.headingTrue" || path === "environment.wind.angleTrueWater" || path === "environment.wind.directionTrue") {
         let twdRad = 0;
         if (path === "environment.wind.directionTrue") twdRad = val;
@@ -139,14 +121,13 @@ function processIncomingData(path, val) {
             twdRad = (store.raw["navigation.headingTrue"] + store.raw["environment.wind.angleTrueWater"]) % (2 * Math.PI);
             if (twdRad < 0) twdRad += (2 * Math.PI);
         } else return;
-
         store.smoothBuf.twd.push({ val: twdRad, time: now });
         store.longBuf.twd.push({ val: twdRad, time: now });
     }
 }
 
 // ==========================================================================
-// 6. MOTORE DI RENDERING
+// 6. RENDER LOOP
 // ==========================================================================
 function startDisplayLoop() {
     renderInterval = setInterval(() => {
@@ -192,7 +173,9 @@ function startDisplayLoop() {
                 let tA = twObj.val * 2;
                 ui.tackHdg.innerHTML = `${Math.round((hObj.val - tA + 360) % 360).toString().padStart(3, '0')}&deg;`;
                 if (cObj) ui.tackCog.innerHTML = `${Math.round((cObj.val - tA + 360) % 360).toString().padStart(3, '0')}&deg;`;
-                if (hObj.stable && twObj.stable || curSog < CONFIG.averages.minSpeed) { ui.tackHdg.classList.remove('unstable-data'); ui.tackCog.classList.remove('unstable-data'); } else { ui.tackHdg.classList.add('unstable-data'); ui.tackCog.classList.add('unstable-data'); }
+                let tStable = (hObj.stable && twObj.stable) || (curSog < CONFIG.averages.minSpeed);
+                if (tStable) { ui.tackHdg.classList.remove('unstable-data'); ui.tackCog.classList.remove('unstable-data'); }
+                else { ui.tackHdg.classList.add('unstable-data'); ui.tackCog.classList.add('unstable-data'); }
             }
             if (twdObj) { curTwdRoseRot = getShortestRotation(curTwdRoseRot, twdObj.val); ui.twdArrow.setAttribute('transform', `rotate(${curTwdRoseRot}, 20, 20)`); }
             lastAvgUIUpdate = now;
@@ -217,13 +200,20 @@ function connect() {
 }
 
 // ==========================================================================
-// 8. FUNZIONI GRAFICHE (Hercules Scalable)
+// 8. FUNZIONI GRAFICHE (Hercules Mode)
 // ==========================================================================
 function updateLeewayDisplay(deg) { const c = 125, px = 125/20; let w = Math.min(Math.abs(deg)*px, 125); ui.leewayMask.setAttribute('x', deg >= 0 ? c : c - w); ui.leewayMask.setAttribute('width', w); ui.leewayVal.textContent = `LEEWAY: ${deg.toFixed(1)}°`; }
 
 function manageHistory(t, v) {
-    const n = Date.now(), i = simulationMode ? SIM_SAMPLE_INTERVAL : CONFIG.graphs.realInterval;
-    if (n - store.lastUpdates[t] > i || store.histories[t].length === 0) { store.histories[t].push(v); if (store.histories[t].length > CONFIG.graphs.samples) store.histories[t].shift(); store.lastUpdates[t] = n; }
+    const n = Date.now();
+    const dynamicInterval = (CONFIG.graphs.historyMinutes * 60000) / CONFIG.graphs.samples;
+    const interval = simulationMode ? SIM_SAMPLE_INTERVAL : dynamicInterval;
+    
+    if (n - store.lastUpdates[t] > interval || store.histories[t].length === 0) {
+        store.histories[t].push(v);
+        if (store.histories[t].length > CONFIG.graphs.samples) store.histories[t].shift();
+        store.lastUpdates[t] = n;
+    }
     const mode = graphModes[t];
     const cfg = calculateScale(t, store.histories[t], mode);
     const box = document.getElementById(t + '-graph').closest('.data-box');
@@ -254,7 +244,14 @@ function updateScaleLabels(t, min, max) {
 function drawGraph(d, id, min, max, isTws, isHercules) {
     const svg = document.getElementById(id); if (!svg || d.length < 2) return;
     const w = 200, h = 40, range = max - min || 1;
-    let gH = ""; [0.25, 0.5, 0.75].forEach(p => { gH += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(255,255,255,0.08)" stroke-width="0.5" />`; });
+    let grids = "";
+    [0.25, 0.5, 0.75].forEach(p => { grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(255,255,255,0.08)" stroke-width="0.5" />`; });
+    
+    const minutes = CONFIG.graphs.historyMinutes;
+    for (let m = 1; m < minutes; m++) {
+        const x = w - (m / minutes) * w;
+        grids += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="rgba(255,255,255,0.05)" stroke-width="0.5" />`;
+    }
     
     let pD = "", cS = "";
     d.forEach((v, i) => {
@@ -266,15 +263,9 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
         }
     });
 
-    const areaPath = pD + ` L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z`;
     const clrs = { 'stw-graph': '#2ecc71', 'sog-graph': '#f39c12', 'depth-graph': '#3498db', 'tws-graph': '#f1c40f' };
-    const lClass = isHercules ? 'line-hercules' : '';
-
-    if (isTws) {
-        svg.innerHTML = `${gH}<path d="${areaPath}" fill="rgba(241,196,15,0.1)" stroke="none" />${cS}`;
-    } else {
-        svg.innerHTML = `${gH}<path d="${areaPath}" fill="${clrs[id]}22" stroke="none" /><path d="${pD}" class="${lClass}" fill="none" stroke="${clrs[id]}" stroke-width="1.5" />`;
-    }
+    const aP = pD + ` L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z`;
+    svg.innerHTML = isTws ? `${grids}<path d="${aP}" fill="rgba(241,196,15,0.12)" stroke="none" />${cS}` : `${grids}<path d="${aP}" fill="${clrs[id]}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${clrs[id]}" stroke-width="1.5" />`;
 }
 
 // ==========================================================================
@@ -302,10 +293,9 @@ if (ui.hotspot) {
 async function init() { await fetchServerConfig(); startDisplayLoop(); connect(); }
 window.addEventListener('load', init);
 
-function checkDepthAlarm(d) { ui.depth.classList.remove('alarm-warning', 'alarm-danger'); if (d < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); } else if (d < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning'); }
+function checkDepthAlarm(m) { ui.depth.classList.remove('alarm-warning', 'alarm-danger'); if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); } else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning'); }
 function playBingBing() { if (!audioCtx) return; const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n; function b(f, s) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f; g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4); o.start(s); o.stop(s + 0.5); } b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6); }
 
-// Simulatore (Triple click su Depth)
 ui.depth.closest('.data-box').addEventListener('click', (function() {
     let dC = 0, lC = 0;
     return function() {
