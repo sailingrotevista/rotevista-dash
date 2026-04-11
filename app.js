@@ -74,37 +74,49 @@ const ui = {
 };
 
 // ==========================================================================
-// 3. CARICAMENTO CONFIGURAZIONE DAL SERVER
+// 3. CARICAMENTO CONFIGURAZIONE DAL SERVER (VERSIONE UNIVERSALE)
 // ==========================================================================
 async function fetchServerConfig() {
-    // Cerchiamo di capire se siamo su un server reale o in locale
-    const isRemote = window.location.protocol.includes("http");
+    if (!window.location.protocol.includes("http")) return;
+
+    // Elenco di tutti i percorsi possibili che SignalK usa per i plugin
+    const pluginID = 'rotevista-dash';
+    const scopeID = '@sailingrotevista/rotevista-dash';
     
-    if (isRemote) {
+    const possibleUrls = [
+        `/plugins/${pluginID}/settings`,
+        `/plugins/${scopeID}/settings`,
+        `/signalk/v1/api/plugins/${pluginID}/settings`,
+        `/signalk/v1/api/plugins/${scopeID}/settings`
+    ];
+
+    console.log("Dashboard: Inizio scansione configurazione server...");
+
+    for (let url of possibleUrls) {
         try {
-            console.log("Dashboard: Recupero impostazioni dal server...");
-            // L'URL ufficiale per leggere i settaggi del plugin
-            const response = await fetch('/signalk/v1/plugins/rotevista-dash/settings');
-            
+            const response = await fetch(url);
             if (response.ok) {
                 const serverConfig = await response.json();
                 
-                // Se il server ha dei dati salvati, sovrascriviamo il CONFIG di default
-                if (serverConfig && Object.keys(serverConfig).length > 0) {
-                    // Merge dei blocchi (Alarms, Graphs, Averages)
+                // Se abbiamo ricevuto un oggetto valido
+                if (serverConfig && typeof serverConfig === 'object' && Object.keys(serverConfig).length > 0) {
+                    
+                    // Merge profondo dei dati
                     if (serverConfig.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...serverConfig.alarms };
                     if (serverConfig.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...serverConfig.graphs };
                     if (serverConfig.averages) CONFIG.averages = { ...CONFIG.averages, ...serverConfig.averages };
                     
-                    console.log("Dashboard: Configurazione caricata correttamente!", CONFIG);
+                    console.log("%c SUCCESS: Configurazione caricata da: " + url, "color: #2ecc71; font-weight: bold;");
+                    console.log("Dati applicati:", CONFIG);
+                    return; // Esci: abbiamo trovato i dati!
                 }
-            } else {
-                console.log("Dashboard: Il server non ha ancora impostazioni salvate. Uso i default.");
             }
         } catch (e) {
-            console.error("Dashboard: Errore critico nel fetch delle impostazioni:", e);
+            // Ignora l'errore e prova il prossimo URL
         }
     }
+    
+    console.warn("Dashboard: Nessuna impostazione trovata sul server (o plugin mai configurato). Uso i default.");
 }
 
 // ==========================================================================
