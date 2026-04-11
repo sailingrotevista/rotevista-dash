@@ -1,7 +1,16 @@
 /* ==========================================================================
-   1. BASE E STRUTTURA (GRID LAYOUT)
+   1. BASE E STRUTTURA GENERALE (GRID LAYOUT)
    ========================================================================== */
-body { background-color: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 0; height: 100vh; width: 100vw; overflow: hidden; }
+body {
+    background-color: #000;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+}
 
 .main-container {
     display: grid;
@@ -9,24 +18,23 @@ body { background-color: #000; color: #fff; font-family: -apple-system, BlinkMac
     height: 100%;
     padding: 5px;
     box-sizing: border-box;
-    /* Default Desktop (es. 4:3 o schermi medi) */
+    gap: 8px;
+    /* Proporzioni Desktop Standard */
     grid-template-columns: 1fr 3.5fr 1fr;
     grid-template-rows: 100%;
-    gap: 8px;
-    transition: grid-template-columns 0.4s ease;
+    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* OTTIMIZZAZIONE PER SCHERMI LARGHI (16:10, 16:9, ecc.) */
+/* Ottimizzazione per schermi molto larghi (es. 16:10, 21:9) */
 @media (min-aspect-ratio: 1.6) {
     .main-container {
-        /* Allarghiamo le colonne laterali per sfruttare lo spazio orizzontale */
         grid-template-columns: 1.4fr 3fr 1.4fr;
-        gap: 15px; /* Aumentiamo anche il distacco per eleganza */
+        gap: 15px;
     }
 }
 
 /* ==========================================================================
-   2. PANNELLI LATERALI E RIQUADRI DATI
+   2. PANNELLI E DATA-BOX
    ========================================================================== */
 .side-panel {
     display: flex;
@@ -37,40 +45,11 @@ body { background-color: #000; color: #fff; font-family: -apple-system, BlinkMac
     height: 100%;
 }
 
-.right-panel {
-    align-items: flex-end;
-    text-align: right;
-}
+.left-panel { grid-column: 1; }
+.right-panel { grid-column: 3; align-items: flex-end; text-align: right; }
 
-/* Riquadro singolo: agisce da contenitore per i font dinamici (cqh) */
-.data-box {
-    position: relative;
-    border-bottom: 1px solid #222;
-    padding: 8px 10px;
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    box-sizing: border-box;
-    flex: 1;
-    container-type: size;
-}
-
-/* Definizione altezze proporzionali (25% grafici, 16.6% dati semplici) */
-.data-box:nth-child(1),
-.data-box:nth-child(2) {
-    height: 25vh;
-}
-
-.data-box:nth-child(3),
-.data-box:nth-child(4),
-.data-box:nth-child(5) {
-    height: 16.666vh;
-}
-
-/* ==========================================================================
-   3. STRUMENTO CENTRALE (WIND GAUGE)
-   ========================================================================== */
 .center-panel {
+    grid-column: 2;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -79,41 +58,57 @@ body { background-color: #000; color: #fff; font-family: -apple-system, BlinkMac
     overflow: hidden;
 }
 
-#wind-gauge {
+.data-box {
+    position: relative;
+    border-bottom: 1px solid #222;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
     width: 100%;
-    height: 100%;
-    max-height: 100%;
-    object-fit: contain;
+    box-sizing: border-box;
+    container-type: size; /* Cruciale per il calcolo cqh */
+    flex: 1;
 }
+
+/* Definizione altezze percentuali basate sul Viewport */
+.data-box:nth-child(1), .data-box:nth-child(2) { height: 25vh; }
+.data-box:nth-child(3), .data-box:nth-child(4), .data-box:nth-child(5) { height: 16.666vh; }
 
 /* ==========================================================================
-   4. TIPOGRAFIA DINAMICA (Basata su altezza riquadro - cqh)
+   3. TACTICAL FOCUS MODE (50/50 SPLIT)
    ========================================================================== */
-.label-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 2px;
-    width: 100%;
+.focus-active { grid-template-columns: 1fr 1fr !important; }
+.focus-active .side-panel:not(.has-focus) { display: none !important; }
+
+.focus-active.focus-side-left .side-panel.has-focus { grid-column: 1; }
+.focus-active.focus-side-left .center-panel { grid-column: 2; }
+.focus-active.focus-side-right .center-panel { grid-column: 1; }
+.focus-active.focus-side-right .side-panel.has-focus { grid-column: 2; }
+
+.focus-active .has-focus .data-box:not(.is-focused) { display: none !important; }
+.focus-active .has-focus .data-box.is-focused { height: 100vh !important; border: none; background: rgba(255, 255, 255, 0.04); }
+
+.focus-active .is-focused .value { font-size: clamp(3rem, 18cqh, 8rem) !important; margin-top: 10px; }
+.focus-active .is-focused .scale-labels { font-size: 22px !important; min-width: 35px !important; }
+
+/* Bussola Esplosa in Focus Mode */
+.focus-active .is-focused .mini-compass {
+    width: 45vh !important;
+    height: 45vh !important;
 }
 
-.label {
-    color: #666;
-    font-size: 0.6rem;
-    font-weight: bold;
-    text-transform: uppercase;
-}
+.focus-active .is-focused .sparkline path { stroke-width: 0.8px !important; }
+.focus-active .is-focused .line-hercules { stroke-width: 1.2px !important; filter: drop-shadow(0 0 3px #ff0000); }
 
-.unit {
-    color: #888;
-    font-size: 0.55rem;
-    font-weight: bold;
-}
+/* ==========================================================================
+   4. TIPOGRAFIA DINAMICA (ELASTICA CQH)
+   ========================================================================== */
+.label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; width: 100%; }
+.label { color: #666; font-size: 0.6rem; font-weight: bold; text-transform: uppercase; }
+.unit { color: #888; font-size: 0.55rem; font-weight: bold; }
 
-/* Valore standard con grafico (STW, SOG, Depth, TWS) */
 .value {
     color: #fff;
-    /* 22% dell'altezza del box, minimo 1.2rem */
     font-size: clamp(1.2rem, 22cqh, 3rem);
     font-weight: 600;
     line-height: 0.9;
@@ -122,40 +117,30 @@ body { background-color: #000; color: #fff; font-family: -apple-system, BlinkMac
     padding-bottom: 5px;
 }
 
-/* Valore grande senza grafico (Heading, COG, Mean) centrato verticalmente */
 .value-large {
     margin-top: auto;
     margin-bottom: auto;
-    /* 35% dell'altezza del box, minimo 1.5rem */
     font-size: clamp(1.5rem, 35cqh, 4rem);
     line-height: 0.85;
 }
 
-/* ==========================================================================
-   5. LAYOUT SPECIALI (TACK E BUSSOLINA TWD)
-   ========================================================================== */
-/* Box TACK (Doppio valore HDG/COG) */
+/* TACK Layout - Centratura verticale e compattezza */
 .dual-value-container {
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
+    align-items: center;
     width: 100%;
+    /* La "molla" auto sopra e sotto lo tiene al centro esatto del box */
     margin-top: auto;
-    margin-bottom: auto; /* Centratura verticale */
+    margin-bottom: auto;
     padding-bottom: 5px;
 }
 
 .dual-value-col {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
     width: 48%;
-    height: 100%;
-}
-
-.dual-value-col.right-col {
-    align-items: flex-end;
-    text-align: right;
+    /* Rimosso height 100% per non farlo allungare fino al titolo */
 }
 
 .dual-label {
@@ -163,39 +148,47 @@ body { background-color: #000; color: #fff; font-family: -apple-system, BlinkMac
     font-size: 0.55rem;
     font-weight: bold;
     text-transform: uppercase;
-    margin-bottom: auto;
+    margin-bottom: 2px; /* Distanza fissa e piccola dal numero sottostante */
 }
 
 .value.dual-val {
-    font-size: clamp(1rem, 20cqh, 1.8rem);
+    font-size: clamp(1rem, 22cqh, 1.8rem);
     padding-bottom: 0;
+    line-height: 0.9;
 }
 
-/* Box TWD con Mini-Compass */
+/* BUSSOLA TWD: Centrata e proporzionata */
 .value-with-compass {
     display: flex;
     justify-content: space-between;
     align-items: center;
     width: 100%;
     margin-top: auto;
-    margin-bottom: auto; /* Centratura verticale */
+    margin-bottom: auto;
+    gap: 8px;
 }
 
 .mini-compass {
-    width: 38px;
-    height: 38px;
-    background: rgba(0,0,0,0.2);
+    /* Impostata a 60% dell'altezza come da tua prova */
+    width: clamp(45px, 60cqh, 120px);
+    height: clamp(45px, 60cqh, 120px);
+    background: #000;
     border-radius: 50%;
     flex-shrink: 0;
+    border: 1.5px solid #333;
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+    transition: all 0.4s ease;
 }
 
 .value-with-compass .value-large {
-    margin-top: 0;
-    margin-bottom: 0;
+    margin: 0;
+    flex-grow: 1;
+    text-align: right;
+    font-size: clamp(1.2rem, 35cqh, 4rem);
 }
 
 /* ==========================================================================
-   6. GRAFICI STORICI (SPARKLINES)
+   5. GRAFICI E SCALE
    ========================================================================== */
 .graph-wrapper {
     position: relative;
@@ -205,152 +198,63 @@ body { background-color: #000; color: #fff; font-family: -apple-system, BlinkMac
     margin-top: 4px;
     display: flex;
     align-items: stretch;
-    gap: 4px; /* Ridotto: spazio minimo tra numeri e grafico */
+    gap: 4px;
 }
-
-.sparkline {
-    flex-grow: 1;
-    height: 100%;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 4px;
-}
+.sparkline { flex-grow: 1; height: 100%; background: rgba(255, 255, 255, 0.03); border-radius: 4px; }
+.sparkline path { stroke-width: 1px !important; }
 
 .scale-labels {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    font-size: 10px; /* Aumentato di ~1.5pt */
-    color: #888; /* Leggermente più chiaro per leggibilità */
+    font-size: 10px;
+    color: #666;
     font-weight: bold;
-    min-width: 16px; /* Allargato per il nuovo font */
+    min-width: 16px;
     height: 100%;
     line-height: 1;
-}
-
-/* SIMMETRIA INTERNA:
-   Pannello SX -> Scala a DESTRA (vicino al vento)
-   Pannello DX -> Scala a SINISTRA (vicino al vento)
-*/
-.left-panel .scale-labels {
-    order: 2;
-    text-align: left;
-}
-.left-panel .sparkline {
-    order: 1;
-}
-
-.right-panel .scale-labels {
-    order: 1;
-    text-align: right;
-}
-.right-panel .sparkline {
-    order: 2;
-}
-
-/* Colori linee grafici */
-#stw-graph { stroke: #2ecc71; fill: rgba(46, 204, 113, 0.15); }
-#sog-graph { stroke: #f39c12; fill: rgba(243, 156, 18, 0.15); }
-#depth-graph { stroke: #3498db; fill: rgba(52, 152, 219, 0.15); }
-#tws-graph { stroke: #f1c40f; fill: rgba(241, 196, 15, 0.15); }
-
-/* Effetto bagliore ROSSO per la linea Hercules */
-.line-hercules {
-    filter: drop-shadow(0 0 5px #ff0000); /* Glow Rosso */
-    stroke-width: 2.2px !important;
-}
-
-/* Sfondo speciale ROSSO SCURO per il box in modalità Hercules */
-.box-hercules {
-    background: rgba(255, 0, 0, 0.08) !important; /* Una punta di rosso nel fondo */
-    border-radius: 10px;
     transition: all 0.3s ease;
 }
 
-.box-hercules .sparkline {
-    background: rgba(255, 0, 0, 0.05); /* Sfondo grafico leggermente rosso */
-}
+.left-panel .scale-labels { order: 2; text-align: left; }
+.left-panel .sparkline { order: 1; }
+.right-panel .scale-labels { order: 1; text-align: right; }
+.right-panel .sparkline { order: 2; }
 
-/* Indicatore "H" più evidente */
-.box-hercules::after {
-    content: "HERCULES";
-    position: absolute;
-    bottom: 4px;
-    right: 35px;
-    font-size: 7px;
-    color: #ff4444;
-    font-weight: 900;
-    letter-spacing: 1px;
-    opacity: 0.8;
-}
+#stw-graph { stroke: #2ecc71; fill: rgba(46, 204, 113, 0.12); }
+#sog-graph { stroke: #f39c12; fill: rgba(243, 156, 18, 0.12); }
+#depth-graph { stroke: #3498db; fill: rgba(52, 152, 219, 0.12); }
+#tws-graph { stroke: #f1c40f; fill: rgba(241, 196, 15, 0.12); }
 
 /* ==========================================================================
-   7. STATI, ALLARMI E ANIMAZIONI
+   6. HERCULES E ANIMAZIONI
    ========================================================================== */
-#status {
-    position: absolute;
-    top: 5px;
-    right: 15px;
-    font-size: 0.5rem;
-    text-transform: uppercase;
-    z-index: 1000;
-}
+.line-hercules { filter: drop-shadow(0 0 5px #ff0000); stroke-width: 1.8px !important; }
+.box-hercules { background: rgba(255, 0, 0, 0.08) !important; transition: all 0.3s ease; }
+.box-hercules::after { content: "HERCULES"; position: absolute; bottom: 4px; right: 35px; font-size: 7px; color: #ff4444; font-weight: 900; letter-spacing: 1px; opacity: 0.8; }
 
+#status { position: absolute; top: 5px; right: 15px; font-size: 0.5rem; text-transform: uppercase; z-index: 1000; }
 .online { color: #2ecc71; opacity: 0.5; }
 .offline { color: #e74c3c; font-weight: bold; }
 
-/* Fluidità lancette SVG */
-#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow {
-    transition: all 0.6s cubic-bezier(0.1, 0.7, 0.1, 1);
-}
-
+#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow { transition: all 0.6s cubic-bezier(0.1, 0.7, 0.1, 1); }
 #leeway-mask-rect { transition: none; }
-
-/* Allarmi Profondità */
 .alarm-warning { color: #f1c40f !important; }
-.alarm-danger {
-    color: #e74c3c !important;
-    font-weight: 900;
-    animation: blink-unstable 1s infinite;
-}
+.alarm-danger { color: #e74c3c !important; font-weight: 900; animation: blink-unstable 1s infinite; }
+@keyframes blink-unstable { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+.unstable-data { animation: blink-unstable 1.5s infinite ease-in-out; color: #f39c12 !important; }
 
-/* Lampeggio dati instabili (MEAN) */
-@keyframes blink-unstable {
-    0% { opacity: 1; }
-    50% { opacity: 0.3; }
-    100% { opacity: 1; }
-}
-
-.unstable-data {
-    animation: blink-unstable 1.5s infinite ease-in-out;
-    color: #f39c12 !important;
-}
+#wind-gauge { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
 
 /* ==========================================================================
-   8. RESPONSIVE LAYOUT (max-aspect-ratio: 40/50)
+   7. RESPONSIVE (PORTRAIT)
    ========================================================================== */
 @media (max-aspect-ratio: 0.9 / 1) {
-    .main-container {
-        grid-template-columns: 1fr 1fr;
-        grid-template-rows: 1fr 1fr;
-    }
-
-    /* Vento sopra a tutta larghezza */
-    .center-panel {
-        grid-column: 1 / span 2;
-        grid-row: 1;
-        height: 50vh;
-    }
-
-    /* Colonne dati sotto affiancate */
-    .side-panel.left-panel { grid-column: 1; grid-row: 2; height: 50vh; }
-    .side-panel.right-panel { grid-column: 2; grid-row: 2; height: 50vh; }
-
-    #wind-gauge { max-height: 100%; width: auto; }
-
-    /* Altezze box dimezzate in modalità responsive */
+    .main-container { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+    .center-panel { grid-column: 1 / span 2; grid-row: 1; height: 50vh; }
+    .left-panel { grid-column: 1; grid-row: 2; height: 50vh; }
+    .right-panel { grid-column: 2; grid-row: 2; height: 50vh; }
     .data-box:nth-child(1), .data-box:nth-child(2) { height: 12.5vh; }
     .data-box:nth-child(3), .data-box:nth-child(4), .data-box:nth-child(5) { height: 8.333vh; }
-    
-    /* Font più protettivi per schermi piccoli */
     .value-large { font-size: clamp(1.2rem, 35cqh, 2.5rem); }
 }
