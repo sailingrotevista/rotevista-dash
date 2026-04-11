@@ -1,16 +1,16 @@
 {
   "name": "@sailingrotevista/rotevista-dash",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Public Wind Dashboard with navigation and course aids",
   "main": "index.html",
-  "plugin": "index.js", 
+  "plugin": "index.js",
   "publishConfig": {
     "access": "public"
   },
   "keywords": [
-      "signalk-webapp",
-      "signalk-node-server-plugin"
-    ],
+    "signalk-webapp",
+    "signalk-node-server-plugin"
+  ],
   "author": "Sailing Rotevista",
   "license": "MIT",
   "signalk": {
