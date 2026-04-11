@@ -1,6 +1,6 @@
 module.exports = function (app) {
   const plugin = {};
-  plugin.id = 'rotevista-dash';
+  plugin.id = 'rotevista-dash'; // Questo ID determina l'URL delle impostazioni
   plugin.name = 'Rotevista Dash Configuration';
   plugin.description = 'Configura i parametri della barca per la Dashboard';
 
@@ -12,7 +12,6 @@ module.exports = function (app) {
     app.debug('Rotevista Dash Plugin Stopped');
   };
 
-  // Qui definiamo la maschera che vedrai su SignalK
   plugin.schema = {
     type: 'object',
     properties: {
