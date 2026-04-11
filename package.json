@@ -1,17 +1,19 @@
 {
   "name": "@sailingrotevista/rotevista-dash",
   "version": "1.0.12",
-  "description": "Dashboard pubblica per Bavaria 39 Rotevista",
+  "description": "Public Wind Dashboard with navigation and course aids",
   "main": "index.html",
+  "plugin": "index.js", 
   "publishConfig": {
     "access": "public"
   },
   "keywords": [
-    "signalk-webapp"
-  ],
-  "author": "sailingrotevista",
+      "signalk-webapp",
+      "signalk-node-server-plugin"
+    ],
+  "author": "Sailing Rotevista",
   "license": "MIT",
   "signalk": {
-    "displayName": "Rotevista Dash"
+    "displayName": "Rotevista Wind Dashboard"
   }
 }
