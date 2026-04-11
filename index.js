@@ -1,19 +1,22 @@
 module.exports = function (app) {
   const plugin = {};
-  plugin.id = 'rotevista-dash'; // Questo ID determina l'URL delle impostazioni
-  plugin.name = 'Rotevista Dash Configuration';
-  plugin.description = 'Configura i parametri della barca per la Dashboard';
+
+  plugin.id = 'rotevista-dash'; // ID univoco per il plugin
+  plugin.name = 'Rotevista Dash Config';
+  plugin.description = 'Impostazioni centralizzate per la Dashboard Rotevista';
 
   plugin.start = function (options, restartServer) {
-    app.debug('Rotevista Dash Plugin Started');
+    app.debug('Plugin Rotevista Dash avviato con opzioni:', options);
   };
 
   plugin.stop = function () {
-    app.debug('Rotevista Dash Plugin Stopped');
+    app.debug('Plugin Rotevista Dash fermato');
   };
 
+  // Schema conforme alla doc di SignalK per generare la UI
   plugin.schema = {
     type: 'object',
+    title: 'Configurazione Barca',
     properties: {
       alarms: {
         type: 'object',
@@ -25,18 +28,18 @@ module.exports = function (app) {
       },
       graphs: {
         type: 'object',
-        title: 'Soglie Terzaroli (Nodi TWS)',
+        title: 'Soglie Vento (Nodi TWS)',
         properties: {
-          reef1: { type: 'number', title: '1° Mano (Arancio)', default: 15.0 },
-          reef2: { type: 'number', title: '2° Mano (Rosso)', default: 20.0 }
+          reef1: { type: 'number', title: 'Soglia Arancio (1° Mano)', default: 15.0 },
+          reef2: { type: 'number', title: 'Soglia Rossa (2° Mano)', default: 20.0 }
         }
       },
       averages: {
         type: 'object',
-        title: 'Medie e Stabilità',
+        title: 'Parametri Medie',
         properties: {
-          longWindow: { type: 'number', title: 'Finestra Medie MEAN (millisecondi)', default: 60000 },
-          minSpeed: { type: 'number', title: 'Velocità minima stabilità (nodi)', default: 0.5 }
+          longWindow: { type: 'number', title: 'Finestra Medie LUNGHE (ms)', default: 60000 },
+          minSpeed: { type: 'number', title: 'Velocità Minima Stabilità (kts)', default: 0.5 }
         }
       }
     }

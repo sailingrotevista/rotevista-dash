@@ -80,7 +80,7 @@ async function fetchServerConfig() {
     if (window.location.protocol.includes("http")) {
         try {
             // SignalK espone le configurazioni dei plugin a questo indirizzo
-            const response = await fetch('/plugins/rotevista-dash/settings');
+            const response = await fetch('/signalk/v1/plugins/rotevista-dash/settings');
             if (response.ok) {
                 const serverConfig = await response.json();
                 
