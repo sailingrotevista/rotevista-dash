@@ -297,4 +297,3 @@ ui.depth.closest('.data-box').addEventListener('click', (function() {
         if (dC === 3) { simulationMode = !simulationMode; if (simulationMode) { if (socket) socket.close(); ui.status.innerText = "SIM ATTIVO"; simInterval = setInterval(() => { const h = Math.random()*360; processIncomingData("navigation.headingTrue", degToRad(h)); processIncomingData("navigation.speedOverGround", ktsToMs(8)); }, 200); } else location.reload(); dC = 0; }
     };
 })());
----Fine Codice ---
