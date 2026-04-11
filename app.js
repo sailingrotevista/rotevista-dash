@@ -7,17 +7,17 @@ let CONFIG = {
         depthWarning: 5.0
     },
     averages: {
-        smoothWindow: 2000,       // Media veloce per le lancette (ms)
-        longWindow: 60000,        // Media lunga per i dati MEAN (ms)
-        stabilityTolerance: 2000, // Tolleranza riempimento buffer (ms)
-        stabilityThreshold: 0.90, // Indice R minimo per dati stabili
-        minSpeed: 0.5             // Velocità sotto la quale non lampeggia nulla (kts)
+        smoothWindow: 2000,
+        longWindow: 60000,
+        stabilityTolerance: 2000,
+        stabilityThreshold: 0.90,
+        minSpeed: 0.5
     },
     graphs: {
-        reef1: 15.0,              // Soglia arancio TWS
-        reef2: 20.0,              // Soglia rossa TWS
-        historyMinutes: 5,        // Durata temporale dei grafici (minuti)
-        samples: 60               // Numero di punti disegnati nel grafico
+        reef1: 15.0,
+        reef2: 20.0,
+        historyMinutes: 5,
+        samples: 60
     },
     scales: {
         stw:   { stdMax: 12, hercSpan: 4,  step: 2 },
@@ -42,10 +42,8 @@ let socket, renderInterval, simInterval;
 let lastAvgUIUpdate = 0, audioCtx = null, lastAlarmTime = 0;
 let curAwaRot = 0, curTwaRot = 0, curTrackRot = 0, curTwdRoseRot = 0;
 
-// Gestione Interazioni (Long Press, Focus, Ghost Clicks)
 let pressTimer, isFocusActive = false, blockNextClick = false;
 
-// Modalità Scale (Standard/Hercules) salvate nel browser
 const graphModes = {
     stw: localStorage.getItem('mode_stw') || 'standard',
     sog: localStorage.getItem('mode_sog') || 'standard',
@@ -69,19 +67,20 @@ const ui = {
     tws: document.getElementById('tws'), depth: document.getElementById('depth'),
     twaAvg: document.getElementById('twa-avg'), awaAvg: document.getElementById('awa-avg'),
     twdAvg: document.getElementById('twd-avg'), twdArrow: document.getElementById('twd-arrow'),
+    twdBoat: document.getElementById('twd-boat-wrap'),
+    twdChevron: document.getElementById('twd-wind-chevron'),
     leewayMask: document.getElementById('leeway-mask-rect'), leewayVal: document.getElementById('leeway-val'),
     tackHdg: document.getElementById('tack-hdg'), tackCog: document.getElementById('tack-cog'),
     status: document.getElementById('status'), hotspot: document.getElementById('fullscreen-hotspot')
 };
 
 // ==========================================================================
-// 3. COMUNICAZIONE CON IL SERVER (FETCH CONFIG)
+// 3. CARICAMENTO CONFIGURAZIONE DAL SERVER
 // ==========================================================================
 async function fetchServerConfig() {
     if (!window.location.protocol.includes("http")) return;
     const pluginID = 'rotevista-dash';
     const possibleUrls = [`/skServer/plugins/${pluginID}/config`, `/plugins/${pluginID}/config` ];
-
     for (let url of possibleUrls) {
         try {
             const response = await fetch(url);
@@ -89,23 +88,13 @@ async function fetchServerConfig() {
                 const data = await response.json();
                 const actual = data.configuration || data;
                 if (actual && typeof actual === 'object') {
-                    // Normalizzazione dati (conversione stringhe -> numeri)
-                    const parseNumbers = (obj) => {
-                        for (let k in obj) {
-                            if (typeof obj[k] === 'object') parseNumbers(obj[k]);
-                            else if (!isNaN(obj[k]) && obj[k] !== "") obj[k] = parseFloat(obj[k]);
-                        }
-                    };
+                    const parseNumbers = (obj) => { for (let k in obj) { if (typeof obj[k] === 'object') parseNumbers(obj[k]); else if (!isNaN(obj[k]) && obj[k] !== "") obj[k] = parseFloat(obj[k]); } };
                     parseNumbers(actual);
-                    // Merge nel sistema locale
                     if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
                     if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
                     if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
-                    if (actual.scales) {
-                        for (let key in actual.scales) { CONFIG.scales[key] = { ...CONFIG.scales[key], ...actual.scales[key] }; }
-                    }
-                    console.log("Dashboard: Configurazione caricata dal server.");
-                    return;
+                    if (actual.scales) { for (let key in actual.scales) { CONFIG.scales[key] = { ...CONFIG.scales[key], ...actual.scales[key] }; } }
+                    console.log("SUCCESS: Config loaded."); return;
                 }
             }
         } catch (e) { }
@@ -121,16 +110,12 @@ function msToKts(ms) { return ms * 1.94384; }
 function ktsToMs(kts) { return kts / 1.94384; }
 function getShortestRotation(curr, target) { let diff = (target - curr) % 360; if (diff > 180) diff -= 360; else if (diff < -180) diff += 360; return curr + diff; }
 
-// Calcolo media circolare vettoriale
 function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
-    const now = Date.now();
-    const validData = bufferArray.filter(item => (now - item.time) <= windowMs);
+    const now = Date.now(); const validData = bufferArray.filter(item => (now - item.time) <= windowMs);
     if (validData.length === 0) return null;
-    let sSin = 0, sCos = 0;
-    validData.forEach(item => { sSin += Math.sin(item.val); sCos += Math.cos(item.val); });
+    let sSin = 0, sCos = 0; validData.forEach(item => { sSin += Math.sin(item.val); sCos += Math.cos(item.val); });
     let R = Math.sqrt(sSin * sSin + sCos * sCos) / validData.length;
-    let timeSpan = validData[validData.length - 1].time - validData[0].time;
-    let isStable = (timeSpan >= windowMs - CONFIG.averages.stabilityTolerance) && (R > CONFIG.averages.stabilityThreshold);
+    let isStable = (validData[validData.length - 1].time - validData[0].time >= windowMs - CONFIG.averages.stabilityTolerance) && (R > CONFIG.averages.stabilityThreshold);
     let avgDeg = Math.round(radToDeg(Math.atan2(sSin, sCos)));
     return { val: signed ? avgDeg : (avgDeg + 360) % 360, stable: isStable };
 }
@@ -141,45 +126,47 @@ function processIncomingData(path, val) {
     if (path === "navigation.courseOverGroundTrue") { store.smoothBuf.cog.push({ val: val, time: now }); store.longBuf.cog.push({ val: val, time: now }); }
     if (path === "environment.wind.angleApparent") { store.smoothBuf.awa.push({ val: val, time: now }); store.longBuf.awa.push({ val: val, time: now }); }
     if (path === "environment.wind.angleTrueWater") { store.smoothBuf.twa.push({ val: val, time: now }); store.longBuf.twa.push({ val: val, time: now }); }
-    
-    // Calcolo TWD (Vento Reale Direzione Geografica)
     if (path === "navigation.headingTrue" || path === "environment.wind.angleTrueWater" || path === "environment.wind.directionTrue") {
-        let twdRad = 0;
-        if (path === "environment.wind.directionTrue") twdRad = val;
+        let twdRad = 0; if (path === "environment.wind.directionTrue") twdRad = val;
         else if (store.raw["navigation.headingTrue"] !== undefined && store.raw["environment.wind.angleTrueWater"] !== undefined) {
             twdRad = (store.raw["navigation.headingTrue"] + store.raw["environment.wind.angleTrueWater"]) % (2 * Math.PI);
             if (twdRad < 0) twdRad += (2 * Math.PI);
         } else return;
-        store.smoothBuf.twd.push({ val: twdRad, time: now });
-        store.longBuf.twd.push({ val: twdRad, time: now });
+        store.smoothBuf.twd.push({ val: twdRad, time: now }); store.longBuf.twd.push({ val: twdRad, time: now });
     }
 }
 
 // ==========================================================================
-// 5. MOTORE DI RENDERING PRINCIPALE
+// 5. MOTORE RENDERING PRINCIPALE
 // ==========================================================================
 function startDisplayLoop() {
     renderInterval = setInterval(() => {
         const now = Date.now();
-
-        // 5.1 Watchdog
         const pathsToWatch = { "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog, "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog, "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth, "environment.wind.speedTrue": ui.tws };
         for (let p in pathsToWatch) { if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) { pathsToWatch[p][pathsToWatch[p] === ui.awsSvg ? 'textContent' : 'innerText'] = "---"; delete store.raw[p]; } }
 
-        // 5.2 Renders Istantanei
         if (store.raw["navigation.speedThroughWater"] !== undefined) { const v = msToKts(store.raw["navigation.speedThroughWater"]); ui.stw.innerText = v.toFixed(1); manageHistory('stw', v); }
         let curSog = 0; if (store.raw["navigation.speedOverGround"] !== undefined) { curSog = msToKts(store.raw["navigation.speedOverGround"]); ui.sog.innerText = curSog.toFixed(1); manageHistory('sog', curSog); }
         if (store.raw["environment.depth.belowTransducer"] !== undefined) { const d = store.raw["environment.depth.belowTransducer"]; ui.depth.innerText = d.toFixed(1); checkDepthAlarm(d); manageHistory('depth', d); }
-        if (store.raw["environment.wind.speedTrue"] !== undefined) { const w = msToKts(store.raw["environment.wind.speedTrue"]); ui.tws.innerText = w.toFixed(1); manageHistory('tws', w); }
+        
+        // --- 1. RENDERING TWS CON COLORE DINAMICO (BIANCO -> ARANCIO -> ROSSO) ---
+        if (store.raw["environment.wind.speedTrue"] !== undefined) {
+            const twsKts = msToKts(store.raw["environment.wind.speedTrue"]);
+            ui.tws.innerText = twsKts.toFixed(1);
+            let twsColor = "#fff"; // Default: Bianco
+            if (twsKts >= CONFIG.graphs.reef2) twsColor = "#e74c3c"; // Rosso
+            else if (twsKts >= CONFIG.graphs.reef1) twsColor = "#e67e22"; // Arancio
+            ui.tws.style.color = twsColor;
+            manageHistory('tws', twsKts);
+        }
         if (store.raw["environment.wind.speedApparent"] !== undefined) ui.awsSvg.textContent = msToKts(store.raw["environment.wind.speedApparent"]).toFixed(1);
 
-        // 5.3 Render Quadrante (2s smoothing)
+        // Render Quadrante
         const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, CONFIG.averages.smoothWindow, true);
         if (smAwa) { curAwaRot = getShortestRotation(curAwaRot, smAwa.val); ui.awa.setAttribute('transform', `rotate(${curAwaRot}, 200, 200)`); }
         const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, CONFIG.averages.smoothWindow, true);
         if (smTwa) { curTwaRot = getShortestRotation(curTwaRot, smTwa.val); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
 
-        // Drift Reale (COG-HDG)
         if (store.raw["navigation.courseOverGroundTrue"] && store.raw["navigation.headingTrue"]) {
             let drift = (radToDeg(store.raw["navigation.courseOverGroundTrue"]) - radToDeg(store.raw["navigation.headingTrue"]) + 360) % 360;
             if (curSog < CONFIG.averages.minSpeed) drift = 0;
@@ -187,7 +174,7 @@ function startDisplayLoop() {
             let ds = drift > 180 ? drift - 360 : drift; updateLeewayDisplay(Math.max(-20, Math.min(20, ds)));
         } else updateLeewayDisplay(0);
 
-        // 5.4 Render Medie Lunghe (Ogni 3s)
+        // --- 2. RENDERING MEDIE E BUSSOLA TATTICA ---
         if (now - lastAvgUIUpdate > 3000) {
             let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averages.longWindow, false),
                 cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averages.longWindow, false),
@@ -204,7 +191,6 @@ function startDisplayLoop() {
             };
             upUI(ui.hdg, hObj); upUI(ui.cog, cObj); upUI(ui.awaAvg, awObj); upUI(ui.twaAvg, twObj); upUI(ui.twdAvg, twdObj);
             
-            // TACK
             if (hObj && twObj && hObj.val !== null) {
                 let tA = twObj.val * 2; ui.tackHdg.innerHTML = `${Math.round((hObj.val - tA + 360) % 360).toString().padStart(3, '0')}&deg;`;
                 if (cObj) ui.tackCog.innerHTML = `${Math.round((cObj.val - tA + 360) % 360).toString().padStart(3, '0')}&deg;`;
@@ -212,7 +198,19 @@ function startDisplayLoop() {
                 if (tStable) { ui.tackHdg.classList.remove('unstable-data'); ui.tackCog.classList.remove('unstable-data'); }
                 else { ui.tackHdg.classList.add('unstable-data'); ui.tackCog.classList.add('unstable-data'); }
             }
-            if (twdObj) { curTwdRoseRot = getShortestRotation(curTwdRoseRot, twdObj.val); ui.twdArrow.setAttribute('transform', `rotate(${curTwdRoseRot}, 20, 20)`); }
+
+            // Rotazione Bussola Tattica e Colore Sincronizzato
+            if (twdObj && hObj) {
+                curTwdRoseRot = getShortestRotation(curTwdRoseRot, twdObj.val);
+                ui.twdArrow.setAttribute('transform', `rotate(${curTwdRoseRot}, 20, 20)`);
+                ui.twdBoat.setAttribute('transform', `rotate(${hObj.val}, 20, 20)`);
+
+                let currentTwsKts = store.raw["environment.wind.speedTrue"] ? msToKts(store.raw["environment.wind.speedTrue"]) : 0;
+                let reefColor = "#fff";
+                if (currentTwsKts >= CONFIG.graphs.reef2) reefColor = "#e74c3c";
+                else if (currentTwsKts >= CONFIG.graphs.reef1) reefColor = "#e67e22";
+                if (ui.twdChevron) ui.twdChevron.setAttribute('stroke', reefColor);
+            }
             lastAvgUIUpdate = now;
         }
         for (let b in store.smoothBuf) { while (store.smoothBuf[b].length > 0 && (now - store.smoothBuf[b][0].time) > CONFIG.averages.smoothWindow) store.smoothBuf[b].shift(); }
@@ -221,7 +219,7 @@ function startDisplayLoop() {
 }
 
 // ==========================================================================
-// 6. CONNESSIONE SIGNALK (subscribe=self)
+// 6. CONNESSIONE SIGNALK
 // ==========================================================================
 function connect() {
     if (simulationMode) return;
@@ -229,13 +227,13 @@ function connect() {
     try {
         socket = new WebSocket(`ws://${addr}/signalk/v1/stream?subscribe=self`);
         socket.onopen = () => { ui.status.className = "online"; ui.status.innerText = "ONLINE"; };
-        socket.onmessage = (e) => { const d = JSON.parse(e.data); if (d.updates) d.updates.forEach(u => u.values && u.values.forEach(v => processIncomingData(v.path, v.value))); };
+        socket.onmessage = (e) => { if (simulationMode) return; const d = JSON.parse(e.data); if (d.updates) d.updates.forEach(u => u.values && u.values.forEach(v => processIncomingData(v.path, v.value))); };
         socket.onclose = () => !simulationMode && setTimeout(connect, 5000);
     } catch (e) { setTimeout(connect, 5000); }
 }
 
 // ==========================================================================
-// 7. FUNZIONI GRAFICHE E SCALATURA
+// 7. FUNZIONI GRAFICHE E DISEGNO (BIANCO -> ARANCIO -> ROSSO)
 // ==========================================================================
 function updateLeewayDisplay(deg) { const c = 125, px = 125/20; let w = Math.min(Math.abs(deg)*px, 125); ui.leewayMask.setAttribute('x', deg >= 0 ? c : c - w); ui.leewayMask.setAttribute('width', w); ui.leewayVal.textContent = `LEEWAY: ${deg.toFixed(1)}°`; }
 
@@ -274,33 +272,31 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
         const x = (i/(CONFIG.graphs.samples-1))*w, y = h-(Math.max(0,Math.min(1,(v-min)/range))*h); pD += `${i===0?'M':'L'} ${x} ${y} `;
         if (isTws && i > 0) {
             const px = ((i-1)/(CONFIG.graphs.samples-1))*w, py = h-(Math.max(0,Math.min(1,(d[i-1]-min)/range))*h);
-            let c = "#f1c40f"; if (v >= CONFIG.graphs.reef2) c = "#e74c3c"; else if (v >= CONFIG.graphs.reef1) c = "#e67e22";
+            let c = "#fff"; // Default: Bianco
+            if (v >= CONFIG.graphs.reef2) c = "#e74c3c"; else if (v >= CONFIG.graphs.reef1) c = "#e67e22";
             cS += `<line x1="${px}" y1="${py}" x2="${x}" y2="${y}" stroke="${c}" class="${isHercules?'line-hercules':''}" />`;
         }
     });
-    const aP = pD + ` L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z`, clrs = { 'stw-graph': '#2ecc71', 'sog-graph': '#f39c12', 'depth-graph': '#3498db', 'tws-graph': '#f1c40f' };
-    svg.innerHTML = isTws ? `${grids}<path d="${aP}" fill="rgba(241,196,15,0.12)" stroke="none" />${cS}` : `${grids}<path d="${aP}" fill="${clrs[id]}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${clrs[id]}" />`;
+    const aP = pD + ` L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z`, clrs = { 'stw-graph': '#2ecc71', 'sog-graph': '#f39c12', 'depth-graph': '#3498db', 'tws-graph': '#ffffff' };
+    svg.innerHTML = isTws ? `${grids}<path d="${aP}" fill="rgba(255,255,255,0.08)" stroke="none" />${cS}` : `${grids}<path d="${aP}" fill="${clrs[id]}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${clrs[id]}" />`;
 }
 
 // ==========================================================================
-// 8. EVENTI E INTERAZIONI (Smart Touch Manager)
+// 8. EVENTI E INTERAZIONI (SMART TOUCH MANAGER)
 // ==========================================================================
-
-// Uccide il menu contestuale di Android/iOS
 window.addEventListener('contextmenu', e => e.preventDefault(), true);
 
 function toggleFocusMode(type, element) {
     const container = document.querySelector('.main-container');
     const parentPanel = element.closest('.side-panel');
     const isLeft = parentPanel.classList.contains('left-panel');
-
     isFocusActive = !isFocusActive;
-
     if (isFocusActive) {
         container.classList.add('focus-active');
         container.classList.add(isLeft ? 'focus-side-left' : 'focus-side-right');
         parentPanel.classList.add('has-focus');
         element.classList.add('is-focused');
+        blockNextClick = true;
     } else {
         container.classList.remove('focus-active', 'focus-side-left', 'focus-side-right');
         document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('has-focus'));
@@ -308,85 +304,44 @@ function toggleFocusMode(type, element) {
     }
 }
 
-// Configurazione Interazioni per i 4 grafici principali
 ['stw', 'sog', 'tws', 'depth'].forEach(type => {
     const el = document.getElementById(type + '-graph').closest('.data-box');
-    
-    let lastTapTime = 0;
-    let tapTimeout;
+    let lastTapTime = 0, tapTimeout;
 
     const handleInteraction = (e) => {
-        // Impedisce al browser di fare qualsiasi cosa (zoom, menu, click fantasma)
         if (e.cancelable) e.preventDefault();
-
         const currentTime = new Date().getTime();
         const tapDelay = currentTime - lastTapTime;
 
-        // --- 1. RILEVAMENTO LONG PRESS ---
-        // Avviamo un timer per la pressione lunga
-        pressTimer = setTimeout(() => {
-            if (!isFocusActive) {
-                toggleFocusMode(type, el);
-                lastTapTime = 0; // Reset per non innescare click singoli al rilascio
-            }
-        }, 800); // 800ms per attivare il Focus
+        pressTimer = setTimeout(() => { if (!isFocusActive) { toggleFocusMode(type, el); lastTapTime = 0; } }, 1000);
 
-        // --- 2. GESTIONE DOPPIO E SINGOLO TOCCO ---
-        // Se tocchiamo di nuovo entro 300ms è un DOUBLE TAP
         if (tapDelay < 300 && tapDelay > 0) {
-            clearTimeout(tapTimeout); // Cancella l'azione del singolo tap
+            clearTimeout(tapTimeout);
             if (!isFocusActive) {
-                // Toggle Hercules Mode
                 graphModes[type] = graphModes[type] === 'standard' ? 'hercules' : 'standard';
                 localStorage.setItem('mode_' + type, graphModes[type]);
                 el.style.backgroundColor = "rgba(255,255,255,0.15)"; setTimeout(() => el.style.backgroundColor = "", 200);
             }
             lastTapTime = 0;
         } else {
-            // Se è passato più tempo, potrebbe essere un SINGOLO TAP
             lastTapTime = currentTime;
-            tapTimeout = setTimeout(() => {
-                // Se siamo in focus mode, il singolo tap esce
-                if (isFocusActive && el.classList.contains('is-focused')) {
-                    toggleFocusMode(type, el);
-                }
-            }, 350); // Attesa per vedere se arriva il secondo tap
+            tapTimeout = setTimeout(() => { if (isFocusActive && el.classList.contains('is-focused')) toggleFocusMode(type, el); }, 350);
         }
     };
-
-    const stopInteraction = () => {
-        clearTimeout(pressTimer);
-    };
-
-    // Usiamo PointerEvents: funzionano identici per Mouse e Touch
     el.addEventListener('pointerdown', handleInteraction);
-    el.addEventListener('pointerup', stopInteraction);
-    el.addEventListener('pointerleave', stopInteraction);
+    el.addEventListener('pointerup', () => clearTimeout(pressTimer));
+    el.addEventListener('pointerleave', () => clearTimeout(pressTimer));
 });
 
-// Fullscreen via Hotspot (Click Singolo)
-if (ui.hotspot) {
-    ui.hotspot.addEventListener('click', (e) => {
-        e.preventDefault();
-        const doc = document.documentElement, isF = document.fullscreenElement || document.webkitFullscreenElement;
-        if (!isF) { if (doc.requestFullscreen) doc.requestFullscreen(); else if (doc.webkitRequestFullscreen) doc.webkitRequestFullscreen(); }
-        else { if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); }
-    });
-}
-
-// ==========================================================================
-// 9. INIZIALIZZAZIONE
-// ==========================================================================
+if (ui.hotspot) { ui.hotspot.addEventListener('click', () => { const doc = document.documentElement, isF = document.fullscreenElement || document.webkitFullscreenElement; if (!isF) { if (doc.requestFullscreen) doc.requestFullscreen(); else if (doc.webkitRequestFullscreen) doc.webkitRequestFullscreen(); } else { if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); } }); }
 (function genTicks() { const c = document.getElementById('ticks'); if (c) { for (let i = 0; i < 360; i += 10) { const l = document.createElementNS("http://www.w3.org/2000/svg", "line"); const m = i % 30 === 0; l.setAttribute("x1", "200"); l.setAttribute("y1", "40"); l.setAttribute("x2", "200"); l.setAttribute("y2", (m ? 60 : 50)); l.setAttribute("stroke", m ? "#fff" : "#666"); l.setAttribute("stroke-width", m ? "2" : "1"); l.setAttribute("transform", `rotate(${i}, 200, 200)`); c.appendChild(l); } } })();
 
 async function init() { await fetchServerConfig(); startDisplayLoop(); connect(); }
 window.addEventListener('load', init);
-
-// Allarmi e Audio
 function checkDepthAlarm(m) { ui.depth.classList.remove('alarm-warning', 'alarm-danger'); if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); } else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning'); }
 function playBingBing() { if (!audioCtx) return; const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n; function b(f, s) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f; g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4); o.start(s); o.stop(s + 0.5); } b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6); }
 
-// Simulatore (Triple click su Depth)
+// Simulatore
 ui.depth.closest('.data-box').addEventListener('click', (function() {
     let dC = 0, lC = 0; return function() { const n = Date.now(); if (n - lC < 500) dC++; else dC = 1; lC = n; if (dC === 3) { simulationMode = !simulationMode; if (simulationMode) { if (socket) socket.close(); ui.status.innerText = "SIM ATTIVO"; simInterval = setInterval(() => { processIncomingData("navigation.headingTrue", degToRad(Math.random()*360)); processIncomingData("navigation.speedOverGround", ktsToMs(8)); }, 200); } else location.reload(); dC = 0; } };
 })());
