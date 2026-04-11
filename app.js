@@ -283,39 +283,96 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
 }
 
 // ==========================================================================
-// 8. EVENTI E INTERAZIONI (Touch, Focus e Fullscreen)
+// 8. EVENTI E INTERAZIONI (Smart Touch Manager)
 // ==========================================================================
 
-// Blocco globale del menu contestuale per Android/iOS
-window.addEventListener('contextmenu', e => e.preventDefault());
+// Uccide il menu contestuale di Android/iOS
+window.addEventListener('contextmenu', e => e.preventDefault(), true);
 
 function toggleFocusMode(type, element) {
     const container = document.querySelector('.main-container');
     const parentPanel = element.closest('.side-panel');
     const isLeft = parentPanel.classList.contains('left-panel');
+
     isFocusActive = !isFocusActive;
-    if (isFocusActive) { container.classList.add('focus-active'); container.classList.add(isLeft ? 'focus-side-left' : 'focus-side-right'); parentPanel.classList.add('has-focus'); element.classList.add('is-focused'); blockNextClick = true; }
-    else { container.classList.remove('focus-active', 'focus-side-left', 'focus-side-right'); document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('has-focus')); document.querySelectorAll('.data-box').forEach(b => b.classList.remove('is-focused')); }
+
+    if (isFocusActive) {
+        container.classList.add('focus-active');
+        container.classList.add(isLeft ? 'focus-side-left' : 'focus-side-right');
+        parentPanel.classList.add('has-focus');
+        element.classList.add('is-focused');
+    } else {
+        container.classList.remove('focus-active', 'focus-side-left', 'focus-side-right');
+        document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('has-focus'));
+        document.querySelectorAll('.data-box').forEach(b => b.classList.remove('is-focused'));
+    }
 }
 
+// Configurazione Interazioni per i 4 grafici principali
 ['stw', 'sog', 'tws', 'depth'].forEach(type => {
     const el = document.getElementById(type + '-graph').closest('.data-box');
     
-    // Doppio Click -> Hercules Zoom
-    el.addEventListener('dblclick', (e) => { if (isFocusActive) return; e.preventDefault(); graphModes[type] = graphModes[type] === 'standard' ? 'hercules' : 'standard'; localStorage.setItem('mode_' + type, graphModes[type]); el.style.backgroundColor = "rgba(255,255,255,0.15)"; setTimeout(() => el.style.backgroundColor = "", 200); });
-    
-    // Long Press -> Tactical Focus
-    const startPress = () => { if (!isFocusActive) pressTimer = setTimeout(() => toggleFocusMode(type, el), 1000); };
-    const cancelPress = () => { clearTimeout(pressTimer); };
-    el.addEventListener('mousedown', startPress); el.addEventListener('touchstart', startPress, {passive: true});
-    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt => el.addEventListener(evt, cancelPress));
-    
-    // Click -> Exit Focus o Ghost click filtering
-    el.addEventListener('click', (e) => { if (blockNextClick) { blockNextClick = false; return; } if (isFocusActive && el.classList.contains('is-focused')) toggleFocusMode(type, el); });
+    let lastTapTime = 0;
+    let tapTimeout;
+
+    const handleInteraction = (e) => {
+        // Impedisce al browser di fare qualsiasi cosa (zoom, menu, click fantasma)
+        if (e.cancelable) e.preventDefault();
+
+        const currentTime = new Date().getTime();
+        const tapDelay = currentTime - lastTapTime;
+
+        // --- 1. RILEVAMENTO LONG PRESS ---
+        // Avviamo un timer per la pressione lunga
+        pressTimer = setTimeout(() => {
+            if (!isFocusActive) {
+                toggleFocusMode(type, el);
+                lastTapTime = 0; // Reset per non innescare click singoli al rilascio
+            }
+        }, 800); // 800ms per attivare il Focus
+
+        // --- 2. GESTIONE DOPPIO E SINGOLO TOCCO ---
+        // Se tocchiamo di nuovo entro 300ms è un DOUBLE TAP
+        if (tapDelay < 300 && tapDelay > 0) {
+            clearTimeout(tapTimeout); // Cancella l'azione del singolo tap
+            if (!isFocusActive) {
+                // Toggle Hercules Mode
+                graphModes[type] = graphModes[type] === 'standard' ? 'hercules' : 'standard';
+                localStorage.setItem('mode_' + type, graphModes[type]);
+                el.style.backgroundColor = "rgba(255,255,255,0.15)"; setTimeout(() => el.style.backgroundColor = "", 200);
+            }
+            lastTapTime = 0;
+        } else {
+            // Se è passato più tempo, potrebbe essere un SINGOLO TAP
+            lastTapTime = currentTime;
+            tapTimeout = setTimeout(() => {
+                // Se siamo in focus mode, il singolo tap esce
+                if (isFocusActive && el.classList.contains('is-focused')) {
+                    toggleFocusMode(type, el);
+                }
+            }, 350); // Attesa per vedere se arriva il secondo tap
+        }
+    };
+
+    const stopInteraction = () => {
+        clearTimeout(pressTimer);
+    };
+
+    // Usiamo PointerEvents: funzionano identici per Mouse e Touch
+    el.addEventListener('pointerdown', handleInteraction);
+    el.addEventListener('pointerup', stopInteraction);
+    el.addEventListener('pointerleave', stopInteraction);
 });
 
-// Fullscreen via Hotspot
-if (ui.hotspot) { ui.hotspot.addEventListener('click', () => { const doc = document.documentElement, isF = document.fullscreenElement || document.webkitFullscreenElement; if (!isF) { if (doc.requestFullscreen) doc.requestFullscreen(); else if (doc.webkitRequestFullscreen) doc.webkitRequestFullscreen(); } else { if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); } }); }
+// Fullscreen via Hotspot (Click Singolo)
+if (ui.hotspot) {
+    ui.hotspot.addEventListener('click', (e) => {
+        e.preventDefault();
+        const doc = document.documentElement, isF = document.fullscreenElement || document.webkitFullscreenElement;
+        if (!isF) { if (doc.requestFullscreen) doc.requestFullscreen(); else if (doc.webkitRequestFullscreen) doc.webkitRequestFullscreen(); }
+        else { if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); }
+    });
+}
 
 // ==========================================================================
 // 9. INIZIALIZZAZIONE
