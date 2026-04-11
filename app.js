@@ -74,28 +74,35 @@ const ui = {
 };
 
 // ==========================================================================
-// 3. CARICAMENTO CONFIGURAZIONE DA SIGNALK
+// 3. CARICAMENTO CONFIGURAZIONE DAL SERVER
 // ==========================================================================
 async function fetchServerConfig() {
-    if (window.location.protocol.includes("http")) {
+    // Cerchiamo di capire se siamo su un server reale o in locale
+    const isRemote = window.location.protocol.includes("http");
+    
+    if (isRemote) {
         try {
-            // SignalK espone le configurazioni dei plugin a questo indirizzo
+            console.log("Dashboard: Recupero impostazioni dal server...");
+            // L'URL ufficiale per leggere i settaggi del plugin
             const response = await fetch('/signalk/v1/plugins/rotevista-dash/settings');
+            
             if (response.ok) {
                 const serverConfig = await response.json();
                 
-                // Sovrascrive CONFIG solo con i valori definiti dall'utente
+                // Se il server ha dei dati salvati, sovrascriviamo il CONFIG di default
                 if (serverConfig && Object.keys(serverConfig).length > 0) {
-                    // Eseguiamo un merge profondo manuale o semplice
-                    if (serverConfig.alarms) Object.assign(CONFIG.alarms, serverConfig.alarms);
-                    if (serverConfig.graphs) Object.assign(CONFIG.graphs, serverConfig.graphs);
-                    if (serverConfig.averages) Object.assign(CONFIG.averages, serverConfig.averages);
+                    // Merge dei blocchi (Alarms, Graphs, Averages)
+                    if (serverConfig.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...serverConfig.alarms };
+                    if (serverConfig.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...serverConfig.graphs };
+                    if (serverConfig.averages) CONFIG.averages = { ...CONFIG.averages, ...serverConfig.averages };
                     
-                    console.log("Configurazione Plugin caricata da SignalK:", CONFIG);
+                    console.log("Dashboard: Configurazione caricata correttamente!", CONFIG);
                 }
+            } else {
+                console.log("Dashboard: Il server non ha ancora impostazioni salvate. Uso i default.");
             }
         } catch (e) {
-            console.log("Errore nel caricamento della configurazione plugin, uso i default.");
+            console.error("Dashboard: Errore critico nel fetch delle impostazioni:", e);
         }
     }
 }
@@ -331,13 +338,19 @@ if (ui.hotspot) {
     if (c) { for (let i = 0; i < 360; i += 10) { const l = document.createElementNS("http://www.w3.org/2000/svg", "line"); const m = i % 30 === 0; l.setAttribute("x1", "200"); l.setAttribute("y1", "40"); l.setAttribute("x2", "200"); l.setAttribute("y2", (m ? 60 : 50)); l.setAttribute("stroke", m ? "#fff" : "#666"); l.setAttribute("stroke-width", m ? "2" : "1"); l.setAttribute("transform", `rotate(${i}, 200, 200)`); c.appendChild(l); } }
 })();
 
-// Lancio Applicazione
+// ==========================================================================
+// 9. LANCIO APPLICAZIONE (Sincronizzato)
+// ==========================================================================
 async function init() {
-    await fetchServerConfig(); // Scarica prima i settaggi della barca
+    // 1. Prima scarichiamo la configurazione dal server
+    await fetchServerConfig();
+    
+    // 2. Poi facciamo partire tutto il resto
     startDisplayLoop();
     connect();
 }
 
+// Avvio al caricamento della pagina
 window.addEventListener('load', init);
 
 function checkDepthAlarm(m) { ui.depth.classList.remove('alarm-warning', 'alarm-danger'); if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); } else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning'); }
