@@ -1,0 +1,18 @@
+{
+  "alarms": {
+    "depthDanger": 2.5,
+    "depthWarning": 5.0
+  },
+  "reef_thresholds": {
+    "orange": 15.0,
+    "red": 20.0
+  },
+  "averages": {
+    "long_window": 60000,
+    "smooth_window": 2000
+  },
+  "hercules_ranges": {
+    "speed": 4.0,
+    "wind": 10.0
+  }
+}
