@@ -20,7 +20,7 @@ body {
     width: 100%; height: 100%;
     padding: 5px; box-sizing: border-box;
     gap: 8px;
-    grid-template-columns: 1.7fr 3fr 1.7fr; /* Rapporto scelto dall'utente */
+    grid-template-columns: 1.7fr 3fr 1.7fr;
     grid-template-rows: 100%;
     transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -43,7 +43,6 @@ body {
     container-type: size;
     flex: 1;
     overflow: hidden;
-    /* Impedisce ogni azione nativa del browser sul tocco */
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
@@ -54,8 +53,12 @@ body {
 .data-box:nth-child(1), .data-box:nth-child(2) { height: 25vh; }
 .data-box:nth-child(3), .data-box:nth-child(4), .data-box:nth-child(5) { height: 16.666vh; }
 
+/* Allineamento Speculare Data Box */
+.left-panel .data-box { align-items: flex-start; text-align: left; }
+.right-panel .data-box { align-items: flex-end; text-align: right; }
+
 /* ==========================================================================
-   3. TACTICAL FOCUS MODE (ORIZZONTALE)
+   3. TACTICAL FOCUS MODE (ORIZZONTALE) E INGRANDIMENTI
    ========================================================================== */
 .focus-active { grid-template-columns: 1fr 1fr !important; }
 .focus-active .side-panel:not(.has-focus) { display: none !important; }
@@ -67,17 +70,35 @@ body {
 .focus-active.focus-side-right .side-panel.has-focus { grid-column: 2 !important; }
 
 .focus-active .has-focus .data-box:not(.is-focused) { display: none !important; }
-.focus-active .has-focus .data-box.is-focused { height: 100vh !important; border: none; background: rgba(255, 255, 255, 0.05); }
+.focus-active .has-focus .data-box.is-focused { height: 100vh !important; border: none; background: rgba(255, 255, 255, 0.05); padding: 20px; }
 
-/* Tipografia e Grafica in Focus */
-.focus-active .is-focused .value { font-size: clamp(3rem, 18cqh, 8rem) !important; margin-top: 10px; }
-.focus-active .is-focused .scale-labels { font-size: 22px !important; min-width: 40px !important; }
+/* Ingrandimenti in Focus Mode */
+.focus-active .is-focused .value { font-size: clamp(4rem, 25cqh, 10rem) !important; margin-top: 15px; }
+.focus-active .is-focused .scale-labels { font-size: 24px !important; min-width: 60px !important; line-height: 1.2; }
+.focus-active .is-focused .label-row .label { font-size: 1.5rem !important; }
+.focus-active .is-focused .label-row .unit { font-size: 1.5rem !important; }
+
+/* Ingrandimento scritta Hercules */
+.focus-active .is-focused.box-hercules .unit::before,
+.focus-active .is-focused.box-hercules .unit::after,
+.focus-active .is-focused.box-hercules .label::before,
+.focus-active .is-focused.box-hercules .label::after {
+    font-size: 14px !important;
+    letter-spacing: 2px;
+}
+
 .focus-active .is-focused .sparkline path { stroke-width: 0.8px !important; }
 
 /* ==========================================================================
-   4. TIPOGRAFIA DINAMICA (CQH)
+   4. TIPOGRAFIA DINAMICA E SIMMETRIA
    ========================================================================== */
 .label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; width: 100%; }
+
+/* Simmetria Titoli/Unità */
+.left-panel .label-row { justify-content: space-between; }
+.right-panel .label-row { justify-content: space-between; flex-direction: row; }
+.right-panel .label-row .label:only-child { margin-left: auto; }
+
 .label { color: #666; font-size: 0.65rem; font-weight: bold; text-transform: uppercase; }
 .unit { color: #888; font-size: 0.6rem; font-weight: bold; }
 .value { color: #fff; font-size: clamp(1.2rem, 22cqh, 3rem); font-weight: 600; line-height: 0.9; letter-spacing: -1px; padding-bottom: 5px; }
@@ -112,12 +133,23 @@ body {
 #depth-graph { stroke: #3498db; fill: rgba(52, 152, 219, 0.12); }
 #tws-graph { stroke: #f1c40f; fill: rgba(241, 196, 15, 0.12); }
 
+/* ==========================================================================
+   6. HERCULES MODE (LABEL TOP E SIMMETRIA)
+   ========================================================================== */
 .line-hercules { filter: drop-shadow(0 0 5px #ff0000); stroke-width: 1.8px !important; }
 .box-hercules { background: rgba(255, 0, 0, 0.08) !important; }
-.box-hercules::after { content: "HERCULES"; position: absolute; bottom: 4px; right: 35px; font-size: 7px; color: #ff4444; font-weight: 900; opacity: 0.8; }
+
+/* Simmetria Scritta Hercules */
+.box-hercules .unit::before, .box-hercules .unit::after,
+.box-hercules .label::before, .box-hercules .label::after {
+    font-size: 7px; color: #ff4444; font-weight: 900; letter-spacing: 1px; text-transform: uppercase;
+}
+.left-panel .box-hercules .unit::before { content: "HERCULES "; }
+.right-panel .box-hercules .unit::after { content: " HERCULES"; }
+.right-panel .box-hercules .label:only-child::before { content: "HERCULES "; }
 
 /* ==========================================================================
-   6. STATI E ANIMAZIONI
+   7. STATI E ANIMAZIONI
    ========================================================================== */
 #status { position: absolute; top: 5px; right: 15px; font-size: 0.5rem; text-transform: uppercase; z-index: 1000; }
 .online { color: #2ecc71; opacity: 0.5; }
@@ -131,7 +163,7 @@ body {
 #wind-gauge { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
 
 /* ==========================================================================
-   7. RESPONSIVE (PORTRAIT) - FIX DEFINITIVO 2x2 E FOCUS
+   8. RESPONSIVE (PORTRAIT)
    ========================================================================== */
 @media (max-aspect-ratio: 0.9 / 1) {
     .main-container {
@@ -139,29 +171,16 @@ body {
         grid-template-rows: 45vh 55vh !important;
     }
 
-    /* Ordine Standard Portrait: Vento (1), SX (2), DX (3) */
-    .center-panel { grid-row: 1 !important; grid-column: 1 / span 2 !important; }
+    .center-panel { grid-row: 1 !important; grid-column: 1 / span 2 !important; padding: 5px 0; }
     .left-panel { grid-row: 2 !important; grid-column: 1 !important; }
     .right-panel { grid-row: 2 !important; grid-column: 2 !important; }
 
-    /* FOCUS MODE IN VERTICALE: Abbandoniamo la Grid, usiamo Flex per sicurezza */
-    .main-container.focus-active {
-        display: flex !important;
-        flex-direction: column !important;
-    }
-    .focus-active .center-panel {
-        flex: 0 0 45vh !important;
-        width: 100% !important;
-    }
-    .focus-active .side-panel.has-focus {
-        flex: 0 0 55vh !important;
-        width: 100% !important;
-        display: flex !important;
-    }
+    .main-container.focus-active { display: flex !important; flex-direction: column !important; }
+    .focus-active .center-panel { flex: 0 0 45vh !important; width: 100% !important; }
+    .focus-active .side-panel.has-focus { flex: 0 0 55vh !important; width: 100% !important; display: flex !important; }
 
-    /* Calibrazione altezze box per Portrait */
     .data-box:nth-child(1), .data-box:nth-child(2) { height: 13.5vh; }
     .data-box:nth-child(3), .data-box:nth-child(4), .data-box:nth-child(5) { height: 9.3vh; }
-
-    .value-large { font-size: clamp(1.2rem, 35cqh, 2.5rem); }
+    .value-large { font-size: clamp(1.2rem, 35cqh, 2.5rem); margin: auto 0; }
+    .value.dual-val { font-size: clamp(0.9rem, 30cqh, 1.4rem); }
 }
