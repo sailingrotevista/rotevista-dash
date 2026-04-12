@@ -1,5 +1,5 @@
 /* ==========================================================================
-   1. BASE E STRUTTURA GENERALE
+   1. BASE E STRUTTURA GENERALE (LIQUID GRID LAYOUT)
    ========================================================================== */
 body {
     background-color: #000;
@@ -8,7 +8,6 @@ body {
     margin: 0; padding: 0;
     height: 100vh; width: 100vw;
     overflow: hidden;
-    /* BLOCCO TOTALE GESTI DI SISTEMA (Android/iOS) */
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
@@ -20,11 +19,29 @@ body {
     width: 100%; height: 100%;
     padding: 5px; box-sizing: border-box;
     gap: 8px;
-    grid-template-columns: 1.7fr 3fr 1.7fr;
+    
+    /*
+       LAYOUT LIQUIDO DEFINITIVO:
+       SX: Prende 1 frazione di tutto lo spazio libero, minimo 160px.
+       CENTRO: Prende ESATTAMENTE la larghezza che serve al cerchio SVG (auto).
+       DX: Prende 1 frazione di tutto lo spazio libero, minimo 160px.
+    */
+    grid-template-columns: minmax(240px, 1fr) auto minmax(240px, 1fr);
     grid-template-rows: 100%;
     transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    
+    /* Assicura che la griglia usi tutto lo spazio orizzontale */
+    justify-content: stretch;
 }
 
+/* Espansione colonne per schermi larghi (16:10) */
+@media (min-aspect-ratio: 1.5) {
+    .main-container {
+        /* Aumentiamo il gap e il minimo vitale per schermi enormi */
+        grid-template-columns: minmax(200px, 1fr) auto minmax(200px, 1fr);
+        gap: 15px;
+    }
+}
 /* ==========================================================================
    2. PANNELLI E DATA-BOX
    ========================================================================== */
@@ -49,54 +66,79 @@ body {
     touch-action: none;
 }
 
-/* Altezze Desktop */
+/* Altezze Desktop (Validate) */
 .data-box:nth-child(1), .data-box:nth-child(2) { height: 25vh; }
 .data-box:nth-child(3), .data-box:nth-child(4), .data-box:nth-child(5) { height: 16.666vh; }
 
-/* Allineamento Speculare Data Box */
+/* Allineamento Speculare Box */
 .left-panel .data-box { align-items: flex-start; text-align: left; }
 .right-panel .data-box { align-items: flex-end; text-align: right; }
 
 /* ==========================================================================
-   3. TACTICAL FOCUS MODE (ORIZZONTALE) E INGRANDIMENTI
+   3. TACTICAL FOCUS MODE (AUTO-EXPANDING SPLIT)
    ========================================================================== */
-.focus-active { grid-template-columns: 1fr 1fr !important; }
-.focus-active .side-panel:not(.has-focus) { display: none !important; }
 
-/* Simmetria Orizzontale */
+/* Nascondi i pannelli laterali non interessati */
+.focus-active .side-panel:not(.has-focus) { display: none !important; }
+.focus-active .side-panel.has-focus {
+    min-width: 400px !important;
+}
+
+/*
+   LOGICA POSIZIONE E LARGHEZZA:
+   Il Vento prende solo la larghezza del suo cerchio (auto).
+   Il Box focalizzato si prende TUTTO il resto dello schermo (1fr).
+*/
+.focus-active.focus-side-left {
+    grid-template-columns: 1fr auto !important; /* Dati SX giganti, Vento DX compatto */
+}
 .focus-active.focus-side-left .side-panel.has-focus { grid-column: 1 !important; }
-.focus-active.focus-side-left .center-panel { grid-column: 2 !important; }
-.focus-active.focus-side-right .center-panel { grid-column: 1 !important; }
+.focus-active.focus-side-left .center-panel { grid-column: 2 !important; justify-content: flex-start; }
+
+.focus-active.focus-side-right {
+    grid-template-columns: auto 1fr !important; /* Vento SX compatto, Dati DX giganti */
+}
+.focus-active.focus-side-right .center-panel { grid-column: 1 !important; justify-content: flex-start; }
 .focus-active.focus-side-right .side-panel.has-focus { grid-column: 2 !important; }
 
+/* Gestione Box Focalizzato a tutto schermo */
 .focus-active .has-focus .data-box:not(.is-focused) { display: none !important; }
-.focus-active .has-focus .data-box.is-focused { height: 100vh !important; border: none; background: rgba(255, 255, 255, 0.05); padding: 20px; }
+.focus-active .has-focus .data-box.is-focused {
+    height: 100vh !important;
+    border: none;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 20px;
+}
 
-/* Ingrandimenti in Focus Mode */
-.focus-active .is-focused .value { font-size: clamp(4rem, 25cqh, 10rem) !important; margin-top: 15px; }
-.focus-active .is-focused .scale-labels { font-size: 24px !important; min-width: 60px !important; line-height: 1.2; }
-.focus-active .is-focused .label-row .label { font-size: 1.5rem !important; }
-.focus-active .is-focused .label-row .unit { font-size: 1.5rem !important; }
+/* Tipografia Extreme per Focus Mode */
+.focus-active .is-focused .value { font-size: clamp(4rem, 25cqh, 4rem) !important; margin-top: 15px; }
+.focus-active .is-focused .scale-labels { font-size: 32px !important; min-width: 80px !important; line-height: 1.2; }
+.focus-active .is-focused .label-row .label { font-size: 2rem !important; }
+.focus-active .is-focused .label-row .unit { font-size: 2rem !important; }
 
-/* Ingrandimento scritta Hercules */
+/* Ingrandimento scritta Hercules in Focus */
 .focus-active .is-focused.box-hercules .unit::before,
 .focus-active .is-focused.box-hercules .unit::after,
 .focus-active .is-focused.box-hercules .label::before,
 .focus-active .is-focused.box-hercules .label::after {
-    font-size: 14px !important;
-    letter-spacing: 2px;
+    font-size: 1.5rem !important;
+    letter-spacing: 2px !important;
 }
 
-.focus-active .is-focused .sparkline path { stroke-width: 0.8px !important; }
+.focus-active .is-focused .sparkline path { stroke-width: 1px !important; }
 
 /* ==========================================================================
-   4. TIPOGRAFIA DINAMICA E SIMMETRIA
+   4. TIPOGRAFIA E LABEL-ROW (SIMMETRIA)
    ========================================================================== */
 .label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; width: 100%; }
 
-/* Simmetria Titoli/Unità */
-.left-panel .label-row { justify-content: space-between; }
+/* SX: [Titolo] ... [Unità] */
+.left-panel .label-row { justify-content: space-between; flex-direction: row; }
+
+/* DX: [Unità] ... [Titolo] */
 .right-panel .label-row { justify-content: space-between; flex-direction: row; }
+
+/* FIX: Spinge i titoli MEAN a destra nella colonna DX */
 .right-panel .label-row .label:only-child { margin-left: auto; }
 
 .label { color: #666; font-size: 0.65rem; font-weight: bold; text-transform: uppercase; }
@@ -106,32 +148,45 @@ body {
 .value-large, .dual-value-container, .value-with-compass { margin-top: auto; margin-bottom: auto; }
 .value-large { font-size: clamp(1.5rem, 35cqh, 4.5rem); line-height: 0.85; }
 
+/* TACK Layout */
 .dual-value-container { display: flex; justify-content: space-between; width: 100%; }
 .dual-value-col { display: flex; flex-direction: column; width: 48%; }
 .dual-label { color: #666; font-size: 0.55rem; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
 .value.dual-val { font-size: clamp(1rem, 22cqh, 2rem); padding-bottom: 0; line-height: 0.9; }
 
+/* BUSSOLA TWD */
 .value-with-compass { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 10px; }
-.mini-compass { width: clamp(40px, 60cqh, 120px); height: clamp(40px, 60cqh, 120px); background: #000; border-radius: 50%; flex-shrink: 0; border: 1.5px solid #333; box-shadow: inset 0 0 10px rgba(0,0,0,0.8); }
+.mini-compass { width: clamp(40px, 60cqh, 120px); height: clamp(40px, 60cqh, 120px); background: #000; border-radius: 50%; flex-shrink: 0; border: 1.5px solid #333; box-shadow: inset 0 0 10px rgba(0,0,0,0.8); transition: all 0.4s ease; }
 .value-with-compass .value-large { margin: 0; flex-grow: 1; text-align: right; font-size: clamp(1.2rem, 35cqh, 4rem); }
 
 /* ==========================================================================
    5. GRAFICI E SCALE
    ========================================================================== */
-.graph-wrapper { position: relative; width: 100%; flex-grow: 1; min-height: 0; margin-top: 4px; display: flex; align-items: stretch; gap: 6px; }
-.sparkline { flex-grow: 1; height: 100%; background: rgba(255, 255, 255, 0.03); border-radius: 4px; }
+.graph-wrapper {
+    position: relative; width: 100%; flex-grow: 1; min-height: 0; margin-top: 4px;
+    display: flex; align-items: stretch; background: rgba(255, 255, 255, 0.03);
+    border-radius: 4px; gap: 2px;
+}
+
+/* Spostamento verso il centro */
+.left-panel .graph-wrapper { margin-right: -6px; }
+.right-panel .graph-wrapper { margin-left: -6px; }
+
+.sparkline { flex-grow: 1; height: 100%; background: transparent !important; display: block; }
 .sparkline path, .sparkline line { stroke-width: 1px !important; transition: all 0.3s ease; }
 
-.scale-labels { display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: #777; font-weight: bold; min-width: 20px; height: 100%; line-height: 1; }
-.left-panel .scale-labels { order: 2; text-align: left; }
+.scale-labels { display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: #777; font-weight: bold; min-width: 18px; height: 100%; line-height: 1; padding: 2px 0; }
+
+/* Simmetria Scale */
+.left-panel .scale-labels { order: 2; text-align: left; padding-left: 4px; border-left: 1px solid rgba(255,255,255,0.08); }
 .left-panel .sparkline { order: 1; }
-.right-panel .scale-labels { order: 1; text-align: right; }
+.right-panel .scale-labels { order: 1; text-align: right; padding-right: 4px; border-right: 1px solid rgba(255,255,255,0.08); }
 .right-panel .sparkline { order: 2; }
 
 #stw-graph { stroke: #2ecc71; fill: rgba(46, 204, 113, 0.12); }
 #sog-graph { stroke: #f39c12; fill: rgba(243, 156, 18, 0.12); }
 #depth-graph { stroke: #3498db; fill: rgba(52, 152, 219, 0.12); }
-#tws-graph { stroke: #f1c40f; fill: rgba(241, 196, 15, 0.12); }
+#tws-graph { stroke: #ffffff; fill: rgba(255, 255, 255, 0.08); }
 
 /* ==========================================================================
    6. HERCULES MODE (LABEL TOP E SIMMETRIA)
@@ -139,13 +194,27 @@ body {
 .line-hercules { filter: drop-shadow(0 0 5px #ff0000); stroke-width: 1.8px !important; }
 .box-hercules { background: rgba(255, 0, 0, 0.08) !important; }
 
-/* Simmetria Scritta Hercules */
+/* Ingrandimento Hercules in Focus Mode */
+.focus-active .is-focused.box-hercules .unit::before,
+.focus-active .is-focused.box-hercules .unit::after,
+.focus-active .is-focused.box-hercules .label::before {
+    font-size: 16px !important; /* Raddoppiato in Focus */
+    letter-spacing: 2px;
+}
+
+/* Stile base Hercules */
 .box-hercules .unit::before, .box-hercules .unit::after,
-.box-hercules .label::before, .box-hercules .label::after {
+.box-hercules .label::before {
     font-size: 7px; color: #ff4444; font-weight: 900; letter-spacing: 1px; text-transform: uppercase;
 }
+
+/* Simmetria Hercules SX: "STW [HERCULES kts]" */
 .left-panel .box-hercules .unit::before { content: "HERCULES "; }
+
+/* Simmetria Hercules DX: "[m HERCULES] DEPTH" */
 .right-panel .box-hercules .unit::after { content: " HERCULES"; }
+
+/* Eccezione: Box MEAN colonna DX (Senza unità) -> "[HERCULES TWA]" */
 .right-panel .box-hercules .label:only-child::before { content: "HERCULES "; }
 
 /* ==========================================================================
@@ -154,7 +223,7 @@ body {
 #status { position: absolute; top: 5px; right: 15px; font-size: 0.5rem; text-transform: uppercase; z-index: 1000; }
 .online { color: #2ecc71; opacity: 0.5; }
 .offline { color: #e74c3c; font-weight: bold; }
-#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow, #twd-boat-wrap {transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);}
+#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow, #twd-boat-wrap { transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
 #leeway-mask-rect { transition: none; }
 .alarm-warning { color: #f1c40f !important; }
 .alarm-danger { color: #e74c3c !important; font-weight: 900; animation: blink-unstable 1s infinite; }
@@ -166,11 +235,7 @@ body {
    8. RESPONSIVE (PORTRAIT)
    ========================================================================== */
 @media (max-aspect-ratio: 0.9 / 1) {
-    .main-container {
-        grid-template-columns: 1fr 1fr !important;
-        grid-template-rows: 45vh 55vh !important;
-    }
-
+    .main-container { grid-template-columns: 1fr 1fr !important; grid-template-rows: 45vh 55vh !important; }
     .center-panel { grid-row: 1 !important; grid-column: 1 / span 2 !important; padding: 5px 0; }
     .left-panel { grid-row: 2 !important; grid-column: 1 !important; }
     .right-panel { grid-row: 2 !important; grid-column: 2 !important; }
