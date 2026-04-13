@@ -41,7 +41,7 @@ let simulationMode = false;
 let socket, renderInterval, simInterval;
 let lastAvgUIUpdate = 0, audioCtx = null, lastAlarmTime = 0;
 let curAwaRot = 0, curTwaRot = 0, curTrackRot = 0, curTwdRoseRot = 0;
-
+let smoothedLeeway = 0;
 let pressTimer, isFocusActive = false, blockNextClick = false;
 
 const graphModes = {
@@ -167,12 +167,30 @@ function startDisplayLoop() {
         const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, CONFIG.averages.smoothWindow, true);
         if (smTwa) { curTwaRot = getShortestRotation(curTwaRot, smTwa.val); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
 
-        if (store.raw["navigation.courseOverGroundTrue"] && store.raw["navigation.headingTrue"]) {
-            let drift = (radToDeg(store.raw["navigation.courseOverGroundTrue"]) - radToDeg(store.raw["navigation.headingTrue"]) + 360) % 360;
-            if (curSog < CONFIG.averages.minSpeed) drift = 0;
-            curTrackRot = getShortestRotation(curTrackRot, drift); ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
-            let ds = drift > 180 ? drift - 360 : drift; updateLeewayDisplay(Math.max(-20, Math.min(20, ds)));
-        } else updateLeewayDisplay(0);
+        if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
+            // 1. Calcolo grezzo
+            let rawDrift = (radToDeg(store.raw["navigation.courseOverGroundTrue"]) - radToDeg(store.raw["navigation.headingTrue"]) + 360) % 360;
+            if (rawDrift > 180) rawDrift -= 360;
+
+            // 2. Filtro di stabilità (Low Pass Filter)
+            // Se la barca è ferma, azzera brutalmente. Altrimenti filtra il valore.
+            if (curSog < CONFIG.averages.minSpeed) {
+                smoothedLeeway = 0;
+            } else {
+                // Smoothing: 90% valore precedente, 10% nuovo valore
+                smoothedLeeway = (smoothedLeeway * 0.9) + (rawDrift * 0.1);
+            }
+
+            // 3. Renderizziamo il valore filtrato
+            curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway);
+            ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
+            
+            // Limita il valore grafico e aggiorna il testo
+            let ds = Math.max(-20, Math.min(20, smoothedLeeway));
+            updateLeewayDisplay(ds);
+        } else {
+            updateLeewayDisplay(0);
+        }
 
         // --- 2. RENDERING MEDIE E BUSSOLA TATTICA ---
         if (now - lastAvgUIUpdate > 3000) {
@@ -182,14 +200,35 @@ function startDisplayLoop() {
                 twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averages.longWindow, true),
                 twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averages.longWindow, false);
 
-            const upUI = (el, obj) => {
-                if (!obj) { el.innerHTML = "---&deg;"; el.classList.remove('unstable-data'); }
-                else {
-                    el.innerHTML = `${obj.val.toString().padStart(3, '0')}&deg;`;
-                    if (obj.stable || curSog < CONFIG.averages.minSpeed) el.classList.remove('unstable-data'); else el.classList.add('unstable-data');
+            const upUI = (el, obj, isCompass = false) => {
+                if (!obj || obj.val === null) {
+                    el.innerHTML = "---&deg;";
+                    el.classList.remove('unstable-data');
+                } else {
+                    let val = Math.round(obj.val);
+                    let displayVal;
+
+                    if (isCompass) {
+                        // Formattazione per HEADING, COG, TWD (0-360°)
+                        displayVal = ((val + 360) % 360).toString().padStart(3, '0');
+                    } else {
+                        // Formattazione per AWA, TWA (-180 a 180°)
+                        // Se è negativo, il segno viene mantenuto correttamente
+                        displayVal = val.toString();
+                    }
+
+                    el.innerHTML = `${displayVal}&deg;`;
+                    
+                    if (obj.stable || curSog < CONFIG.averages.minSpeed) el.classList.remove('unstable-data');
+                    else el.classList.add('unstable-data');
                 }
             };
-            upUI(ui.hdg, hObj); upUI(ui.cog, cObj); upUI(ui.awaAvg, awObj); upUI(ui.twaAvg, twObj); upUI(ui.twdAvg, twdObj);
+            
+            upUI(ui.hdg,    hObj,   true);  // Bussola
+            upUI(ui.cog,    cObj,   true);  // Bussola
+            upUI(ui.awaAvg, awObj,  false); // Angolo
+            upUI(ui.twaAvg, twObj,  false); // Angolo
+            upUI(ui.twdAvg, twdObj, true);  // Bussola (La direzione del vento è sempre 0-360)
             
             if (hObj && twObj && hObj.val !== null) {
                 let tA = twObj.val * 2; ui.tackHdg.innerHTML = `${Math.round((hObj.val - tA + 360) % 360).toString().padStart(3, '0')}&deg;`;
@@ -201,6 +240,7 @@ function startDisplayLoop() {
 
             // Rotazione Bussola Tattica e Colore Sincronizzato
             if (twdObj && hObj) {
+                updateWindTrend();
                 curTwdRoseRot = getShortestRotation(curTwdRoseRot, twdObj.val);
                 ui.twdArrow.setAttribute('transform', `rotate(${curTwdRoseRot}, 20, 20)`);
                 ui.twdBoat.setAttribute('transform', `rotate(${hObj.val}, 20, 20)`);
@@ -403,45 +443,67 @@ ui.depth.closest('.data-box').addEventListener('click', (function() {
 })());
 
 // ==========================================================================
-// 9. MOTORE SIMULAZIONE DINAMICA
+// 9. MOTORE SIMULAZIONE DINAMICA (VERSIONE STOCASTICA)
 // ==========================================================================
 function startDynamicSimulation() {
     ui.status.innerText = "SIM ATTIVO";
-    
-    // Parametri base iniziali
-    let baseTws = 60, baseDepth = 12, baseHdg = 45;
-    
+
+    // 1. STATO INIZIALE (Aggiunto leeway a 0)
+    let sim = {
+        hdg: Math.random() * 360,
+        tws: 12,
+        twd: Math.random() * 360,
+        depth: 12,
+        stw: 5,
+        leeway: 0, // Inerzia per il Leeway
+        startTime: Date.now()
+    };
+
     simInterval = setInterval(() => {
-        // T rappresenta il progresso nel ciclo di 10 minuti (da 0 a 1)
-        const t = (Date.now() % 600000) / 600000;
-        const radT = t * 2 * Math.PI;
+        const elapsed = (Date.now() - sim.startTime) / 1000;
 
-        // Oscillazioni fluide (Sinusoidali)
-        const tws = baseTws + Math.sin(radT) * 5;      // Oscilla +- 5 kts
-        const depth = baseDepth + Math.sin(radT) * 3;  // Oscilla +- 3 m
-        const twa = 40 + Math.sin(radT * 2) * 10;      // Oscilla angolo +- 10°
+        // 2. SALTO DI VENTO (dopo 120 secondi)
+        if (elapsed > 120 && elapsed < 121) {
+            sim.twd = Math.random() * 360;
+        }
 
-        // Calcoli Vettoriali (Nautica)
-        const stw = Math.min(tws * 0.7, 8); // Velocità barca legata al vento
-        const twaRad = degToRad(twa);
+        // 3. RAFFICA (ogni 40s per 5s) con smoothing 0.05
+        const inGust = (elapsed % 40) < 5;
+        const targetTws = (inGust ? 18 : 10) + Math.sin(elapsed / 10) * 2;
+        sim.tws += (targetTws - sim.tws) * 0.05; // Smoothing lento
+
+        // 4. POLARE SEMPLIFICATA (STW in base al TWA)
+        let twaRel = (sim.twd - sim.hdg + 360) % 360;
+        if (twaRel > 180) twaRel -= 360;
         
-        // AWS = radq(stw² + tws² + 2*stw*tws*cos(twa))
-        const aws = Math.sqrt(Math.pow(stw, 2) + Math.pow(tws, 2) + 2 * stw * tws * Math.cos(twaRad));
-        // AWA = atan2(tws*sin(twa), stw + tws*cos(twa))
-        const awa = radToDeg(Math.atan2(tws * Math.sin(twaRad), stw + tws * Math.cos(twaRad)));
-        
-        // Calcolo Leeway (Scarroccio): più forte il vento, più scarroccia
-        const leeway = (tws > 5) ? Math.sin(twaRad) * (tws * 0.2) : 0;
+        let targetStw = 3 + (4 * Math.sin((Math.abs(twaRel) - 45) * Math.PI / 125));
+        sim.stw += (Math.max(3, Math.min(8, targetStw)) - sim.stw) * 0.05; // Smoothing STW
 
-        // Invio dati al sistema
-        processIncomingData("environment.wind.speedTrue", ktsToMs(tws));
-        processIncomingData("environment.wind.angleTrueWater", degToRad(twa));
+        // 5. CALCOLO LEEWAY CON FILTRO (Inerzia)
+        const rawLeeway = Math.sin(degToRad(twaRel)) * 4;
+        sim.leeway += (rawLeeway - sim.leeway) * 0.05; // Smoothing 0.05 per evitare i balli di +/- 3.1
+
+        // 6. CALCOLO VETTORIALE COG
+        const cog = (sim.hdg - sim.leeway + 360) % 360;
+
+        // 7. CALCOLO VENTO APPARENTE (AWS/AWA)
+        const twaRad = degToRad(twaRel);
+        const aws = Math.sqrt(Math.pow(sim.stw, 2) + Math.pow(sim.tws, 2) + 2 * sim.stw * sim.tws * Math.cos(twaRad));
+        const awa = radToDeg(Math.atan2(sim.tws * Math.sin(twaRad), sim.stw + sim.tws * Math.cos(twaRad)));
+
+        // 8. INVIO DATI PULITI
+        processIncomingData("environment.wind.speedTrue", ktsToMs(sim.tws));
+        processIncomingData("environment.wind.directionTrue", degToRad(sim.twd));
+        processIncomingData("environment.wind.angleTrueWater", degToRad(twaRel));
         processIncomingData("environment.wind.speedApparent", ktsToMs(aws));
         processIncomingData("environment.wind.angleApparent", degToRad(awa));
-        processIncomingData("environment.depth.belowTransducer", depth);
-        processIncomingData("navigation.headingTrue", degToRad(baseHdg));
-        processIncomingData("navigation.speedThroughWater", ktsToMs(stw));
-        processIncomingData("navigation.courseOverGroundTrue", degToRad(baseHdg + leeway));
+        processIncomingData("environment.depth.belowTransducer", sim.depth);
+        processIncomingData("navigation.headingTrue", degToRad(sim.hdg));
+        processIncomingData("navigation.speedThroughWater", ktsToMs(sim.stw));
+        processIncomingData("navigation.speedOverGround", ktsToMs(sim.stw));
+        processIncomingData("navigation.courseOverGroundTrue", degToRad(cog));
+
+        // Aggiorna display grafico
+        updateLeewayDisplay(sim.leeway);
     }, 1000);
 }
-

@@ -179,6 +179,8 @@
                 <g id="twa-pointer" transform="rotate(0, 200, 200)" opacity="0.85">
                     <path d="M200,90 L206,98 L200,125 L194,98 Z" fill="#ffff00" stroke="#000" stroke-width="0.8" />
                     <text x="200" y="104" fill="#000" font-size="8" font-weight="900" text-anchor="middle" font-family="Arial Black">T</text>
+                    <circle id="trend-gauge-cw"  cx="215" cy="110" r="4" fill="#ff0000" opacity="0" />
+                    <circle id="trend-gauge-ccw" cx="185" cy="110" r="4" fill="#00ff00" opacity="0" />
                 </g>
                 
                 <!-- Barra LEEWAY / SCARROCCIO Inferiore -->
@@ -282,7 +284,6 @@
                                                 <path d="M 20,17 L 17,26 L 20,24.5 L 23,26 Z" fill="white" opacity="0.2" />
                                             </g>
 
-                                            <!-- 2. INDICATORE VENTO: Ruota con il TWD (id: twd-arrow) -->
                                             <g id="twd-arrow" transform="rotate(0, 20, 20)">
                                                 <path id="twd-wind-chevron" d="M 17,5 L 20,7.5 L 23,5"
                                                       fill="none"
@@ -290,6 +291,8 @@
                                                       stroke-width="2.2"
                                                       stroke-linecap="round"
                                                       stroke-linejoin="round" />
+                                                <circle id="trend-dot-cw" cx="24" cy="7.5" r="1.5" fill="#ff0000" />
+                                                <circle id="trend-dot-ccw" cx="16" cy="7.5" r="1.5" fill="#00ff00" />
                                             </g>
                                         </svg>
                     <span class="value value-large" id="twd-avg">---&deg;</span>
