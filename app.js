@@ -41,7 +41,10 @@ let simulationMode = false;
 let socket, renderInterval, simInterval;
 let lastAvgUIUpdate = 0, audioCtx = null, lastAlarmTime = 0;
 let curAwaRot = 0, curTwaRot = 0, curTrackRot = 0, curTwdRoseRot = 0;
+
+// Variabili di stato per filtri e trend
 let smoothedLeeway = 0;
+let rotationTrend = 0;
 let pressTimer, isFocusActive = false, blockNextClick = false;
 
 const graphModes = {
@@ -137,8 +140,41 @@ function processIncomingData(path, val) {
 }
 
 // ==========================================================================
-// 5. MOTORE RENDERING PRINCIPALE
+// 5. MOTORE RENDERING PRINCIPALE E TREND
 // ==========================================================================
+
+// Calcolo Trend del Vento (Definita prima del loop per evitare ReferenceError)
+function updateWindTrend() {
+    const longAvg = getCircularAverageFromBuffer(store.longBuf.twd, 60000, false);
+    const shortAvg = getCircularAverageFromBuffer(store.longBuf.twd, 15000, false);
+
+    if (!longAvg || !shortAvg) return;
+
+    let diff = (shortAvg.val - longAvg.val + 540) % 360 - 180;
+    
+    // Smoothing del trend per evitare scatti
+    rotationTrend = (rotationTrend * 0.95) + (diff * 0.05);
+
+    // Seleziona sia i pallini della bussola che del gauge centrale
+    const cwDots = [document.getElementById('trend-dot-cw'), document.getElementById('trend-gauge-cw')];
+    const ccwDots = [document.getElementById('trend-dot-ccw'), document.getElementById('trend-gauge-ccw')];
+
+    // Soglia: il vento deve ruotare di almeno 1.5 gradi di media per attivarsi
+    if (Math.abs(rotationTrend) > 1.5) {
+        if (rotationTrend > 0) { // Orario
+            cwDots.forEach(el => el && el.classList.add('is-trending'));
+            ccwDots.forEach(el => el && el.classList.remove('is-trending'));
+        } else { // Antiorario
+            ccwDots.forEach(el => el && el.classList.add('is-trending'));
+            cwDots.forEach(el => el && el.classList.remove('is-trending'));
+        }
+    } else {
+        // Vento stabile, spegni tutti i pallini
+        cwDots.forEach(el => el && el.classList.remove('is-trending'));
+        ccwDots.forEach(el => el && el.classList.remove('is-trending'));
+    }
+}
+
 function startDisplayLoop() {
     renderInterval = setInterval(() => {
         const now = Date.now();
@@ -149,7 +185,7 @@ function startDisplayLoop() {
         let curSog = 0; if (store.raw["navigation.speedOverGround"] !== undefined) { curSog = msToKts(store.raw["navigation.speedOverGround"]); ui.sog.innerText = curSog.toFixed(1); manageHistory('sog', curSog); }
         if (store.raw["environment.depth.belowTransducer"] !== undefined) { const d = store.raw["environment.depth.belowTransducer"]; ui.depth.innerText = d.toFixed(1); checkDepthAlarm(d); manageHistory('depth', d); }
         
-        // --- 1. RENDERING TWS CON COLORE DINAMICO (BIANCO -> ARANCIO -> ROSSO) ---
+        // --- 1. RENDERING TWS CON COLORE DINAMICO ---
         if (store.raw["environment.wind.speedTrue"] !== undefined) {
             const twsKts = msToKts(store.raw["environment.wind.speedTrue"]);
             ui.tws.innerText = twsKts.toFixed(1);
@@ -167,27 +203,20 @@ function startDisplayLoop() {
         const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, CONFIG.averages.smoothWindow, true);
         if (smTwa) { curTwaRot = getShortestRotation(curTwaRot, smTwa.val); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
 
+        // --- CALCOLO E SMUSSAMENTO LEEWAY ---
         if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
-            // 1. Calcolo grezzo
             let rawDrift = (radToDeg(store.raw["navigation.courseOverGroundTrue"]) - radToDeg(store.raw["navigation.headingTrue"]) + 360) % 360;
             if (rawDrift > 180) rawDrift -= 360;
 
-            // 2. Filtro di stabilità (Low Pass Filter)
-            // Se la barca è ferma, azzera brutalmente. Altrimenti filtra il valore.
             if (curSog < CONFIG.averages.minSpeed) {
                 smoothedLeeway = 0;
             } else {
-                // Smoothing: 90% valore precedente, 10% nuovo valore
                 smoothedLeeway = (smoothedLeeway * 0.9) + (rawDrift * 0.1);
             }
 
-            // 3. Renderizziamo il valore filtrato
             curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway);
             ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
-            
-            // Limita il valore grafico e aggiorna il testo
-            let ds = Math.max(-20, Math.min(20, smoothedLeeway));
-            updateLeewayDisplay(ds);
+            updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
         } else {
             updateLeewayDisplay(0);
         }
@@ -208,14 +237,8 @@ function startDisplayLoop() {
                     let val = Math.round(obj.val);
                     let displayVal;
 
-                    if (isCompass) {
-                        // Formattazione per HEADING, COG, TWD (0-360°)
-                        displayVal = ((val + 360) % 360).toString().padStart(3, '0');
-                    } else {
-                        // Formattazione per AWA, TWA (-180 a 180°)
-                        // Se è negativo, il segno viene mantenuto correttamente
-                        displayVal = val.toString();
-                    }
+                    if (isCompass) displayVal = ((val + 360) % 360).toString().padStart(3, '0');
+                    else displayVal = val.toString();
 
                     el.innerHTML = `${displayVal}&deg;`;
                     
@@ -224,11 +247,11 @@ function startDisplayLoop() {
                 }
             };
             
-            upUI(ui.hdg,    hObj,   true);  // Bussola
-            upUI(ui.cog,    cObj,   true);  // Bussola
-            upUI(ui.awaAvg, awObj,  false); // Angolo
-            upUI(ui.twaAvg, twObj,  false); // Angolo
-            upUI(ui.twdAvg, twdObj, true);  // Bussola (La direzione del vento è sempre 0-360)
+            upUI(ui.hdg,    hObj,   true);
+            upUI(ui.cog,    cObj,   true);
+            upUI(ui.awaAvg, awObj,  false);
+            upUI(ui.twaAvg, twObj,  false);
+            upUI(ui.twdAvg, twdObj, true);
             
             if (hObj && twObj && hObj.val !== null) {
                 let tA = twObj.val * 2; ui.tackHdg.innerHTML = `${Math.round((hObj.val - tA + 360) % 360).toString().padStart(3, '0')}&deg;`;
@@ -240,7 +263,8 @@ function startDisplayLoop() {
 
             // Rotazione Bussola Tattica e Colore Sincronizzato
             if (twdObj && hObj) {
-                updateWindTrend();
+                updateWindTrend(); // Aggiorna i pallini
+                
                 curTwdRoseRot = getShortestRotation(curTwdRoseRot, twdObj.val);
                 ui.twdArrow.setAttribute('transform', `rotate(${curTwdRoseRot}, 20, 20)`);
                 ui.twdBoat.setAttribute('transform', `rotate(${hObj.val}, 20, 20)`);
@@ -378,16 +402,14 @@ function toggleFocusMode(type, element) {
 // ==========================================================================
 if (ui.hotspot) {
     let pressTimer;
-    const HOLD_DURATION = 1000; // 1 secondo di pressione per attivare Night Mode
+    const HOLD_DURATION = 1000;
 
     ui.hotspot.addEventListener('pointerdown', (e) => {
-        // Avvia il timer al tocco
         pressTimer = setTimeout(() => {
             document.body.classList.toggle('night-mode');
-            // Feedback visivo immediato al cambio modalità
             ui.hotspot.style.opacity = "0.5";
             setTimeout(() => ui.hotspot.style.opacity = "1", 200);
-            pressTimer = null; // Reset per evitare che il click scatti dopo
+            pressTimer = null;
         }, HOLD_DURATION);
     });
 
@@ -395,7 +417,6 @@ if (ui.hotspot) {
         if (pressTimer) {
             clearTimeout(pressTimer);
             pressTimer = null;
-            // Se arriviamo qui, è stato un click rapido -> Fullscreen
             const doc = document.documentElement;
             const isF = document.fullscreenElement || document.webkitFullscreenElement;
             if (!isF) {
@@ -422,7 +443,9 @@ window.addEventListener('load', init);
 function checkDepthAlarm(m) { ui.depth.classList.remove('alarm-warning', 'alarm-danger'); if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); } else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning'); }
 function playBingBing() { if (!audioCtx) return; const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n; function b(f, s) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f; g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4); o.start(s); o.stop(s + 0.5); } b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6); }
 
-// Simulatore su Depth (3 click rapidi)
+// ==========================================================================
+// 9. MOTORE SIMULAZIONE DINAMICA E AVVIO (3 Click su Depth)
+// ==========================================================================
 ui.depth.closest('.data-box').addEventListener('click', (function() {
     let dC = 0, lC = 0;
     return function() {
@@ -433,7 +456,7 @@ ui.depth.closest('.data-box').addEventListener('click', (function() {
             simulationMode = !simulationMode;
             if (simulationMode) {
                 if (socket) socket.close();
-                startDynamicSimulation(); // Chiama la nuova funzione
+                startDynamicSimulation();
             } else {
                 location.reload();
             }
@@ -442,56 +465,52 @@ ui.depth.closest('.data-box').addEventListener('click', (function() {
     };
 })());
 
-// ==========================================================================
-// 9. MOTORE SIMULAZIONE DINAMICA (VERSIONE STOCASTICA)
-// ==========================================================================
 function startDynamicSimulation() {
     ui.status.innerText = "SIM ATTIVO";
 
-    // 1. STATO INIZIALE (Aggiunto leeway a 0)
     let sim = {
         hdg: Math.random() * 360,
         tws: 12,
         twd: Math.random() * 360,
         depth: 12,
         stw: 5,
-        leeway: 0, // Inerzia per il Leeway
+        leeway: 0,
         startTime: Date.now()
     };
 
     simInterval = setInterval(() => {
         const elapsed = (Date.now() - sim.startTime) / 1000;
 
-        // 2. SALTO DI VENTO (dopo 120 secondi)
-        if (elapsed > 120 && elapsed < 121) {
-            sim.twd = Math.random() * 360;
-        }
+        // Vento: Rotazione lenta + Salto netto a 120s
+        if (elapsed > 120 && elapsed < 121) sim.twd = Math.random() * 360;
+        sim.twd = (sim.twd + (Math.sin(elapsed / 20) * 0.5) + 360) % 360;
 
-        // 3. RAFFICA (ogni 40s per 5s) con smoothing 0.05
+        // Raffica
         const inGust = (elapsed % 40) < 5;
         const targetTws = (inGust ? 18 : 10) + Math.sin(elapsed / 10) * 2;
-        sim.tws += (targetTws - sim.tws) * 0.05; // Smoothing lento
+        sim.tws += (targetTws - sim.tws) * 0.05;
 
-        // 4. POLARE SEMPLIFICATA (STW in base al TWA)
+        // Barca segue il vento pigramente
+        sim.hdg = (sim.hdg + (Math.random() - 0.5) * 1 + 360) % 360;
+
         let twaRel = (sim.twd - sim.hdg + 360) % 360;
         if (twaRel > 180) twaRel -= 360;
         
+        // Polare smussata
         let targetStw = 3 + (4 * Math.sin((Math.abs(twaRel) - 45) * Math.PI / 125));
-        sim.stw += (Math.max(3, Math.min(8, targetStw)) - sim.stw) * 0.05; // Smoothing STW
+        sim.stw += (Math.max(3, Math.min(8, targetStw)) - sim.stw) * 0.05;
 
-        // 5. CALCOLO LEEWAY CON FILTRO (Inerzia)
+        // Leeway smussato
         const rawLeeway = Math.sin(degToRad(twaRel)) * 4;
-        sim.leeway += (rawLeeway - sim.leeway) * 0.05; // Smoothing 0.05 per evitare i balli di +/- 3.1
+        sim.leeway += (rawLeeway - sim.leeway) * 0.05;
 
-        // 6. CALCOLO VETTORIALE COG
+        // Vettori Reali
         const cog = (sim.hdg - sim.leeway + 360) % 360;
-
-        // 7. CALCOLO VENTO APPARENTE (AWS/AWA)
         const twaRad = degToRad(twaRel);
         const aws = Math.sqrt(Math.pow(sim.stw, 2) + Math.pow(sim.tws, 2) + 2 * sim.stw * sim.tws * Math.cos(twaRad));
         const awa = radToDeg(Math.atan2(sim.tws * Math.sin(twaRad), sim.stw + sim.tws * Math.cos(twaRad)));
 
-        // 8. INVIO DATI PULITI
+        // Invio Dati (Con tutto il set necessario per la UI)
         processIncomingData("environment.wind.speedTrue", ktsToMs(sim.tws));
         processIncomingData("environment.wind.directionTrue", degToRad(sim.twd));
         processIncomingData("environment.wind.angleTrueWater", degToRad(twaRel));
@@ -503,7 +522,5 @@ function startDynamicSimulation() {
         processIncomingData("navigation.speedOverGround", ktsToMs(sim.stw));
         processIncomingData("navigation.courseOverGroundTrue", degToRad(cog));
 
-        // Aggiorna display grafico
-        updateLeewayDisplay(sim.leeway);
     }, 1000);
 }
