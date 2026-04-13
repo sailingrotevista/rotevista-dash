@@ -84,6 +84,8 @@ body {
     min-width: 400px !important;
 }
 
+
+
 /*
    LOGICA POSIZIONE E LARGHEZZA:
    Il Vento prende solo la larghezza del suo cerchio (auto).
@@ -112,7 +114,7 @@ body {
 
 /* Tipografia Extreme per Focus Mode */
 .focus-active .is-focused .value { font-size: clamp(4rem, 25cqh, 4rem) !important; margin-top: 15px; }
-.focus-active .is-focused .scale-labels { font-size: 32px !important; min-width: 80px !important; line-height: 1.2; }
+.focus-active .is-focused .scale-labels { font-size: 32px !important; min-width: 40px !important; line-height: 1.2; }
 .focus-active .is-focused .label-row .label { font-size: 2rem !important; }
 .focus-active .is-focused .label-row .unit { font-size: 2rem !important; }
 
@@ -170,12 +172,12 @@ body {
 
 /* Spostamento verso il centro */
 .left-panel .graph-wrapper { margin-right: -6px; }
-.right-panel .graph-wrapper { margin-left: -6px; }
+.right-panel .graph-wrapper { margin-left: 666px; }
 
 .sparkline { flex-grow: 1; height: 100%; background: transparent !important; display: block; }
 .sparkline path, .sparkline line { stroke-width: 1px !important; transition: all 0.3s ease; }
 
-.scale-labels { display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: #777; font-weight: bold; min-width: 18px; height: 100%; line-height: 1; padding: 2px 0; }
+.scale-labels { display: flex; flex-direction: column; justify-content: space-between; font-size: 10px; color: #777; font-weight: bold; min-width: 10px; height: 100%; line-height: 1; padding: 2px 0; }
 
 /* Simmetria Scale */
 .left-panel .scale-labels { order: 2; text-align: left; padding-left: 4px; border-left: 1px solid rgba(255,255,255,0.08); }
