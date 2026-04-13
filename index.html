@@ -9,7 +9,7 @@
     <title>Sailing Dashboard Pro</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body >
+<body>
     
     <!-- Etichetta stato connessione SignalK -->
     <div id="status" class="offline">OFFLINE</div>
@@ -89,6 +89,8 @@
             <!-- ViewBox ottimizzato per ingrandire il diametro (Zoom in) -->
             <svg id="wind-gauge" viewBox="35 38 330 395" preserveAspectRatio="xMidYMid meet">
                 <defs>
+                    <!-- Maschera per tagliare la barca esattamente sul bordo del cerchio r=50 -->
+                    <clipPath id="boat-clip"><circle cx="200" cy="200" r="50" /></clipPath>
                     <!-- Gradienti e Maschere per i settori del vento -->
                     <linearGradient id="axiom-grad" x1="0%" y1="0%" x2="0%" y2="100%">
                         <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
@@ -100,6 +102,12 @@
                         <stop offset="50%" style="stop-color:#00ff00;stop-opacity:1" />
                         <stop offset="75%" style="stop-color:#ff8800;stop-opacity:1" />
                         <stop offset="100%" style="stop-color:#ff0000;stop-opacity:1" />
+                    </linearGradient>
+                    <!-- Gradiente Leeway per la Night Mode (Rosso cupo al centro, Rosso vivo ai lati) -->
+                    <linearGradient id="leeway-night-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#ff0000;stop-opacity:1" /> <!-- Estremo SX: Rosso vivo -->
+                        <stop offset="50%" style="stop-color:#330000;stop-opacity:1" /> <!-- Centro: Rosso cupo -->
+                        <stop offset="100%" style="stop-color:#ff0000;stop-opacity:1" /> <!-- Estremo DX: Rosso vivo -->
                     </linearGradient>
                     <clipPath id="leeway-clip">
                         <rect id="leeway-mask-rect" x="125" y="0" width="0" height="12" rx="2" />
@@ -150,7 +158,11 @@
                 <circle id="fullscreen-hotspot" cx="200" cy="200" r="55" fill="#181818" stroke="#333" stroke-width="1" filter="url(#center-glow)" cursor="pointer" />
                 
                 <!-- Icona Barca Centrale (Spinta Y+5 per centratura visiva perfetta) -->
-                <path id="boat-icon" d="M200,150 Q165,185 170,250 Q165,190 200,173 Q235,190 230,250 Q235,185 200,150 Z" fill="url(#axiom-grad)" transform="translate(0, 5)" style="pointer-events: none;" />
+                <path id="boat-icon" d="M200,150 Q165,185 170,250 Q165,190 200,173 Q235,190 230,250 Q235,185 200,150 Z"
+                      fill="url(#axiom-grad)"
+                      transform="translate(0, 5)"
+                      clip-path="url(#boat-clip)"
+                      style="pointer-events: none;" />
                 
                 <!-- Display Centrale Numerico: Vento Apparente -->
                 <g id="aws-display-group" transform="translate(200, 265)">

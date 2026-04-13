@@ -309,49 +309,146 @@ body {
 }
 
 /* ==========================================================================
-   10. NIGHT MODE (RED ON BLACK)
+   10. NIGHT MODE (RED ON BLACK - TACTICAL)
    ========================================================================== */
 body.night-mode {
     background-color: #000 !important;
-    color: #ff0000 !important; /* Rosso puro per tutto il testo */
+    color: #ff0000 !important;
 }
 
-/* Pannelli e Box */
-.night-mode .side-panel { background: rgba(255, 0, 0, 0.02); border: 1px solid #200000; }
-.night-mode .data-box { border-bottom-color: #330000; }
-
-/* Etichette e Unità */
-.night-mode .label, .night-mode .unit, .night-mode .dual-label {
-    color: #660000 !important; /* Rosso molto scuro per le scritte secondarie */
+/* --- Pannelli e Box --- */
+.night-mode .side-panel {
+    background: rgba(20, 0, 0, 0.4);
+    border: 1px solid #330000;
+}
+.night-mode .data-box {
+    border-bottom-color: #260000;
 }
 
-/* Valori Numerici */
-.night-mode .value, .night-mode .value-large {
+/* --- Tipografia Secondaria (Titoli, Unità, TACK Labels) --- */
+.night-mode .label,
+.night-mode .unit,
+.night-mode .dual-label {
+    color: #800000 !important; /* Rosso cupo per non affaticare la vista */
+}
+
+/* --- Valori Numerici --- */
+.night-mode .value,
+.night-mode .value-large {
     color: #ff3333 !important;
-    text-shadow: 0 0 5px rgba(255, 0, 0, 0.3); /* Leggero bagliore per la leggibilità */
+    text-shadow: 0 0 8px rgba(255, 0, 0, 0.4); /* Bagliore per profondità */
 }
 
-/* Grafici Sparkline */
-.night-mode .sparkline { background: rgba(50, 0, 0, 0.2); }
-.night-mode svg path { stroke: #aa0000 !important; fill: rgba(100, 0, 0, 0.1) !important; }
-.night-mode .scale-labels { color: #440000 !important; }
+/* --- Grafici Sparkline (Solo Linea, No Riempimento) --- */
+.night-mode .graph-wrapper {
+    background: rgba(30, 0, 0, 0.3) !important;
+}
 
-/* Eccezione Grafico TWS (Mantiene i segmenti ma tutti su tonalità di rosso) */
-.night-mode #tws-graph line { stroke: #ff0000 !important; }
+/* Nasconde l'area di riempimento sotto la linea */
+.night-mode .sparkline path:first-of-type {
+    display: none !important;
+}
 
-/* Strumento Centrale (Vento) */
+/* Rende la linea del tracciato molto più visibile */
+.night-mode .sparkline path {
+    fill: none !important;
+    stroke: #ff3333 !important;
+    stroke-width: 1.8px !important;
+    opacity: 1 !important;
+    filter: drop-shadow(0 0 2px rgba(255, 0, 0, 0.4));
+}
+
+/* Griglie interne (Orizzontali e Verticali) uniformi */
+.night-mode .sparkline line {
+    stroke: #4d0000 !important;
+    stroke-width: 0.7px !important;
+    opacity: 1 !important;
+}
+
+/* Forza i segmenti colorati del TWS alla stessa luminosità della linea */
+.night-mode #tws-graph line:not([stroke*="rgba"]) {
+    stroke: #ff3333 !important;
+    stroke-width: 1.8px !important;
+}
+
+/* Numeri delle scale a lato dei grafici */
+.night-mode .scale-labels {
+    color: #660000 !important;
+}
+
+/* --- Hercules Mode in Night Mode --- */
+.night-mode .box-hercules {
+    background: rgba(60, 0, 0, 0.2) !important;
+}
+.night-mode .line-hercules {
+    filter: drop-shadow(0 0 6px #ff0000) !important;
+}
+
+/* Scritta Hercules in alto (Colore personalizzato #f60000) */
+.night-mode .box-hercules .unit::before,
+.night-mode .box-hercules .unit::after,
+.night-mode .box-hercules .label::before,
+.night-mode .box-hercules .label::after {
+    color: #f60000 !important;
+    font-weight: 700;
+    opacity: 0.9;
+    letter-spacing: 1px;
+}
+
+/* --- Strumento Centrale (Wind Gauge) --- */
 .night-mode #wind-gauge circle { stroke: #330000; }
-.night-mode #ticks line { stroke: #440000 !important; }
-.night-mode #tick-labels { fill: #660000 !important; }
-.night-mode #boat-icon { fill: #220000 !important; opacity: 0.8; }
+.night-mode #ticks line { stroke: #4d0000 !important; }
+.night-mode #tick-labels { fill: #800000 !important; }
+.night-mode #boat-icon { fill: #330000 !important; opacity: 0.6; }
 .night-mode #aws-val-svg { fill: #ff3333 !important; }
 
-/* Lancette: Tutte rosse con diverse intensità */
+/* Settori Vento (Distinguibili per stile, non per colore) */
+.night-mode #wind-gauge path[stroke="#ff0000"] { stroke: #660000 !important; opacity: 0.8; } /* Sx Solid */
+.night-mode #wind-gauge path[stroke="#00ff00"] {
+    stroke: #660000 !important;
+    stroke-dasharray: 4, 3; /* Dx Dashed */
+    opacity: 0.8;
+}
+.night-mode #wind-gauge path[stroke="#ff8800"] { stroke: #330000 !important; stroke-width: 8; } /* Poppa Dark */
+
+/* Lancette Wind Gauge */
 .night-mode #awa-pointer path { fill: #ff0000; stroke: #000; }
-.night-mode #twa-pointer path { fill: #aa0000; stroke: #000; }
+.night-mode #twa-pointer path { fill: #800000; stroke: #000; }
 .night-mode #track-pointer path { fill: #ff0000; stroke: #fff; stroke-width: 0.5; }
 
-/* Bussola TWD */
-.night-mode .mini-compass { border-color: #330000; }
-.night-mode .mini-compass text { fill: #660000 !important; }
+/* --- Blocco Leeway (Scarroccio) --- */
+.night-mode rect[fill="url(#leeway-grad)"] { fill: url(#leeway-night-grad) !important; }
+.night-mode #leeway-val { fill: #ff3333 !important; }
+.night-mode g[stroke="#555"] line { stroke: #4d0000 !important; }
+.night-mode g[fill="#555"] text { fill: #660000 !important; }
+.night-mode rect[fill="#222"] { fill: #0a0000 !important; stroke: #200000; }
+
+/* --- Bussola TWD --- */
+.night-mode .mini-compass { border-color: #330000; background: #000; }
+.night-mode .mini-compass text { fill: #800000 !important; }
 .night-mode #twd-arrow path { fill: #ff0000 !important; stroke: #000 !important; }
+.night-mode #twd-boat-wrap path { fill: #ff0000 !important; opacity: 0.15; }
+
+.night-mode #center-glow feDropShadow {
+    flood-color: #ff0000 !important;
+    flood-opacity: 0.6 !important;
+}
+
+.night-mode #aws-display-group text {
+    fill: #ff3333 !important;
+}
+
+/* --- Modifica: Miglioramento visibilità TWD in Night Mode --- */
+.night-mode #twd-arrow #twd-wind-chevron {
+    stroke: #ff3333 !important;        /* Rosso più brillante */
+    stroke-width: 3px !important;      /* Più spesso */
+    opacity: 1 !important;             /* Piena opacità */
+    filter: drop-shadow(0 0 4px #ff0000); /* Effetto neon per staccarsi dallo sfondo */
+    transform-origin: center;          /* Forza il centro corretto */
+}
+
+/* Assicuriamoci che anche la punta della barca sia visibile */
+.night-mode #twd-boat-wrap path {
+    fill: #ff3333 !important;
+    opacity: 0.4 !important;
+}

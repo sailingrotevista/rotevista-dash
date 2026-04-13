@@ -333,7 +333,48 @@ function toggleFocusMode(type, element) {
     el.addEventListener('pointerleave', () => clearTimeout(pressTimer));
 });
 
-if (ui.hotspot) { ui.hotspot.addEventListener('click', () => { const doc = document.documentElement, isF = document.fullscreenElement || document.webkitFullscreenElement; if (!isF) { if (doc.requestFullscreen) doc.requestFullscreen(); else if (doc.webkitRequestFullscreen) doc.webkitRequestFullscreen(); } else { if (document.exitFullscreen) document.exitFullscreen(); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); } }); }
+// ==========================================================================
+// GESTIONE HOTSPOT: Click (Fullscreen) e Long Press (Night Mode)
+// ==========================================================================
+if (ui.hotspot) {
+    let pressTimer;
+    const HOLD_DURATION = 1000; // 1 secondo di pressione per attivare Night Mode
+
+    ui.hotspot.addEventListener('pointerdown', (e) => {
+        // Avvia il timer al tocco
+        pressTimer = setTimeout(() => {
+            document.body.classList.toggle('night-mode');
+            // Feedback visivo immediato al cambio modalità
+            ui.hotspot.style.opacity = "0.5";
+            setTimeout(() => ui.hotspot.style.opacity = "1", 200);
+            pressTimer = null; // Reset per evitare che il click scatti dopo
+        }, HOLD_DURATION);
+    });
+
+    ui.hotspot.addEventListener('pointerup', (e) => {
+        if (pressTimer) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+            // Se arriviamo qui, è stato un click rapido -> Fullscreen
+            const doc = document.documentElement;
+            const isF = document.fullscreenElement || document.webkitFullscreenElement;
+            if (!isF) {
+                if (doc.requestFullscreen) doc.requestFullscreen();
+                else if (doc.webkitRequestFullscreen) doc.webkitRequestFullscreen();
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen();
+                else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+            }
+        }
+    });
+
+    ui.hotspot.addEventListener('pointerleave', () => {
+        if (pressTimer) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+        }
+    });
+}
 (function genTicks() { const c = document.getElementById('ticks'); if (c) { for (let i = 0; i < 360; i += 10) { const l = document.createElementNS("http://www.w3.org/2000/svg", "line"); const m = i % 30 === 0; l.setAttribute("x1", "200"); l.setAttribute("y1", "40"); l.setAttribute("x2", "200"); l.setAttribute("y2", (m ? 60 : 50)); l.setAttribute("stroke", m ? "#fff" : "#666"); l.setAttribute("stroke-width", m ? "2" : "1"); l.setAttribute("transform", `rotate(${i}, 200, 200)`); c.appendChild(l); } } })();
 
 async function init() { await fetchServerConfig(); startDisplayLoop(); connect(); }
@@ -341,7 +382,66 @@ window.addEventListener('load', init);
 function checkDepthAlarm(m) { ui.depth.classList.remove('alarm-warning', 'alarm-danger'); if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); } else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning'); }
 function playBingBing() { if (!audioCtx) return; const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n; function b(f, s) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f; g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4); o.start(s); o.stop(s + 0.5); } b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6); }
 
-// Simulatore
+// Simulatore su Depth (3 click rapidi)
 ui.depth.closest('.data-box').addEventListener('click', (function() {
-    let dC = 0, lC = 0; return function() { const n = Date.now(); if (n - lC < 500) dC++; else dC = 1; lC = n; if (dC === 3) { simulationMode = !simulationMode; if (simulationMode) { if (socket) socket.close(); ui.status.innerText = "SIM ATTIVO"; simInterval = setInterval(() => { processIncomingData("navigation.headingTrue", degToRad(Math.random()*360)); processIncomingData("navigation.speedOverGround", ktsToMs(8)); }, 200); } else location.reload(); dC = 0; } };
+    let dC = 0, lC = 0;
+    return function() {
+        const n = Date.now();
+        if (n - lC < 500) dC++; else dC = 1;
+        lC = n;
+        if (dC === 3) {
+            simulationMode = !simulationMode;
+            if (simulationMode) {
+                if (socket) socket.close();
+                startDynamicSimulation(); // Chiama la nuova funzione
+            } else {
+                location.reload();
+            }
+            dC = 0;
+        }
+    };
 })());
+
+// ==========================================================================
+// 9. MOTORE SIMULAZIONE DINAMICA
+// ==========================================================================
+function startDynamicSimulation() {
+    ui.status.innerText = "SIM ATTIVO";
+    
+    // Parametri base iniziali
+    let baseTws = 60, baseDepth = 12, baseHdg = 45;
+    
+    simInterval = setInterval(() => {
+        // T rappresenta il progresso nel ciclo di 10 minuti (da 0 a 1)
+        const t = (Date.now() % 600000) / 600000;
+        const radT = t * 2 * Math.PI;
+
+        // Oscillazioni fluide (Sinusoidali)
+        const tws = baseTws + Math.sin(radT) * 5;      // Oscilla +- 5 kts
+        const depth = baseDepth + Math.sin(radT) * 3;  // Oscilla +- 3 m
+        const twa = 40 + Math.sin(radT * 2) * 10;      // Oscilla angolo +- 10°
+
+        // Calcoli Vettoriali (Nautica)
+        const stw = Math.min(tws * 0.7, 8); // Velocità barca legata al vento
+        const twaRad = degToRad(twa);
+        
+        // AWS = radq(stw² + tws² + 2*stw*tws*cos(twa))
+        const aws = Math.sqrt(Math.pow(stw, 2) + Math.pow(tws, 2) + 2 * stw * tws * Math.cos(twaRad));
+        // AWA = atan2(tws*sin(twa), stw + tws*cos(twa))
+        const awa = radToDeg(Math.atan2(tws * Math.sin(twaRad), stw + tws * Math.cos(twaRad)));
+        
+        // Calcolo Leeway (Scarroccio): più forte il vento, più scarroccia
+        const leeway = (tws > 5) ? Math.sin(twaRad) * (tws * 0.2) : 0;
+
+        // Invio dati al sistema
+        processIncomingData("environment.wind.speedTrue", ktsToMs(tws));
+        processIncomingData("environment.wind.angleTrueWater", degToRad(twa));
+        processIncomingData("environment.wind.speedApparent", ktsToMs(aws));
+        processIncomingData("environment.wind.angleApparent", degToRad(awa));
+        processIncomingData("environment.depth.belowTransducer", depth);
+        processIncomingData("navigation.headingTrue", degToRad(baseHdg));
+        processIncomingData("navigation.speedThroughWater", ktsToMs(stw));
+        processIncomingData("navigation.courseOverGroundTrue", degToRad(baseHdg + leeway));
+    }, 1000);
+}
+
