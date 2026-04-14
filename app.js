@@ -1,5 +1,5 @@
 // ==========================================================================
-// 1. CONFIGURAZIONE E DEFAULT (Sincronizzato con il Plugin SignalK)
+// 1. CONFIGURAZIONE E DEFAULT
 // ==========================================================================
 let CONFIG = {
     alarms: { depthDanger: 2.5, depthWarning: 5.0 },
@@ -22,7 +22,7 @@ const SIM_SAMPLE_INTERVAL = 1000;
 // 2. STATO GLOBALE E RIFERIMENTI UI
 // ==========================================================================
 let simulationMode = false;
-let displayModeSog = 'SOG'; // 'SOG' o 'VMG'
+let displayModeSog = 'SOG';
 let socket, renderInterval, simInterval;
 let lastAvgUIUpdate = 0, audioCtx = null, lastAlarmTime = 0;
 let curAwaRot = 0, curTwaRot = 0, curTrackRot = 0, curTwdRoseRot = 0;
@@ -66,7 +66,7 @@ const ui = {
 };
 
 // ==========================================================================
-// 3. UTILITIES DI SISTEMA (MATEMATICA E BUFFER)
+// 3. UTILITIES (MATEMATICA, BUFFER, AUDIO)
 // ==========================================================================
 function radToDeg(rad) { return rad * (180 / Math.PI); }
 function degToRad(deg) { return deg * (Math.PI / 180); }
@@ -74,17 +74,11 @@ function msToKts(ms) { return ms * 1.94384; }
 function ktsToMs(kts) { return kts / 1.94384; }
 function getShortestRotation(curr, target) { let diff = (target - curr) % 360; if (diff > 180) diff -= 360; else if (diff < -180) diff += 360; return curr + diff; }
 
-/**
- * Gestione sicura dei buffer per prevenire memory leak (O(1) complexity).
- */
 function safePush(buffer, val, time, maxLen = 200) {
     buffer.push({ val: val, time: time });
     if (buffer.length > maxLen) { buffer.shift(); }
 }
 
-/**
- * Calcola medie circolari restituendo Radianti.
- */
 function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
     const now = Date.now();
     const validData = bufferArray.filter(item => (now - item.time) <= windowMs);
@@ -97,14 +91,35 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
     return { val: signed ? avgRad : (avgRad + 2 * Math.PI) % (2 * Math.PI), stable: isStable };
 }
 
-// ==========================================================================
-// 4. LOGICA FISICA E CALCOLI
-// ==========================================================================
+function playBingBing() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n;
+    function b(f, s) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f; g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4); o.start(s); o.stop(s + 0.5); }
+    b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6);
+}
 
-/**
- * Calcola il Vento Reale partendo dagli Apparenti.
- * Logica Acqua (Vele) vs Terra (Meteo).
- */
+function playGybeAlarm() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const n = Date.now(); if (n - lastAlarmTime < 2000) return; lastAlarmTime = n;
+    function note(f, s, d) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.05, s); g.gain.exponentialRampToValueAtTime(0.001, s + d); o.start(s); o.stop(s + d); }
+    for (let i = 0; i < 4; i++) { note(1800, audioCtx.currentTime + (i * 0.15), 0.1); note(1200, audioCtx.currentTime + (i * 0.15) + 0.07, 0.1); }
+}
+
+function checkDepthAlarm(m) {
+    ui.depth.classList.remove('alarm-warning', 'alarm-danger');
+    if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); }
+    else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning');
+}
+
+function updateLeewayDisplay(deg) {
+    const c = 125, px = 125/20; let w = Math.min(Math.abs(deg)*px, 125);
+    ui.leewayMask.setAttribute('x', deg >= 0 ? c : c - w); ui.leewayMask.setAttribute('width', w);
+    ui.leewayVal.textContent = `LEEWAY: ${deg.toFixed(1)}°`;
+}
+
+// ==========================================================================
+// 4. MOTORE DI CALCOLO VENTO E DATA ROUTING
+// ==========================================================================
 function computeTrueWind() {
     const aws = store.raw["environment.wind.speedApparent"];
     let awa = store.raw["environment.wind.angleApparent"];
@@ -114,21 +129,27 @@ function computeTrueWind() {
     if (aws === undefined || awa === undefined) return;
     if (awa > Math.PI) awa -= 2 * Math.PI;
 
-    // Vento Reale su ACQUA (TWA/TWS)
     const tw_water_x = aws * Math.cos(awa) - stw, tw_water_y = aws * Math.sin(awa);
-    const tws_water = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y), twa_water = Math.atan2(tw_water_y, tw_water_x);
+    const tws_water = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
 
-    // Vento Reale su TERRA (TWD)
     const drift_angle = (cog - hdg + Math.PI * 3) % (2 * Math.PI) - Math.PI;
     const sog_vec_x = sog * Math.cos(drift_angle), sog_vec_y = sog * Math.sin(drift_angle);
     const tw_ground_x = aws * Math.cos(awa) - sog_vec_x, tw_ground_y = aws * Math.sin(awa) - sog_vec_y;
-    let twd_ground = (hdg + Math.atan2(tw_ground_y, tw_ground_x) + 2 * Math.PI) % (2 * Math.PI);
-    
+    const tws_ground = Math.sqrt(tw_ground_x * tw_ground_x + tw_ground_y * tw_ground_y);
+
     const now = Date.now();
-    store.raw["environment.wind.speedTrue"] = tws_water; store.raw["environment.wind.angleTrueWater"] = twa_water; store.raw["environment.wind.directionTrue"] = twd_ground;
+    store.raw["environment.wind.speedTrue"] = tws_water;
     
-    safePush(store.smoothBuf.twa, twa_water, now); safePush(store.longBuf.twa, twa_water, now);
-    safePush(store.smoothBuf.twd, twd_ground, now); safePush(store.longBuf.twd, twd_ground, now);
+    if (tws_water > 0.05) {
+        const twa_water = Math.atan2(tw_water_y, tw_water_x);
+        store.raw["environment.wind.angleTrueWater"] = twa_water;
+        safePush(store.smoothBuf.twa, twa_water, now); safePush(store.longBuf.twa, twa_water, now);
+    }
+    if (tws_ground > 0.05) {
+        let twd_ground = (hdg + Math.atan2(tw_ground_y, tw_ground_x) + 2 * Math.PI) % (2 * Math.PI);
+        store.raw["environment.wind.directionTrue"] = twd_ground;
+        safePush(store.smoothBuf.twd, twd_ground, now); safePush(store.longBuf.twd, twd_ground, now);
+    }
 }
 
 function processIncomingData(path, val) {
@@ -136,7 +157,6 @@ function processIncomingData(path, val) {
     if (path === "navigation.position") store.raw["navigation.position"] = val;
     if (path === "environment.wind.angleApparent") { safePush(store.smoothBuf.awa, val, now); safePush(store.longBuf.awa, val, now); }
 
-    // Dirty flag + Debounce 100ms
     const twPaths = ["environment.wind.speedApparent", "environment.wind.angleApparent", "navigation.speedThroughWater", "navigation.speedOverGround", "navigation.headingTrue", "navigation.courseOverGroundTrue"];
     if (twPaths.includes(path)) twDirty = true;
     if (twDirty && (now - lastTWCompute > 100)) { computeTrueWind(); lastTWCompute = now; twDirty = false; }
@@ -146,14 +166,7 @@ function processIncomingData(path, val) {
 }
 
 // ==========================================================================
-// 5. AUDIO E ALLARMI
-// ==========================================================================
-function playBingBing() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n; function b(f, s) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f; g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4); o.start(s); o.stop(s + 0.5); } b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6); }
-function playGybeAlarm() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); const n = Date.now(); if (n - lastAlarmTime < 2000) return; lastAlarmTime = n; function note(f, s, d) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.05, s); g.gain.exponentialRampToValueAtTime(0.001, s + d); o.start(s); o.stop(s + d); } for (let i = 0; i < 4; i++) { note(1800, audioCtx.currentTime + (i * 0.15), 0.1); note(1200, audioCtx.currentTime + (i * 0.15) + 0.07, 0.1); } }
-function checkDepthAlarm(m) { ui.depth.classList.remove('alarm-warning', 'alarm-danger'); if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); } else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning'); }
-
-// ==========================================================================
-// 6. TREND VENTO E TATTICA
+// 5. TREND VENTO E SICUREZZA
 // ==========================================================================
 function updateWindTrend() {
     const now = Date.now();
@@ -167,20 +180,18 @@ function updateWindTrend() {
     if (lastShortAvgVal === null) { lastShortAvgVal = shortAvgDeg; lastInstantTwa = instantTwaDeg; return; }
     const dt = (now - lastTrendTime) / 1000; lastTrendTime = now;
 
-    // Gybe Safety
     const gybeDetected = (Math.abs(instantTwaDeg) > 155 && Math.sign(instantTwaDeg) !== Math.sign(lastInstantTwa));
     lastInstantTwa = instantTwaDeg;
-    if (gybeDetected && isNavigating && (now - lastGybeAlarmTime > 5000)) { lastGybeAlarmTime = now; playGybeAlarm(); }
-    
+
     const compassDots = { cw: document.getElementById('trend-dot-cw'), ccw: document.getElementById('trend-dot-ccw') };
     const gaugeDots = { cw: document.getElementById('trend-gauge-cw'), ccw: document.getElementById('trend-gauge-ccw') };
 
+    if (gybeDetected && isNavigating && (now - lastGybeAlarmTime > 5000)) { lastGybeAlarmTime = now; playGybeAlarm(); }
     if (now - lastGybeAlarmTime < 4000 && isNavigating) {
         [compassDots.cw, compassDots.ccw, gaugeDots.cw, gaugeDots.ccw].forEach(el => { if (el) { el.classList.add('is-gybing'); el.classList.remove('is-trending'); el.setAttribute('fill', '#ff0000'); }});
         return;
     }
 
-    // Trend calculation con Clamping e Alpha adattivo
     let diff = (shortAvgDeg - lastShortAvgVal + 540) % 360 - 180; lastShortAvgVal = shortAvgDeg;
     if (dt > 0) {
         let rate = Math.max(-10, Math.min(10, diff / dt));
@@ -211,10 +222,8 @@ function updateWindTrend() {
 }
 
 // ==========================================================================
-// 7. RENDERING ENGINE (TIERED RENDERING)
+// 6. RENDERING ENGINE (TIERED)
 // ==========================================================================
-function updateLeewayDisplay(deg) { const c = 125, px = 125/20; let w = Math.min(Math.abs(deg)*px, 125); ui.leewayMask.setAttribute('x', deg >= 0 ? c : c - w); ui.leewayMask.setAttribute('width', w); ui.leewayVal.textContent = `LEEWAY: ${deg.toFixed(1)}°`; }
-
 function refreshGraph(t) {
     const type = (t === 'vmg') ? 'sog' : t;
     const data = store.histories[t]; if (!data || data.length < 2) return;
@@ -229,12 +238,12 @@ function startDisplayLoop() {
     renderInterval = setInterval(() => {
         const now = Date.now(); tick++;
 
-        // --- LIVE TIER (1s) ---
-        const pathsToWatch = { "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog, "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog, "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth, "environment.wind.speedTrue": ui.tws };
-        for (let p in pathsToWatch) { if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) { if (pathsToWatch[p] === ui.awsSvg) ui.awsSvg.textContent = "---"; else pathsToWatch[p].innerText = "---"; delete store.raw[p]; } }
-
         const stwKts = msToKts(store.raw["navigation.speedThroughWater"] || 0), sogKts = msToKts(store.raw["navigation.speedOverGround"] || 0);
         isNavigating = stwKts > CONFIG.averages.minSpeed || sogKts > CONFIG.averages.minSpeed;
+
+        // LIVE TIER (1s)
+        const pathsToWatch = { "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog, "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog, "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth, "environment.wind.speedTrue": ui.tws };
+        for (let p in pathsToWatch) { if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) { if (pathsToWatch[p] === ui.awsSvg) ui.awsSvg.textContent = "---"; else pathsToWatch[p].innerText = "---"; delete store.raw[p]; } }
 
         if (store.raw["navigation.speedThroughWater"] !== undefined) { ui.stw.innerText = stwKts.toFixed(1); manageHistory('stw', stwKts); }
         if (store.raw["navigation.speedOverGround"] !== undefined) {
@@ -244,36 +253,32 @@ function startDisplayLoop() {
             else { ui.sog.innerText = sogKts.toFixed(1); ui.sog.style.color = (sogKts-stwKts > 0.3) ? "#2ecc71" : (sogKts-stwKts < -0.3 ? "#e74c3c" : "#fff"); document.getElementById('sog-vmg-label').textContent = 'SOG'; }
         }
         if (store.raw["environment.depth.belowTransducer"] !== undefined) { const d = store.raw["environment.depth.belowTransducer"]; ui.depth.innerText = d.toFixed(1); checkDepthAlarm(d); manageHistory('depth', d); }
-        if (store.raw["environment.wind.speedTrue"] !== undefined) { const twsKts = msToKts(store.raw["environment.wind.speedTrue"]); ui.tws.innerText = twsKts.toFixed(1); ui.tws.style.color = (twsKts >= CONFIG.graphs.reef2) ? "#e74c3c" : (twsKts >= CONFIG.graphs.reef1 ? "#e67e22" : "#fff"); manageHistory('tws', twsKts); }
+        if (store.raw["environment.wind.speedTrue"] !== undefined) { ui.tws.innerText = msToKts(store.raw["environment.wind.speedTrue"]).toFixed(1); ui.tws.style.color = (msToKts(store.raw["environment.wind.speedTrue"]) >= CONFIG.graphs.reef2) ? "#e74c3c" : (msToKts(store.raw["environment.wind.speedTrue"]) >= CONFIG.graphs.reef1 ? "#e67e22" : "#fff"); manageHistory('tws', msToKts(store.raw["environment.wind.speedTrue"])); }
         if (store.raw["environment.wind.speedApparent"] !== undefined) ui.awsSvg.textContent = msToKts(store.raw["environment.wind.speedApparent"]).toFixed(1);
 
-        const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, CONFIG.averages.smoothWindow, true);
+        const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, 2000, true);
         if (smAwa) { curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val)); ui.awa.setAttribute('transform', `rotate(${curAwaRot}, 200, 200)`); }
-        const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, CONFIG.averages.smoothWindow, true);
+        const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, 2000, true);
         if (smTwa) { curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val)); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
 
         if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
             let driftDeg = radToDeg((store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (Math.PI * 2) - Math.PI);
             if (sogKts < CONFIG.averages.minSpeed) smoothedLeeway = 0; else smoothedLeeway = (smoothedLeeway * 0.9) + (driftDeg * 0.1);
             curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway); ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
-            const isContaminated = Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7; ui.leewayVal.style.color = isContaminated ? "#f39c12" : "#fff";
+            ui.leewayVal.style.color = (Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7) ? "#f39c12" : "#fff";
             updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
         }
-        
-        updateWindTrend(); // Fast update
 
-        // --- HEAVY TIER (2s) ---
-        if (tick % 2 === 0) {
-            refreshGraph('stw'); refreshGraph(displayModeSog === 'VMG' ? 'vmg' : 'sog'); refreshGraph('depth'); refreshGraph('tws');
-        }
+        updateWindTrend();
 
-        // --- SLOW TIER (3s) ---
+        // HEAVY TIER (2s)
+        if (tick % 2 === 0) { refreshGraph('stw'); refreshGraph(displayModeSog === 'VMG' ? 'vmg' : 'sog'); refreshGraph('depth'); refreshGraph('tws'); }
+
+        // SLOW TIER (3s)
         if (tick % 3 === 0) {
-            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averages.longWindow, false),
-                cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averages.longWindow, false),
-                awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averages.longWindow, true),
-                twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averages.longWindow, true),
-                twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averages.longWindow, false);
+            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, 60000, false), cObj = getCircularAverageFromBuffer(store.longBuf.cog, 60000, false),
+                awObj = getCircularAverageFromBuffer(store.longBuf.awa, 60000, true), twObj = getCircularAverageFromBuffer(store.longBuf.twa, 60000, true),
+                twdObj = getCircularAverageFromBuffer(store.longBuf.twd, 60000, false);
 
             const upUI = (el, obj, isCompass = false) => {
                 if (!obj || obj.val === null) { el.innerHTML = "---&deg;"; el.classList.remove('unstable-data'); }
@@ -283,11 +288,12 @@ function startDisplayLoop() {
                 }
             };
             upUI(ui.hdg, hObj, true); upUI(ui.cog, cObj, true); upUI(ui.awaAvg, awObj, false); upUI(ui.twaAvg, twObj, false); upUI(ui.twdAvg, twdObj, true);
-            if (hObj && twObj && hObj.val !== null) {
-                const tackHdgDeg = radToDeg((hObj.val - (twObj.val * 2) + Math.PI * 2) % (Math.PI * 2));
+            
+            if (hObj && twObj) {
+                const tackHdgDeg = radToDeg((hObj.val - twObj.val * 2 + Math.PI * 2) % (Math.PI * 2));
                 ui.tackHdg.innerHTML = `${Math.round((tackHdgDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
                 if (cObj) {
-                    const tackCogDeg = radToDeg((cObj.val - (twObj.val * 2) + Math.PI * 2) % (Math.PI * 2));
+                    const tackCogDeg = radToDeg((cObj.val - twObj.val * 2 + Math.PI * 2) % (Math.PI * 2));
                     ui.tackCog.innerHTML = `${Math.round((tackCogDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
                 }
             }
@@ -296,13 +302,14 @@ function startDisplayLoop() {
                 curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(smTwd.val)); ui.twdArrow.setAttribute('transform', `rotate(${curWindCompassRot}, 20, 20)`);
                 curBoatCompassRot = getShortestRotation(curBoatCompassRot, radToDeg(smHdg.val)); ui.twdBoat.setAttribute('transform', `rotate(${curBoatCompassRot}, 20, 20)`);
             }
+            lastAvgUIUpdate = now;
         }
         if (tick % 60 === 0) tick = 0;
     }, RENDER_INTERVAL_MS);
 }
 
 // ==========================================================================
-// 8. INTERAZIONI E RETE
+// 7. CONFIGURAZIONE E GRAFICI UTILS
 // ==========================================================================
 async function fetchServerConfig() {
     if (!window.location.protocol.includes("http")) return;
@@ -314,7 +321,7 @@ async function fetchServerConfig() {
             if (response.ok) {
                 const data = await response.json();
                 const actual = data.configuration || data;
-                if (actual && typeof actual === 'object') {
+                if (actual) {
                     const parseNumbers = (obj) => { for (let k in obj) { if (typeof obj[k] === 'object') parseNumbers(obj[k]); else if (!isNaN(obj[k]) && obj[k] !== "") obj[k] = parseFloat(obj[k]); } };
                     parseNumbers(actual);
                     if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
@@ -359,6 +366,9 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     svg.innerHTML = isTws ? `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="rgba(255,255,255,0.08)" stroke="none" />${cS}` : `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="${colorKey}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${colorKey}" />`;
 }
 
+// ==========================================================================
+// 8. INTERAZIONI E RETE
+// ==========================================================================
 function toggleFocusMode(type, element) {
     const container = document.querySelector('.main-container'); const parentPanel = element.closest('.side-panel'); const isLeft = parentPanel.classList.contains('left-panel');
     isFocusActive = !isFocusActive;
@@ -401,7 +411,7 @@ ui.depth.closest('.data-box').addEventListener('click', (function() { let dC = 0
 
 function startDynamicSimulation() {
     ui.status.innerText = "SIM ATTIVO";
-    let sim = { hdg: 45, tws: 12, twd: 45, depth: 12, stw: 5, leeway: 0, currentSpeed: 1.5, currentDir: 90, startTime: Date.now() };
+    let sim = { hdg: 45, tws: 12, twd: 90, depth: 12, stw: 5, leeway: 0, currentSpeed: 1.5, currentDir: 90, startTime: Date.now() };
     simInterval = setInterval(() => {
         const elapsed = (Date.now() - sim.startTime) / 1000;
         if (elapsed > 120 && elapsed < 121) sim.twd = Math.random() * 360;
@@ -411,9 +421,11 @@ function startDynamicSimulation() {
         let twaRel = (sim.twd - sim.hdg + 360) % 360; if (twaRel > 180) twaRel -= 360;
         let targetStw = 3 + (4 * Math.sin((Math.abs(twaRel) - 45) * Math.PI / 125)); sim.stw += (Math.max(3, Math.min(8, targetStw)) - sim.stw) * 0.05;
         const rawLeeway = Math.sin(degToRad(twaRel)) * 4; sim.leeway += (rawLeeway - sim.leeway) * 0.05;
+
         const bX = sim.stw * Math.sin(degToRad(sim.hdg + sim.leeway)), bY = sim.stw * Math.cos(degToRad(sim.hdg + sim.leeway));
         const cX = sim.currentSpeed * Math.sin(degToRad(sim.currentDir)), cY = sim.currentSpeed * Math.cos(degToRad(sim.currentDir));
         const sog = Math.sqrt(Math.pow(bX + cX, 2) + Math.pow(bY + cY, 2)), cog = (radToDeg(Math.atan2(bX + cX, bY + cY)) + 360) % 360;
+
         const twaRad = degToRad(twaRel), aws = Math.sqrt(Math.pow(sim.stw, 2) + Math.pow(sim.tws, 2) + 2 * sim.stw * sim.tws * Math.cos(twaRad));
         const awa = Math.atan2(sim.tws * Math.sin(twaRad), sim.stw + sim.tws * Math.cos(twaRad));
         processIncomingData("environment.wind.speedApparent", ktsToMs(aws)); processIncomingData("environment.wind.angleApparent", awa);
@@ -424,7 +436,7 @@ function startDynamicSimulation() {
 }
 
 // ==========================================================================
-// 11. INIT
+// 10. INIT
 // ==========================================================================
 window.addEventListener('contextmenu', e => e.preventDefault(), true);
 (function genTicks() { const c = document.getElementById('ticks'); if (c) { for (let i = 0; i < 360; i += 10) { const l = document.createElementNS("http://www.w3.org/2000/svg", "line"); const m = i % 30 === 0; l.setAttribute("x1", "200"); l.setAttribute("y1", "40"); l.setAttribute("x2", "200"); l.setAttribute("y2", (m ? 60 : 50)); l.setAttribute("stroke", m ? "#fff" : "#666"); l.setAttribute("stroke-width", m ? "2" : "1"); l.setAttribute("transform", `rotate(${i}, 200, 200)`); c.appendChild(l); } } })();

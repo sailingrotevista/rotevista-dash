@@ -158,16 +158,24 @@
                     <text id="aws-val-svg" x="0" y="42" fill="#fff" font-size="52" font-weight="bold" text-anchor="middle">0.0</text>
                 </g>
 
-                <g id="awa-pointer" transform="rotate(0, 200, 200)" opacity="0.85">
-                    <path d="M200,80 L211,95 L200,145 L189,95 Z" fill="#ff8c00" stroke="#000" stroke-width="1" />
-                    <text x="200" y="102" fill="#000" font-size="11" font-weight="900" text-anchor="middle" font-family="Arial Black">A</text>
+                <!-- Lancetta Apparente (AWA) - Versione allungata -->
+                <g id="awa-pointer" transform="rotate(0, 200, 200)" opacity="0.9">
+                    <!-- Ho portato 75 -> 70 (fuori) e 145 -> 155 (dentro) -->
+                    <path d="M 200,70 L 213,95 L 200,145 L 187,95 Z"
+                          fill="#ff8c00" stroke="#000" stroke-width="1" />
+                    <text x="200" y="90" fill="#000" font-size="10" font-weight="900" text-anchor="middle" font-family="Arial Black">A</text>
                 </g>
-                
-                <g id="twa-pointer" transform="rotate(0, 200, 200)" opacity="0.85">
-                    <path d="M200,90 L206,98 L200,125 L194,98 Z" fill="#ffff00" stroke="#000" stroke-width="0.8" />
-                    <text x="200" y="104" fill="#000" font-size="8" font-weight="900" text-anchor="middle" font-family="Arial Black">T</text>
-                    <circle id="trend-gauge-cw"  cx="215" cy="110" r="4" fill="#ffffff" opacity="0.3" />
-                    <circle id="trend-gauge-ccw" cx="185" cy="110" r="4" fill="#ffffff" opacity="0.3" />
+
+                <!-- Lancetta Reale (TWA) - FORMA A GOCCIA (Secondaria/Piccola) -->
+                <g id="twa-pointer" transform="rotate(0, 200, 200)" opacity="0.9">
+                    <!-- Goccia piccola: inizia a y=92, punta a y=128 -->
+                    <path d="M 200,92 A 8,8 0 0 1 208,100 C 208,108 200,128 200,128 C 200,128 192,108 192,100 A 8,8 0 0 1 200,92 Z"
+                          fill="#ffff00" stroke="#000" stroke-width="0.8" />
+                    <text x="200" y="106" fill="#000" font-size="9" font-weight="900" text-anchor="middle" font-family="Arial Black">T</text>
+                    
+                    <!-- Pallini Trend (Sempre agganciati alla rotazione del TWA) -->
+                    <circle id="trend-gauge-cw"  cx="215" cy="110" r="4" fill="#ffffff" />
+                    <circle id="trend-gauge-ccw" cx="185" cy="110" r="4" fill="#ffffff" />
                 </g>
                 
                 <g transform="translate(75, 395)">
