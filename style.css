@@ -25,27 +25,17 @@ body {
     box-sizing: border-box;
     gap: 8px; /* Spazio costante tra tutti i blocchi della dashboard */
     
-    /*
-       LAYOUT LIQUIDO:
+    /* LAYOUT LIQUIDO:
        I lati hanno un minimo vitale (180px) per proteggere i testi.
-       Il centro (auto) si adatta millimetricamente al diametro dell'SVG.
-    */
+       Il centro (auto) si adatta millimetricamente al diametro dell'SVG. */
     grid-template-columns: minmax(180px, 1fr) minmax(auto, 1.5fr) minmax(180px, 1fr);
     grid-template-rows: 100%;
     transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
     justify-content: stretch;
 }
 
-/* Espansione colonne per schermi molto larghi (es. 16:10 / 16:9)
-@media (min-aspect-ratio: 1.5) {
-    .main-container {
-        grid-template-columns: minmax(200px, 1fr) minmax(auto, 3fr) minmax(200px, 1fr);
-        gap: 15px;
-    }
-}*/
-
 /* ==========================================================================
-   2. PANNELLI E DATA-BOX
+   2. PANNELLI E DATA-BOX (DISTRIBUZIONE FR)
    ========================================================================== */
 .side-panel {
     display: flex;
@@ -54,12 +44,14 @@ body {
     border-radius: 12px;
     height: 100%;
     overflow: hidden;
+    gap: 2px;
 }
 
 .left-panel { grid-column: 1; }
 
 .center-panel {
     grid-column: 2;
+    position: relative; /* Indispensabile per posizionare #status al suo interno */
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -77,13 +69,14 @@ body {
 .data-box {
     position: relative;
     border-bottom: 1px solid #222;
-    padding: 4px 8px;
+    padding: 2px 4px; /* Padding ottimizzato per il recupero spazio verticale */
     display: flex;
     flex-direction: column;
     width: 100%;
     box-sizing: border-box;
-    container-type: size; /* Rende il box misurabile per l'unità cqh */
-    flex: 1;
+    container-type: size; /* Per unità cqh */
+    flex: 1 1 0px; /* Divide lo spazio equamente in 5 parti */
+    min-height: 0;
     overflow: hidden;
 }
 
@@ -91,35 +84,24 @@ body {
 .left-panel .data-box { align-items: flex-start; text-align: left; }
 .right-panel .data-box { align-items: flex-end; text-align: right; }
 
-.side-panel {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    gap: 2px;
-}
-
-.data-box {
-    flex: 1 1 0px; /* Ogni box si divide lo spazio equamente, ma può ridursi se serve */
-    min-height: 0; /* Fondamentale per permettere al grafico di non eccedere */
-    padding: 2px 4px; /* Ancora più compatto */
-}
-
 /* ==========================================================================
-   3. TACTICAL FOCUS MODE (AUTO-EXPANDING SPLIT)
+   3. TACTICAL FOCUS MODE (AUTO-EXPANDING SPLIT / DUAL SCREEN)
    ========================================================================== */
 
 /* Nasconde le colonne non focalizzate */
 .focus-active .side-panel:not(.has-focus) { display: none !important; }
 
-/* Protezione larghezza minima per il grafico focalizzato */
-.focus-active .side-panel.has-focus { min-width: 400px !important; }
-
-/* Logica di espansione: il box scelto prende tutto il resto dello spazio (1fr) */
-.focus-active.focus-side-left { grid-template-columns: 1fr auto !important; }
+/* In Focus Mode Left: [Pannello Sinistro Largo | Centro Stretto] */
+.focus-active.focus-side-left {
+    grid-template-columns: 2fr auto !important;
+}
 .focus-active.focus-side-left .side-panel.has-focus { grid-column: 1 !important; }
 .focus-active.focus-side-left .center-panel { grid-column: 2 !important; justify-content: flex-start; }
 
-.focus-active.focus-side-right { grid-template-columns: auto 1fr !important; }
+/* In Focus Mode Right: [Centro Stretto | Pannello Destro Largo] */
+.focus-active.focus-side-right {
+    grid-template-columns: auto 2fr !important;
+}
 .focus-active.focus-side-right .center-panel { grid-column: 1 !important; justify-content: flex-start; }
 .focus-active.focus-side-right .side-panel.has-focus { grid-column: 2 !important; }
 
@@ -138,15 +120,6 @@ body {
 .focus-active .is-focused .label-row .label { font-size: 2rem !important; }
 .focus-active .is-focused .label-row .unit { font-size: 2rem !important; }
 
-/* Ingrandimento etichette Hercules in Focus */
-.focus-active .is-focused.box-hercules .unit::before,
-.focus-active .is-focused.box-hercules .unit::after,
-.focus-active .is-focused.box-hercules .label::before,
-.focus-active .is-focused.box-hercules .label::after {
-    font-size: 1.5rem !important;
-    letter-spacing: 2px !important;
-}
-
 .focus-active .is-focused .sparkline path { stroke-width: 1px !important; }
 
 /* ==========================================================================
@@ -154,17 +127,10 @@ body {
    ========================================================================== */
 .label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; width: 100%; }
 
-/* Simmetria Titoli/Unità: SX [Label...Unit], DX [Unit...Label] */
-.left-panel .label-row { justify-content: space-between; flex-direction: row; }
-.right-panel .label-row { justify-content: space-between; flex-direction: row; }
-
-/* Forza i titoli MEAN (senza unità) a destra nella colonna DX */
-.right-panel .label-row .label:only-child { margin-left: auto; }
-
 .label { color: #666; font-size: 0.65rem; font-weight: bold; text-transform: uppercase; }
 .unit { color: #888; font-size: 0.6rem; font-weight: bold; }
 
-/* Numero standard (22% altezza box per non coprire il grafico) */
+/* Numero standard (22% altezza box) */
 .value {
     color: #fff;
     font-size: clamp(1.2rem, 22cqh, 3rem);
@@ -174,12 +140,7 @@ body {
     padding-bottom: 5px;
 }
 
-/* Centratura verticale automatica per i box senza grafico */
-.value-large, .dual-value-container, .value-with-compass {
-    margin-top: auto;
-    margin-bottom: auto;
-}
-
+.value-large, .dual-value-container, .value-with-compass { margin-top: auto; margin-bottom: auto; }
 .value-large { font-size: clamp(1.5rem, 35cqh, 4.5rem); line-height: 0.85; }
 
 /* TACK Layout (Mure opposte) */
@@ -189,12 +150,11 @@ body {
 .value.dual-val { font-size: clamp(1rem, 22cqh, 2rem); padding-bottom: 0; line-height: 0.9; }
 
 /* ==========================================================================
-   5. BUSSOLA TWD DINAMICA
+   5. BUSSOLA TWD DINAMICA (WIDGET)
    ========================================================================== */
 .value-with-compass { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 5px; }
 
 .mini-compass {
-    /* Forma circolare protetta: 80% dell'altezza o 42% della larghezza */
     width: min(80cqh, 42cqw);
     height: min(80cqh, 42cqw);
     aspect-ratio: 1 / 1;
@@ -206,13 +166,8 @@ body {
     transition: all 0.4s ease;
 }
 
-.value-with-compass .value-large {
-    margin: 0; flex: 1; text-align: right;
-    font-size: clamp(1rem, 38cqh, 4rem); white-space: nowrap;
-}
-
 /* ==========================================================================
-   6. GRAFICI E SCALE (SIMMETRIA INTERNA)
+   6. GRAFICI E SCALE (OTTIMIZZAZIONE ORIZZONTALE)
    ========================================================================== */
 .graph-wrapper {
     position: relative; width: 100%; flex-grow: 1; min-height: 0; margin-top: 4px;
@@ -220,7 +175,7 @@ body {
     border-radius: 4px; gap: 0px !important;
 }
 
-/* Spostamento verso il centro per eliminare spazi neri morti */
+/* Allargamento verso il centro */
 .left-panel .graph-wrapper { margin-right: -6px; }
 .right-panel .graph-wrapper { margin-left: -6px; }
 
@@ -229,17 +184,17 @@ body {
 
 .scale-labels {
     display: flex; flex-direction: column; justify-content: space-between;
-    font-size: 10px; color: #777; font-weight: bold; min-width: 12px;
-    height: 100%; line-height: 1; padding: 0 px 0; border: none !important;
+    font-size: 8px; color: #777; font-weight: bold; min-width: 12px;
+    height: 100%; line-height: 1; padding: 0; border: none !important;
 }
 
-/* Simmetria: le scale numeriche "guardano" sempre il quadrante centrale */
-.left-panel .scale-labels { order: 2; text-align: left; padding-left: 4px; border-left: 1px solid rgba(255,255,255,0.08); }
+/* Simmetria scale */
+.left-panel .scale-labels { order: 2; text-align: left; padding-left: 4px; }
 .left-panel .sparkline { order: 1; }
-.right-panel .scale-labels { order: 1; text-align: right; padding-right: 4px; border-right: 1px solid rgba(255,255,255,0.08); }
+.right-panel .scale-labels { order: 1; text-align: right; padding-right: 4px; }
 .right-panel .sparkline { order: 2; }
 
-/* Colori semantici per i grafici */
+/* Colori grafici */
 #stw-graph { stroke: #2ecc71; fill: rgba(46, 204, 113, 0.12); }
 #sog-graph { stroke: #f39c12; fill: rgba(243, 156, 18, 0.12); }
 #depth-graph { stroke: #3498db; fill: rgba(52, 152, 219, 0.12); }
@@ -252,9 +207,7 @@ body {
 .box-hercules { background: rgba(255, 0, 0, 0.08) !important; }
 .box-hercules .scale-labels { color: #ff8888; }
 
-/* Etichetta Hercules dinamica accanto alle unità */
-.box-hercules .unit::before, .box-hercules .unit::after,
-.box-hercules .label::before {
+.box-hercules .unit::before, .box-hercules .unit::after, .box-hercules .label::before {
     font-size: 7px; color: #ff4444; font-weight: 900; letter-spacing: 1px; text-transform: uppercase;
 }
 .left-panel .box-hercules .unit::before { content: "HERCULES "; }
@@ -262,226 +215,100 @@ body {
 .right-panel .box-hercules .label:only-child::after { content: " HERCULES"; }
 
 /* ==========================================================================
-   8. STATI E ANIMAZIONI
+   8. STATI, STATUS E ANIMAZIONI
    ========================================================================== */
-#status { position: absolute; top: 5px; right: 15px; font-size: 0.5rem; text-transform: uppercase; z-index: 1000; }
+#status {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-size: 0.6rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    z-index: 1000;
+    letter-spacing: 1px;
+    background: rgba(0,0,0,0.4);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
 .online { color: #2ecc71; opacity: 0.5; }
 .offline { color: #e74c3c; font-weight: bold; }
 
-/* Animazioni fluide per gli elementi rotanti (0.8s) */
 #awa-pointer, #twa-pointer, #track-pointer, #twd-arrow, #twd-boat-wrap {
     transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-#leeway-mask-rect { transition: none; }
+.unstable-data { animation: blink-unstable 1.5s infinite ease-in-out; color: #f39c12 !important; }
 .alarm-warning { color: #f1c40f !important; }
 .alarm-danger { color: #e74c3c !important; font-weight: 900; animation: blink-unstable 1s infinite; }
-
-@keyframes blink-unstable { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
-.unstable-data { animation: blink-unstable 1.5s infinite ease-in-out; color: #f39c12 !important; }
+@keyframes blink-unstable { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
 #wind-gauge { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
 
 /* ==========================================================================
-   9. RESPONSIVE (PORTRAIT MODE - IPHONE/TABLET)
+   9. RESPONSIVE (PORTRAIT MODE)
    ========================================================================== */
 @media (max-aspect-ratio: 0.9 / 1) {
-    .main-container {
-        grid-template-columns: 1fr 1fr !important;
-        grid-template-rows: 45vh calc(55vh - 8px) !important;
-    }
-    
+    .main-container { grid-template-columns: 1fr 1fr !important; grid-template-rows: 45vh calc(55vh - 8px) !important; }
     .center-panel { grid-row: 1 !important; grid-column: 1 / span 2 !important; padding: 5px 0; }
     .left-panel { grid-row: 2 !important; grid-column: 1 !important; }
     .right-panel { grid-row: 2 !important; grid-column: 2 !important; }
-
-    /* Focus Mode Verticale: Impilamento Flex sopra/sotto */
     .main-container.focus-active { display: flex !important; flex-direction: column !important; }
-    .focus-active .center-panel { flex: 0 0 45vh !important; width: 100% !important; }
-    .focus-active .side-panel.has-focus { flex: 0 0 calc(55vh - 8px) !important; width: 100% !important; display: flex !important; }
-
-    /* Altezze box Portrait dinamiche (per evitare overflow) */
+    .focus-active .center-panel { flex: 0 0 45vh !important; }
+    .focus-active .side-panel.has-focus { flex: 0 0 calc(55vh - 8px) !important; display: flex !important; }
     .data-box { height: auto !important; flex: 1 !important; }
-    .data-box:nth-child(1), .data-box:nth-child(2) { flex: 1.5 !important; }
-
-    .value-large { font-size: clamp(1.2rem, 35cqh, 2.5rem); margin: auto 0; }
-    .value.dual-val { font-size: clamp(0.9rem, 30cqh, 1.4rem); }
-    
-    /* Protezione bussola per box bassi (Portrait) */
-    .mini-compass {
-        width: min(70cqh, 40cqw) !important;
-        height: min(70cqh, 40cqw) !important;
-    }
-    
-    .right-panel .label-row .label:only-child { margin-left: auto !important; }
-    .box-hercules .unit::before, .box-hercules .unit::after { font-size: 6px !important; }
 }
 
 /* ==========================================================================
    10. NIGHT MODE (RED ON BLACK - TACTICAL)
    ========================================================================== */
-body.night-mode {
-    background-color: #000 !important;
-    color: #ff0000 !important;
-}
+body.night-mode { background-color: #000 !important; color: #ff0000 !important; }
+.night-mode .side-panel { background: rgba(20, 0, 0, 0.4); border: 1px solid #330000; }
+.night-mode .data-box { border-bottom-color: #260000; }
+.night-mode .label, .night-mode .unit, .night-mode .dual-label { color: #800000 !important; }
+.night-mode .value, .night-mode .value-large { color: #ff3333 !important; text-shadow: 0 0 8px rgba(255, 0, 0, 0.4); }
 
-/* --- Pannelli e Box --- */
-.night-mode .side-panel {
-    background: rgba(20, 0, 0, 0.4);
-    border: 1px solid #330000;
-}
-.night-mode .data-box {
-    border-bottom-color: #260000;
-}
+.night-mode .graph-wrapper { background: rgba(30, 0, 0, 0.3) !important; }
+.night-mode .sparkline path:first-of-type { display: none !important; }
+.night-mode .sparkline path { fill: none !important; stroke: #ff3333 !important; stroke-width: 1.8px !important; opacity: 1 !important; filter: drop-shadow(0 0 2px rgba(255, 0, 0, 0.4)); }
+.night-mode .sparkline line { stroke: #4d0000 !important; stroke-width: 0.7px !important; }
+.night-mode #tws-graph line:not([stroke*="rgba"]) { stroke: #ff3333 !important; stroke-width: 1.8px !important; }
+.night-mode .scale-labels { color: #660000 !important; }
 
-/* --- Tipografia Secondaria (Titoli, Unità, TACK Labels) --- */
-.night-mode .label,
-.night-mode .unit,
-.night-mode .dual-label {
-    color: #800000 !important; /* Rosso cupo per non affaticare la vista */
-}
+.night-mode .box-hercules { background: rgba(60, 0, 0, 0.2) !important; }
+.night-mode .line-hercules { filter: drop-shadow(0 0 6px #ff0000) !important; }
 
-/* --- Valori Numerici --- */
-.night-mode .value,
-.night-mode .value-large {
-    color: #ff3333 !important;
-    text-shadow: 0 0 8px rgba(255, 0, 0, 0.4); /* Bagliore per profondità */
-}
-
-/* --- Grafici Sparkline (Solo Linea, No Riempimento) --- */
-.night-mode .graph-wrapper {
-    background: rgba(30, 0, 0, 0.3) !important;
-}
-
-/* Nasconde l'area di riempimento sotto la linea */
-.night-mode .sparkline path:first-of-type {
-    display: none !important;
-}
-
-/* Rende la linea del tracciato molto più visibile */
-.night-mode .sparkline path {
-    fill: none !important;
-    stroke: #ff3333 !important;
-    stroke-width: 1.8px !important;
-    opacity: 1 !important;
-    filter: drop-shadow(0 0 2px rgba(255, 0, 0, 0.4));
-}
-
-/* Griglie interne (Orizzontali e Verticali) uniformi */
-.night-mode .sparkline line {
-    stroke: #4d0000 !important;
-    stroke-width: 0.7px !important;
-    opacity: 1 !important;
-}
-
-/* Forza i segmenti colorati del TWS alla stessa luminosità della linea */
-.night-mode #tws-graph line:not([stroke*="rgba"]) {
-    stroke: #ff3333 !important;
-    stroke-width: 1.8px !important;
-}
-
-/* Numeri delle scale a lato dei grafici */
-.night-mode .scale-labels {
-    color: #660000 !important;
-}
-
-/* --- Hercules Mode in Night Mode --- */
-.night-mode .box-hercules {
-    background: rgba(60, 0, 0, 0.2) !important;
-}
-.night-mode .line-hercules {
-    filter: drop-shadow(0 0 6px #ff0000) !important;
-}
-
-/* Scritta Hercules in alto (Colore personalizzato #f60000) */
-.night-mode .box-hercules .unit::before,
-.night-mode .box-hercules .unit::after,
-.night-mode .box-hercules .label::before,
-.night-mode .box-hercules .label::after {
-    color: #f60000 !important;
-    font-weight: 700;
-    opacity: 0.9;
-    letter-spacing: 1px;
-}
-
-/* --- Strumento Centrale (Wind Gauge) --- */
 .night-mode #wind-gauge circle { stroke: #330000; }
 .night-mode #ticks line { stroke: #4d0000 !important; }
 .night-mode #tick-labels { fill: #800000 !important; }
 .night-mode #boat-icon { fill: #330000 !important; opacity: 0.6; }
 .night-mode #aws-val-svg { fill: #ff3333 !important; }
-
-/* Settori Vento (Distinguibili per stile, non per colore) */
-.night-mode #wind-gauge path[stroke="#ff0000"] { stroke: #660000 !important; opacity: 0.8; } /* Sx Solid */
-.night-mode #wind-gauge path[stroke="#00ff00"] {
-    stroke: #660000 !important;
-    stroke-dasharray: 4, 3; /* Dx Dashed */
-    opacity: 0.8;
-}
-.night-mode #wind-gauge path[stroke="#ff8800"] { stroke: #330000 !important; stroke-width: 8; } /* Poppa Dark */
-
-/* Lancette Wind Gauge */
 .night-mode #awa-pointer path { fill: #ff0000; stroke: #000; }
 .night-mode #twa-pointer path { fill: #800000; stroke: #000; }
 .night-mode #track-pointer path { fill: #ff0000; stroke: #fff; stroke-width: 0.5; }
+.night-mode #aws-display-group text { fill: #ff3333 !important; }
+.night-mode #center-glow feDropShadow { flood-color: #ff0000 !important; flood-opacity: 0.6 !important; }
 
-/* --- Blocco Leeway (Scarroccio) --- */
-.night-mode rect[fill="url(#leeway-grad)"] { fill: url(#leeway-night-grad) !important; }
-.night-mode #leeway-val { fill: #ff3333 !important; }
-.night-mode g[stroke="#555"] line { stroke: #4d0000 !important; }
-.night-mode g[fill="#555"] text { fill: #660000 !important; }
-.night-mode rect[fill="#222"] { fill: #0a0000 !important; stroke: #200000; }
-
-/* --- Bussola TWD --- */
+/* Bussola TWD Night */
 .night-mode .mini-compass { border-color: #330000; background: #000; }
 .night-mode .mini-compass text { fill: #800000 !important; }
-.night-mode #twd-arrow path { fill: #ff0000 !important; stroke: #000 !important; }
-.night-mode #twd-boat-wrap path { fill: #ff0000 !important; opacity: 0.15; }
+.night-mode #twd-arrow #twd-wind-chevron { stroke: #ff3333 !important; stroke-width: 3px !important; opacity: 1 !important; filter: drop-shadow(0 0 4px #ff0000); transform-origin: center; }
+.night-mode #twd-boat-wrap path { fill: #ff3333 !important; opacity: 0.4 !important; }
 
-.night-mode #center-glow feDropShadow {
-    flood-color: #ff0000 !important;
-    flood-opacity: 0.6 !important;
-}
+/* ==========================================================================
+   11. TREND VENTO E ALLARME STRAMBATA (GYBE)
+   ========================================================================== */
+@keyframes blink-trend { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
-.night-mode #aws-display-group text {
-    fill: #ff3333 !important;
-}
-
-/* --- Modifica: Miglioramento visibilità TWD in Night Mode --- */
-.night-mode #twd-arrow #twd-wind-chevron {
-    stroke: #ff3333 !important;        /* Rosso più brillante */
-    stroke-width: 3px !important;      /* Più spesso */
-    opacity: 1 !important;             /* Piena opacità */
-    filter: drop-shadow(0 0 4px #ff0000); /* Effetto neon per staccarsi dallo sfondo */
-    transform-origin: center;          /* Forza il centro corretto */
-}
-
-/* Assicuriamoci che anche la punta della barca sia visibile */
-.night-mode #twd-boat-wrap path {
-    fill: #ff3333 !important;
-    opacity: 0.4 !important;
-}
-
-/* Definiamo il lampeggio */
-@keyframes blink-trend {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
-}
-
-/* Stile base dei pallini */
 #trend-dot-cw, #trend-dot-ccw, #trend-gauge-cw, #trend-gauge-ccw {
     opacity: 0.3;
     transition: opacity 0.3s ease;
 }
 
-/* Quando attivi la classe, forziamo l'animazione */
-.is-trending {
-    animation: blink-trend 1s infinite !important;
-}
+.is-trending { animation: blink-trend 1s infinite !important; }
 
 /* Allarme Strambata: Rosso fisso con bagliore neon */
 .is-gybing {
     opacity: 1 !important;
-    animation: none !important; /* Rimuove il lampeggio */
+    animation: none !important;
     filter: drop-shadow(0 0 8px #ff0000) !important;
 }

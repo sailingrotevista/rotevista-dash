@@ -17,18 +17,20 @@ const SIM_SAMPLE_INTERVAL = 1000;
 // 2. STATO GLOBALE E RIFERIMENTI UI
 // ==========================================================================
 let simulationMode = false;
+let displayModeSog = 'SOG'; // 'SOG' o 'VMG'
 let socket, renderInterval, simInterval;
 let lastAvgUIUpdate = 0, audioCtx = null, lastAlarmTime = 0;
 let curAwaRot = 0, curTwaRot = 0, curTrackRot = 0, curTwdRoseRot = 0;
+let curBoatCompassRot = 0, curWindCompassRot = 0;
 
-// Variabili di stato per filtri e logica tattica
-let smoothedLeeway = 0;
-let rotationTrend = 0;
-let lastShortAvgVal = null;
-let lastInstantTwa = null;
+let smoothedLeeway = 0, rotationTrend = 0;
+let lastShortAvgVal = null, lastInstantTwa = null;
+let lastTrendTime = Date.now(), lastGybeAlarmTime = 0, lastTWCompute = 0;
+let twDirty = false;
+let reconnectDelay = 1000;
 let isNavigating = false;
 
-let pressTimer, isFocusActive = false, blockNextClick = false;
+let pressTimer, isFocusActive = false;
 
 const graphModes = {
     stw: localStorage.getItem('mode_stw') || 'standard',
@@ -41,8 +43,8 @@ const store = {
     raw: {}, timestamps: {},
     smoothBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
     longBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
-    histories: { stw: [], sog: [], depth: [], tws: [] },
-    lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0 }
+    histories: { stw: [], sog: [], depth: [], tws: [], vmg: [] },
+    lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0 }
 };
 
 const ui = {
@@ -61,7 +63,7 @@ const ui = {
 };
 
 // ==========================================================================
-// 3. MATEMATICA E UTILS
+// 3. UTILITIES DI SISTEMA (MATEMATICA E BUFFER)
 // ==========================================================================
 function radToDeg(rad) { return rad * (180 / Math.PI); }
 function degToRad(deg) { return deg * (Math.PI / 180); }
@@ -69,26 +71,72 @@ function msToKts(ms) { return ms * 1.94384; }
 function ktsToMs(kts) { return kts / 1.94384; }
 function getShortestRotation(curr, target) { let diff = (target - curr) % 360; if (diff > 180) diff -= 360; else if (diff < -180) diff += 360; return curr + diff; }
 
+/**
+ * Gestione sicura dei buffer per prevenire memory leak.
+ */
+function safePush(buffer, val, time, maxLen = 200) {
+    buffer.push({ val: val, time: time });
+    if (buffer.length > maxLen) { buffer.shift(); }
+}
+
 function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
-    const now = Date.now(); const validData = bufferArray.filter(item => (now - item.time) <= windowMs);
+    const now = Date.now();
+    const validData = bufferArray.filter(item => (now - item.time) <= windowMs);
     if (validData.length === 0) return null;
-    let sSin = 0, sCos = 0; validData.forEach(item => { sSin += Math.sin(item.val); sCos += Math.cos(item.val); });
+    let sSin = 0, sCos = 0;
+    validData.forEach(item => { sSin += Math.sin(item.val); sCos += Math.cos(item.val); });
     let R = Math.sqrt(sSin * sSin + sCos * sCos) / validData.length;
     let isStable = (validData.length > 2) && (validData[validData.length - 1].time - validData[0].time >= windowMs - CONFIG.averages.stabilityTolerance) && (R > CONFIG.averages.stabilityThreshold);
-    let avgDeg = Math.round(radToDeg(Math.atan2(sSin, sCos)));
-    return { val: signed ? avgDeg : (avgDeg + 360) % 360, stable: isStable };
+    let avgRad = Math.atan2(sSin, sCos);
+    return { val: signed ? avgRad : (avgRad + 2 * Math.PI) % (2 * Math.PI), stable: isStable };
+}
+
+/**
+ * Calcola il Vento Reale (Acqua e Terra) partendo dagli Apparenti.
+ */
+function computeTrueWind() {
+    const aws = store.raw["environment.wind.speedApparent"];
+    let awa = store.raw["environment.wind.angleApparent"];
+    const stw = store.raw["navigation.speedThroughWater"] || 0, sog = store.raw["navigation.speedOverGround"] || 0;
+    const hdg = store.raw["navigation.headingTrue"] || 0, cog = store.raw["navigation.courseOverGroundTrue"] || 0;
+    
+    if (aws === undefined || awa === undefined) return;
+    if (awa > Math.PI) awa -= 2 * Math.PI;
+
+    // Logica Acqua (TWA/TWS)
+    const tw_water_x = aws * Math.cos(awa) - stw, tw_water_y = aws * Math.sin(awa);
+    const tws_water = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y), twa_water = Math.atan2(tw_water_y, tw_water_x);
+
+    // Logica Terra (TWD) con gestione deriva normalizzata
+    const drift_angle = (cog - hdg + Math.PI * 3) % (2 * Math.PI) - Math.PI;
+    const sog_vec_x = sog * Math.cos(drift_angle), sog_vec_y = sog * Math.sin(drift_angle);
+    const tw_ground_x = aws * Math.cos(awa) - sog_vec_x, tw_ground_y = aws * Math.sin(awa) - sog_vec_y;
+    let twd_ground = (hdg + Math.atan2(tw_ground_y, tw_ground_x) + 2 * Math.PI) % (2 * Math.PI);
+    
+    const now = Date.now();
+    store.raw["environment.wind.speedTrue"] = tws_water; store.raw["environment.wind.angleTrueWater"] = twa_water; store.raw["environment.wind.directionTrue"] = twd_ground;
+    
+    safePush(store.smoothBuf.twa, twa_water, now); safePush(store.longBuf.twa, twa_water, now);
+    safePush(store.smoothBuf.twd, twd_ground, now); safePush(store.longBuf.twd, twd_ground, now);
+}
+
+function processIncomingData(path, val) {
+    const now = Date.now(); store.timestamps[path] = now; store.raw[path] = val;
+    if (path === "navigation.position") store.raw["navigation.position"] = val;
+    if (path === "environment.wind.angleApparent") { safePush(store.smoothBuf.awa, val, now); safePush(store.longBuf.awa, val, now); }
+
+    const twPaths = ["environment.wind.speedApparent", "environment.wind.angleApparent", "navigation.speedThroughWater", "navigation.speedOverGround", "navigation.headingTrue", "navigation.courseOverGroundTrue"];
+    if (twPaths.includes(path)) twDirty = true;
+    if (twDirty && (now - lastTWCompute > 100)) { computeTrueWind(); lastTWCompute = now; twDirty = false; }
+
+    if (path === "navigation.headingTrue") { safePush(store.smoothBuf.hdg, val, now); safePush(store.longBuf.hdg, val, now); }
+    if (path === "navigation.courseOverGroundTrue") { safePush(store.smoothBuf.cog, val, now); safePush(store.longBuf.cog, val, now); }
 }
 
 // ==========================================================================
-// 4. LOGICA FISICA (VENTO E SICUREZZA)
+// 4. AUDIO E ALLARMI
 // ==========================================================================
-
-function playBingBing() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n;
-    function b(f, s) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f; g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4); o.start(s); o.stop(s + 0.5); }
-    b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6);
-}
+function playBingBing() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n; function b(f, s) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f; g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4); o.start(s); o.stop(s + 0.5); } b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6); }
 
 function playGybeAlarm() {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -97,65 +145,57 @@ function playGybeAlarm() {
     for (let i = 0; i < 4; i++) { note(1800, audioCtx.currentTime + (i * 0.15), 0.1); note(1200, audioCtx.currentTime + (i * 0.15) + 0.07, 0.1); }
 }
 
-function checkDepthAlarm(m) {
-    ui.depth.classList.remove('alarm-warning', 'alarm-danger');
-    if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); }
-    else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning');
-}
+function checkDepthAlarm(m) { ui.depth.classList.remove('alarm-warning', 'alarm-danger'); if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); } else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning'); }
 
-function computeTrueWind() {
-    const aws = store.raw["environment.wind.speedApparent"];
-    const awa = store.raw["environment.wind.angleApparent"];
-    const stw = store.raw["navigation.speedThroughWater"] || 0;
-    const sog = store.raw["navigation.speedOverGround"] || 0;
-    const hdg = store.raw["navigation.headingTrue"] || 0;
-    const cog = store.raw["navigation.courseOverGroundTrue"] || 0;
-    if (aws === undefined || awa === undefined) return;
-    const tw_water_x = aws * Math.cos(awa) - stw;
-    const tw_water_y = aws * Math.sin(awa);
-    const tws_water = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
-    const twa_water = Math.atan2(tw_water_y, tw_water_x);
-    const drift_angle = cog - hdg;
-    const sog_vec_x = sog * Math.cos(drift_angle);
-    const sog_vec_y = sog * Math.sin(drift_angle);
-    const tw_ground_x = aws * Math.cos(awa) - sog_vec_x;
-    const tw_ground_y = aws * Math.sin(awa) - sog_vec_y;
-    const twd_ground = (hdg + Math.atan2(tw_ground_y, tw_ground_x) + 2 * Math.PI) % (2 * Math.PI);
-    const now = Date.now();
-    store.raw["environment.wind.speedTrue"] = tws_water;
-    store.raw["environment.wind.angleTrueWater"] = twa_water;
-    store.raw["environment.wind.directionTrue"] = twd_ground;
-    store.smoothBuf.twa.push({ val: twa_water, time: now });
-    store.longBuf.twa.push({ val: twa_water, time: now });
-    store.smoothBuf.twd.push({ val: twd_ground, time: now });
-    store.longBuf.twd.push({ val: twd_ground, time: now });
-}
-
+// ==========================================================================
+// 5. TREND E TATTICA
+// ==========================================================================
+/**
+ * Monitoraggio Trend Vento Professionale (Tattica + Meteo + Gybe Safety)
+ */
 function updateWindTrend() {
+    const now = Date.now();
     const twaAvgObj = getCircularAverageFromBuffer(store.longBuf.twa, 60000, true);
     const shortAvg = getCircularAverageFromBuffer(store.longBuf.twd, 5000, false);
     const instantTwaRad = store.raw["environment.wind.angleTrueWater"];
+
     if (!shortAvg || !twaAvgObj || instantTwaRad === undefined) return;
     const instantTwaDeg = radToDeg(instantTwaRad);
-    if (lastShortAvgVal === null) { lastShortAvgVal = shortAvg.val; lastInstantTwa = instantTwaDeg; return; }
-    const gybeDetected = (Math.abs(instantTwaDeg) > 150 && Math.abs(lastInstantTwa) > 150 && Math.sign(instantTwaDeg) !== Math.sign(lastInstantTwa));
+    const shortAvgDeg = radToDeg(shortAvg.val);
+    const twaAvgDeg = radToDeg(twaAvgObj.val);
+
+    if (lastShortAvgVal === null) { lastShortAvgVal = shortAvgDeg; lastInstantTwa = instantTwaDeg; return; }
+    const dt = (now - lastTrendTime) / 1000; lastTrendTime = now;
+
+    // --- GYBE SAFETY ---
+    const gybeDetected = (Math.abs(instantTwaDeg) > 155 && Math.sign(instantTwaDeg) !== Math.sign(lastInstantTwa));
     lastInstantTwa = instantTwaDeg;
+    if (gybeDetected && isNavigating && (now - lastGybeAlarmTime > 5000)) { lastGybeAlarmTime = now; playGybeAlarm(); }
+    
     const compassDots = { cw: document.getElementById('trend-dot-cw'), ccw: document.getElementById('trend-dot-ccw') };
     const gaugeDots = { cw: document.getElementById('trend-gauge-cw'), ccw: document.getElementById('trend-gauge-ccw') };
-    if (gybeDetected && isNavigating) {
-        playGybeAlarm();
+
+    if (now - lastGybeAlarmTime < 4000 && isNavigating) {
         [compassDots.cw, compassDots.ccw, gaugeDots.cw, gaugeDots.ccw].forEach(el => { if (el) { el.classList.add('is-gybing'); el.classList.remove('is-trending'); el.setAttribute('fill', '#ff0000'); }});
         return;
     }
-    let diff = (shortAvg.val - lastShortAvgVal + 540) % 360 - 180;
-    lastShortAvgVal = shortAvg.val;
-    rotationTrend = (rotationTrend * 0.95) + (diff * 0.05);
+
+    // --- TREND CALCULATION (°/sec) ---
+    let diff = (shortAvgDeg - lastShortAvgVal + 540) % 360 - 180; lastShortAvgVal = shortAvgDeg;
+    if (dt > 0) {
+        let currentRate = Math.max(-10, Math.min(10, diff / dt)); // Clamp a 10°/sec per evitare rumore
+        const alpha = Math.min(1, dt / 5);
+        rotationTrend = rotationTrend * (1 - alpha) + currentRate * alpha;
+    }
+
     if (Math.abs(rotationTrend) > 1.0) {
-        const pos = store.raw["navigation.position"];
-        const isSouthernHemisphere = pos && pos.latitude < 0;
-        let meteoColor = (!isSouthernHemisphere) ? (rotationTrend < 0 ? "#00ff00" : "#ff0000") : (rotationTrend > 0 ? "#00ff00" : "#ff0000");
-        let isLift = (twaAvgObj.val > 0) ? (rotationTrend > 0) : (rotationTrend < 0);
+        const pos = store.raw["navigation.position"], isSouth = pos && pos.latitude < 0;
+        let meteoColor = (!isSouth) ? (rotationTrend < 0 ? "#00ff00" : "#ff0000") : (rotationTrend > 0 ? "#00ff00" : "#ff0000");
+        let isLift = (twaAvgDeg > 0) ? (rotationTrend > 0) : (rotationTrend < 0);
+        const absTwa = Math.abs(twaAvgDeg);
+        if (absTwa >= 90 && absTwa < 160) isLift = !isLift; else if (absTwa >= 160) isLift = false;
         const tacticColor = isLift ? "#00ff00" : "#ff0000";
+
         if (rotationTrend > 0) {
             if (compassDots.cw) { compassDots.cw.classList.add('is-trending'); compassDots.cw.setAttribute('fill', meteoColor); }
             if (gaugeDots.cw) { gaugeDots.cw.classList.add('is-trending'); gaugeDots.cw.setAttribute('fill', tacticColor); }
@@ -171,60 +211,72 @@ function updateWindTrend() {
 }
 
 // ==========================================================================
-// 5. DATA ROUTING
-// ==========================================================================
-function processIncomingData(path, val) {
-    const now = Date.now(); store.timestamps[path] = now; store.raw[path] = val;
-    if (path === "navigation.position") store.raw["navigation.position"] = val;
-    if (path === "environment.wind.angleApparent") { store.smoothBuf.awa.push({ val: val, time: now }); store.longBuf.awa.push({ val: val, time: now }); }
-    if (path === "environment.wind.speedApparent" || path === "environment.wind.angleApparent" || path === "navigation.speedThroughWater") computeTrueWind();
-    if (path === "navigation.headingTrue") { store.smoothBuf.hdg.push({ val: val, time: now }); store.longBuf.hdg.push({ val: val, time: now }); }
-    if (path === "navigation.courseOverGroundTrue") { store.smoothBuf.cog.push({ val: val, time: now }); store.longBuf.cog.push({ val: val, time: now }); }
-}
-
-// ==========================================================================
-// 6. MOTORE RENDERING UI
+// 6. RENDERING E LOOP PRINCIPALE
 // ==========================================================================
 function updateLeewayDisplay(deg) { const c = 125, px = 125/20; let w = Math.min(Math.abs(deg)*px, 125); ui.leewayMask.setAttribute('x', deg >= 0 ? c : c - w); ui.leewayMask.setAttribute('width', w); ui.leewayVal.textContent = `LEEWAY: ${deg.toFixed(1)}°`; }
 
 function startDisplayLoop() {
+    let tick = 0; // Contatore per i cicli di rendering
+
     renderInterval = setInterval(() => {
         const now = Date.now();
+        tick++;
+
+        // ==========================================================
+        // LIVE TIER (Ogni 1s) - Reattività, Numeri, Allarmi, Lancette
+        // ==========================================================
         const pathsToWatch = { "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog, "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog, "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth, "environment.wind.speedTrue": ui.tws };
         for (let p in pathsToWatch) { if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) { if (pathsToWatch[p] === ui.awsSvg) ui.awsSvg.textContent = "---"; else pathsToWatch[p].innerText = "---"; delete store.raw[p]; } }
 
-        const stwKts = msToKts(store.raw["navigation.speedThroughWater"] || 0);
-        const sogKts = msToKts(store.raw["navigation.speedOverGround"] || 0);
+        const stwKts = msToKts(store.raw["navigation.speedThroughWater"] || 0), sogKts = msToKts(store.raw["navigation.speedOverGround"] || 0);
         isNavigating = stwKts > CONFIG.averages.minSpeed || sogKts > CONFIG.averages.minSpeed;
 
+        // Numeri veloci
         if (store.raw["navigation.speedThroughWater"] !== undefined) { ui.stw.innerText = stwKts.toFixed(1); manageHistory('stw', stwKts); }
         if (store.raw["navigation.speedOverGround"] !== undefined) {
-            ui.sog.innerText = sogKts.toFixed(1);
-            let sogColor = "#fff"; const currentEffect = sogKts - stwKts;
-            if (currentEffect > 0.3) sogColor = "#2ecc71"; else if (currentEffect < -0.3) sogColor = "#e74c3c";
-            ui.sog.style.color = sogColor; manageHistory('sog', sogKts);
+            const twaRad = store.raw["environment.wind.angleTrueWater"];
+            const vmgKts = (twaRad !== undefined) ? Math.abs(stwKts * Math.cos(twaRad)) : 0;
+            manageHistory('vmg', vmgKts); manageHistory('sog', sogKts);
+            if (displayModeSog === 'VMG') { ui.sog.innerText = vmgKts.toFixed(1); ui.sog.style.color = "#64ffda"; document.getElementById('sog-vmg-label').textContent = 'VMG'; }
+            else { ui.sog.innerText = sogKts.toFixed(1); ui.sog.style.color = (sogKts-stwKts > 0.3) ? "#2ecc71" : (sogKts-stwKts < -0.3 ? "#e74c3c" : "#fff"); document.getElementById('sog-vmg-label').textContent = 'SOG'; }
         }
         if (store.raw["environment.depth.belowTransducer"] !== undefined) { const d = store.raw["environment.depth.belowTransducer"]; ui.depth.innerText = d.toFixed(1); checkDepthAlarm(d); manageHistory('depth', d); }
-        if (store.raw["environment.wind.speedTrue"] !== undefined) {
-            const twsKts = msToKts(store.raw["environment.wind.speedTrue"]); ui.tws.innerText = twsKts.toFixed(1);
-            ui.tws.style.color = (twsKts >= CONFIG.graphs.reef2) ? "#e74c3c" : (twsKts >= CONFIG.graphs.reef1 ? "#e67e22" : "#fff");
-            manageHistory('tws', twsKts);
-        }
+        if (store.raw["environment.wind.speedTrue"] !== undefined) { const twsKts = msToKts(store.raw["environment.wind.speedTrue"]); ui.tws.innerText = twsKts.toFixed(1); ui.tws.style.color = (twsKts >= CONFIG.graphs.reef2) ? "#e74c3c" : (twsKts >= CONFIG.graphs.reef1 ? "#e67e22" : "#fff"); manageHistory('tws', twsKts); }
         if (store.raw["environment.wind.speedApparent"] !== undefined) ui.awsSvg.textContent = msToKts(store.raw["environment.wind.speedApparent"]).toFixed(1);
 
+        // Lancette (Sempre fluide ogni 1s)
         const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, CONFIG.averages.smoothWindow, true);
-        if (smAwa) { curAwaRot = getShortestRotation(curAwaRot, smAwa.val); ui.awa.setAttribute('transform', `rotate(${curAwaRot}, 200, 200)`); }
+        if (smAwa) { curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val)); ui.awa.setAttribute('transform', `rotate(${curAwaRot}, 200, 200)`); }
         const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, CONFIG.averages.smoothWindow, true);
-        if (smTwa) { curTwaRot = getShortestRotation(curTwaRot, smTwa.val); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
+        if (smTwa) { curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val)); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
 
+        // Leeway (Ogni 1s)
         if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
-            let drift = (radToDeg(store.raw["navigation.courseOverGroundTrue"]) - radToDeg(store.raw["navigation.headingTrue"]) + 540) % 360 - 180;
-            if (sogKts < CONFIG.averages.minSpeed) smoothedLeeway = 0; else smoothedLeeway = (smoothedLeeway * 0.9) + (drift * 0.1);
+            let driftRad = (store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+            let driftDeg = radToDeg(driftRad);
+            if (sogKts < CONFIG.averages.minSpeed) smoothedLeeway = 0; else smoothedLeeway = (smoothedLeeway * 0.9) + (driftDeg * 0.1);
             curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway); ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
+            const isContaminated = Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7;
+            ui.leewayVal.style.color = isContaminated ? "#f39c12" : "#fff";
             updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
-        } else updateLeewayDisplay(0);
+        }
+        
+        updateWindTrend(); // Trend calcolato ogni secondo
 
-        if (now - lastAvgUIUpdate > 3000) {
+        // ==========================================================
+        // HEAVY TIER (Ogni 2s) - Disegno Sparklines SVG
+        // ==========================================================
+        if (tick % 2 === 0) {
+            refreshGraph('stw');
+            refreshGraph(displayModeSog === 'VMG' ? 'vmg' : 'sog');
+            refreshGraph('depth');
+            refreshGraph('tws');
+        }
+
+        // ==========================================================
+        // SLOW TIER (Ogni 3s) - Medie MEAN e Calcoli TACK
+        // ==========================================================
+        if (tick % 3 === 0) {
             let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averages.longWindow, false),
                 cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averages.longWindow, false),
                 awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averages.longWindow, true),
@@ -234,26 +286,39 @@ function startDisplayLoop() {
             const upUI = (el, obj, isCompass = false) => {
                 if (!obj || obj.val === null) { el.innerHTML = "---&deg;"; el.classList.remove('unstable-data'); }
                 else {
-                    let val = Math.round(obj.val); el.innerHTML = (isCompass ? ((val + 360) % 360).toString().padStart(3, '0') : val) + "&deg;";
+                    let valDeg = Math.round(radToDeg(obj.val)); el.innerHTML = (isCompass ? ((valDeg + 360) % 360).toString().padStart(3, '0') : valDeg) + "&deg;";
                     if (obj.stable || !isNavigating) el.classList.remove('unstable-data'); else el.classList.add('unstable-data');
                 }
             };
             upUI(ui.hdg, hObj, true); upUI(ui.cog, cObj, true); upUI(ui.awaAvg, awObj, false); upUI(ui.twaAvg, twObj, false); upUI(ui.twdAvg, twdObj, true);
+            
             if (hObj && twObj && hObj.val !== null) {
-                const tA = twObj.val * 2;
-                ui.tackHdg.innerHTML = `${Math.round((hObj.val - tA + 360) % 360).toString().padStart(3, '0')}&deg;`;
-                if (cObj) ui.tackCog.innerHTML = `${Math.round((cObj.val - tA + 360) % 360).toString().padStart(3, '0')}&deg;`;
+                const tackHdgDeg = radToDeg((hObj.val - (twObj.val * 2) + Math.PI * 2) % (Math.PI * 2));
+                ui.tackHdg.innerHTML = `${Math.round((tackHdgDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
+                if (cObj) {
+                    const tackCogDeg = radToDeg((cObj.val - (twObj.val * 2) + Math.PI * 2) % (Math.PI * 2));
+                    ui.tackCog.innerHTML = `${Math.round((tackCogDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
+                }
             }
-            if (twdObj && hObj) { updateWindTrend(); curTwdRoseRot = getShortestRotation(curTwdRoseRot, twdObj.val); ui.twdArrow.setAttribute('transform', `rotate(${curTwdRoseRot}, 20, 20)`); ui.twdBoat.setAttribute('transform', `rotate(${hObj.val}, 20, 20)`); }
-            lastAvgUIUpdate = now;
+
+            const smHdg = getCircularAverageFromBuffer(store.smoothBuf.hdg, 2000, false), smTwd = getCircularAverageFromBuffer(store.smoothBuf.twd, 2000, false);
+            if (smHdg && smTwd) {
+                curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(smTwd.val)); ui.twdArrow.setAttribute('transform', `rotate(${curWindCompassRot}, 20, 20)`);
+                curBoatCompassRot = getShortestRotation(curBoatCompassRot, radToDeg(smHdg.val)); ui.twdBoat.setAttribute('transform', `rotate(${curBoatCompassRot}, 20, 20)`);
+            }
         }
-        for (let b in store.smoothBuf) { while (store.smoothBuf[b].length > 0 && (now - store.smoothBuf[b][0].time) > CONFIG.averages.smoothWindow) store.smoothBuf[b].shift(); }
-        for (let b in store.longBuf) { while (store.longBuf[b].length > 0 && (now - store.longBuf[b][0].time) > CONFIG.averages.longWindow) store.longBuf[b].shift(); }
+
+        // Pulizia buffer
+        if (tick % 60 === 0) { // Ogni minuto pulisce tutto per sicurezza
+            for (let b in store.smoothBuf) { while (store.smoothBuf[b].length > 0 && (now - store.smoothBuf[b][0].time) > CONFIG.averages.smoothWindow) store.smoothBuf[b].shift(); }
+            for (let b in store.longBuf) { while (store.longBuf[b].length > 0 && (now - store.longBuf[b][0].time) > CONFIG.averages.longWindow) store.longBuf[b].shift(); }
+            tick = 0; // Reset contatore
+        }
     }, RENDER_INTERVAL_MS);
 }
 
 // ==========================================================================
-// 7. CONFIG E GRAFICI
+// 7. CONFIGURAZIONE E GRAFICI
 // ==========================================================================
 async function fetchServerConfig() {
     if (!window.location.protocol.includes("http")) return;
@@ -278,11 +343,43 @@ async function fetchServerConfig() {
     }
 }
 
+/**
+ * Gestisce l'archiviazione dei dati storici.
+ * Il disegno grafico viene ora gestito separatamente nel loop pesante.
+ */
 function manageHistory(t, v) {
-    const n = Date.now(); const interval = simulationMode ? SIM_SAMPLE_INTERVAL : (CONFIG.graphs.historyMinutes * 60000) / CONFIG.graphs.samples;
-    if (n - store.lastUpdates[t] > interval || store.histories[t].length === 0) { store.histories[t].push(v); if (store.histories[t].length > CONFIG.graphs.samples) store.histories[t].shift(); store.lastUpdates[t] = n; }
-    const mode = graphModes[t], cfg = calculateScale(t, store.histories[t], mode);
-    updateScaleLabels(t, cfg.min, cfg.max); drawGraph(store.histories[t], t + '-graph', cfg.min, cfg.max, t === 'tws', mode === 'hercules');
+    const n = Date.now();
+    const interval = simulationMode ? SIM_SAMPLE_INTERVAL : (CONFIG.graphs.historyMinutes * 60000) / CONFIG.graphs.samples;
+    
+    if (n - store.lastUpdates[t] > interval || store.histories[t].length === 0) {
+        store.histories[t].push(v);
+        if (store.histories[t].length > CONFIG.graphs.samples) store.histories[t].shift();
+        store.lastUpdates[t] = n;
+    }
+}
+
+/**
+ * Funzione dedicata al ridisegno dei grafici (chiamata dal loop HEAVY)
+ */
+function refreshGraph(t) {
+    const type = (t === 'vmg') ? 'sog' : t;
+    const data = store.histories[t];
+    if (!data || data.length < 2) return;
+
+    const mode = graphModes[type];
+    const cfg = calculateScale(type, data, mode);
+    
+    // Aggiornamento stile box Hercules
+    const graphEl = document.getElementById(type + '-graph');
+    if (graphEl) {
+        const box = graphEl.closest('.data-box');
+        if (box) {
+            if (mode === 'hercules') box.classList.add('box-hercules');
+            else box.classList.remove('box-hercules');
+        }
+    }
+    updateScaleLabels(type, cfg.min, cfg.max);
+    drawGraph(data, type + '-graph', cfg.min, cfg.max, t === 'tws', mode === 'hercules');
 }
 
 function calculateScale(type, data, mode) {
@@ -308,14 +405,13 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
         }
     });
     const clrs = { 'stw-graph': '#2ecc71', 'sog-graph': '#f39c12', 'depth-graph': '#3498db', 'tws-graph': '#ffffff' };
-    svg.innerHTML = isTws ? `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="rgba(255,255,255,0.08)" stroke="none" />${cS}` : `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="${clrs[id]}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${clrs[id]}" />`;
+    const colorKey = id === 'sog-graph' && displayModeSog === 'VMG' ? '#64ffda' : clrs[id];
+    svg.innerHTML = isTws ? `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="rgba(255,255,255,0.08)" stroke="none" />${cS}` : `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="${colorKey}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${colorKey}" />`;
 }
 
 // ==========================================================================
-// 8. INTERAZIONI
+// 8. INTERAZIONI E SIMULATORE
 // ==========================================================================
-window.addEventListener('contextmenu', e => e.preventDefault(), true);
-
 function toggleFocusMode(type, element) {
     const container = document.querySelector('.main-container'); const parentPanel = element.closest('.side-panel'); const isLeft = parentPanel.classList.contains('left-panel');
     isFocusActive = !isFocusActive;
@@ -324,14 +420,16 @@ function toggleFocusMode(type, element) {
 }
 
 ['stw', 'sog', 'tws', 'depth'].forEach(type => {
-    const el = document.getElementById(type + '-graph').closest('.data-box'); let lastTapTime = 0, tapTimeout;
-    el.addEventListener('pointerdown', (e) => {
-        if (e.cancelable) e.preventDefault(); const currentTime = new Date().getTime(); const tapDelay = currentTime - lastTapTime;
-        pressTimer = setTimeout(() => { if (!isFocusActive) { toggleFocusMode(type, el); lastTapTime = 0; } }, 1000);
+    const el = document.getElementById(type + '-graph').closest('.data-box');
+    let lastTapTime = 0, tapTimeout, isLongPressActive = false;
+    el.addEventListener('pointerdown', (e) => { isLongPressActive = false; pressTimer = setTimeout(() => { if (!isFocusActive) { isLongPressActive = true; toggleFocusMode(type, el); lastTapTime = 0; } }, 1000); });
+    el.addEventListener('pointerup', (e) => {
+        clearTimeout(pressTimer); if (isLongPressActive) return;
+        const currentTime = new Date().getTime(), tapDelay = currentTime - lastTapTime;
         if (tapDelay < 300 && tapDelay > 0) { clearTimeout(tapTimeout); if (!isFocusActive) { graphModes[type] = graphModes[type] === 'standard' ? 'hercules' : 'standard'; localStorage.setItem('mode_' + type, graphModes[type]); } lastTapTime = 0; }
-        else { lastTapTime = currentTime; tapTimeout = setTimeout(() => { if (isFocusActive && el.classList.contains('is-focused')) toggleFocusMode(type, el); }, 350); }
+        else { lastTapTime = currentTime; tapTimeout = setTimeout(() => { if (isFocusActive && el.classList.contains('is-focused')) toggleFocusMode(type, el); else if (!isFocusActive && type === 'sog') { displayModeSog = (displayModeSog === 'SOG') ? 'VMG' : 'SOG'; el.style.backgroundColor = "rgba(100, 255, 218, 0.1)"; setTimeout(() => el.style.backgroundColor = "", 150); } }, 250); }
     });
-    el.addEventListener('pointerup', () => clearTimeout(pressTimer)); el.addEventListener('pointerleave', () => clearTimeout(pressTimer));
+    el.addEventListener('pointerleave', () => clearTimeout(pressTimer));
 });
 
 if (ui.hotspot) {
@@ -340,25 +438,53 @@ if (ui.hotspot) {
     ui.hotspot.addEventListener('pointerleave', () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } });
 }
 
-// ==========================================================================
-// 9. CONNESSIONE E SIMULATORE
-// ==========================================================================
 function connect() {
     if (simulationMode) return;
+    
     let addr = (window.location.protocol.includes("http")) ? window.location.host : CONFIG.server.fallbackIp;
+    const protocol = (window.location.protocol === 'https:') ? 'wss' : 'ws';
+
     try {
-        socket = new WebSocket(`ws://${addr}/signalk/v1/stream?subscribe=self`);
-        socket.onopen = () => { ui.status.className = "online"; ui.status.innerText = "ONLINE"; };
-        socket.onmessage = (e) => { if (simulationMode) return; const d = JSON.parse(e.data); if (d.updates) d.updates.forEach(u => u.values && u.values.forEach(v => processIncomingData(v.path, v.value))); };
-        socket.onclose = () => !simulationMode && setTimeout(connect, 5000);
-    } catch (e) { setTimeout(connect, 5000); }
+        socket = new WebSocket(`${protocol}://${addr}/signalk/v1/stream?subscribe=self`);
+        
+        socket.onopen = () => {
+            ui.status.className = "online";
+            ui.status.innerText = "ONLINE";
+            reconnectDelay = 1000; // Reset del ritardo dopo una connessione riuscita
+        };
+        
+        socket.onmessage = (e) => {
+            if (simulationMode) return;
+            const d = JSON.parse(e.data);
+            if (d.updates) d.updates.forEach(u => u.values && u.values.forEach(v => processIncomingData(v.path, v.value)));
+        };
+        
+        socket.onclose = () => {
+            if (!simulationMode) {
+                ui.status.className = "offline";
+                ui.status.innerText = "RECONNECTING...";
+                
+                // Exponential Backoff: aumenta il tempo ad ogni tentativo fallito
+                setTimeout(connect, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); // Max 10 secondi
+            }
+        };
+
+        socket.onerror = () => {
+            socket.close(); // Forza il trigger di onclose
+        };
+
+    } catch (e) {
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+    }
 }
 
 ui.depth.closest('.data-box').addEventListener('click', (function() { let dC = 0, lC = 0; return function() { const n = Date.now(); if (n - lC < 500) dC++; else dC = 1; lC = n; if (dC === 3) { simulationMode = !simulationMode; if (simulationMode) { if (socket) socket.close(); startDynamicSimulation(); } else location.reload(); dC = 0; } }; })());
 
 function startDynamicSimulation() {
     ui.status.innerText = "SIM ATTIVO";
-    let sim = { hdg: 45, tws: 12, twd: 45, depth: 12, stw: 5, leeway: 0, startTime: Date.now() };
+    let sim = { hdg: 45, tws: 12, twd: 45, depth: 12, stw: 5, leeway: 0, currentSpeed: 1.5, currentDir: 90, startTime: Date.now() };
     simInterval = setInterval(() => {
         const elapsed = (Date.now() - sim.startTime) / 1000;
         if (elapsed > 120 && elapsed < 121) sim.twd = Math.random() * 360;
@@ -368,19 +494,22 @@ function startDynamicSimulation() {
         let twaRel = (sim.twd - sim.hdg + 360) % 360; if (twaRel > 180) twaRel -= 360;
         let targetStw = 3 + (4 * Math.sin((Math.abs(twaRel) - 45) * Math.PI / 125)); sim.stw += (Math.max(3, Math.min(8, targetStw)) - sim.stw) * 0.05;
         const rawLeeway = Math.sin(degToRad(twaRel)) * 4; sim.leeway += (rawLeeway - sim.leeway) * 0.05;
-        const cog = (sim.hdg - sim.leeway + 360) % 360; const twaRad = degToRad(twaRel);
-        const aws = Math.sqrt(Math.pow(sim.stw, 2) + Math.pow(sim.tws, 2) + 2 * sim.stw * sim.tws * Math.cos(twaRad));
+        const bX = sim.stw * Math.sin(degToRad(sim.hdg + sim.leeway)), bY = sim.stw * Math.cos(degToRad(sim.hdg + sim.leeway));
+        const cX = sim.currentSpeed * Math.sin(degToRad(sim.currentDir)), cY = sim.currentSpeed * Math.cos(degToRad(sim.currentDir));
+        const sog = Math.sqrt(Math.pow(bX + cX, 2) + Math.pow(bY + cY, 2)), cog = (radToDeg(Math.atan2(bX + cX, bY + cY)) + 360) % 360;
+        const twaRad = degToRad(twaRel), aws = Math.sqrt(Math.pow(sim.stw, 2) + Math.pow(sim.tws, 2) + 2 * sim.stw * sim.tws * Math.cos(twaRad));
         const awa = Math.atan2(sim.tws * Math.sin(twaRad), sim.stw + sim.tws * Math.cos(twaRad));
         processIncomingData("environment.wind.speedApparent", ktsToMs(aws)); processIncomingData("environment.wind.angleApparent", awa);
         processIncomingData("environment.depth.belowTransducer", sim.depth); processIncomingData("navigation.headingTrue", degToRad(sim.hdg));
-        processIncomingData("navigation.speedThroughWater", ktsToMs(sim.stw)); processIncomingData("navigation.speedOverGround", ktsToMs(sim.stw));
+        processIncomingData("navigation.speedThroughWater", ktsToMs(sim.stw)); processIncomingData("navigation.speedOverGround", ktsToMs(sog));
         processIncomingData("navigation.courseOverGroundTrue", degToRad(cog)); processIncomingData("navigation.position", { latitude: 45.0, longitude: 12.0 });
     }, 1000);
 }
 
 // ==========================================================================
-// 10. INIT
+// 9. INIT
 // ==========================================================================
+window.addEventListener('contextmenu', e => e.preventDefault(), true);
 (function genTicks() { const c = document.getElementById('ticks'); if (c) { for (let i = 0; i < 360; i += 10) { const l = document.createElementNS("http://www.w3.org/2000/svg", "line"); const m = i % 30 === 0; l.setAttribute("x1", "200"); l.setAttribute("y1", "40"); l.setAttribute("x2", "200"); l.setAttribute("y2", (m ? 60 : 50)); l.setAttribute("stroke", m ? "#fff" : "#666"); l.setAttribute("stroke-width", m ? "2" : "1"); l.setAttribute("transform", `rotate(${i}, 200, 200)`); c.appendChild(l); } } })();
 async function init() { await fetchServerConfig(); startDisplayLoop(); connect(); }
 window.addEventListener('load', init);
