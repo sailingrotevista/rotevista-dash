@@ -1,11 +1,16 @@
 // ==========================================================================
-// 1. CONFIGURAZIONE E DEFAULT
+// 1. CONFIGURAZIONE E DEFAULT (Sincronizzato con il Plugin SignalK)
 // ==========================================================================
 let CONFIG = {
     alarms: { depthDanger: 2.5, depthWarning: 5.0 },
     averages: { smoothWindow: 2000, longWindow: 60000, stabilityTolerance: 2000, stabilityThreshold: 0.90, minSpeed: 0.5 },
     graphs: { reef1: 15.0, reef2: 20.0, historyMinutes: 5, samples: 60 },
-    scales: { stw: { stdMax: 12, hercSpan: 4, step: 2 }, sog: { stdMax: 12, hercSpan: 4, step: 2 }, tws: { stdMax: 25, hercSpan: 10, step: 5 }, depth: { stdMax: 20, hercSpan: 10, step: 10 } },
+    scales: {
+        stw: { stdMax: 12, hercSpan: 4, step: 2 },
+        sog: { stdMax: 12, hercSpan: 4, step: 2 },
+        tws: { stdMax: 25, hercSpan: 10, step: 5 },
+        depth: { stdMax: 20, hercSpan: 10, step: 10 }
+    },
     server: { fallbackIp: "192.168.111.240:3000" }
 };
 
@@ -26,9 +31,7 @@ let curBoatCompassRot = 0, curWindCompassRot = 0;
 let smoothedLeeway = 0, rotationTrend = 0;
 let lastShortAvgVal = null, lastInstantTwa = null;
 let lastTrendTime = Date.now(), lastGybeAlarmTime = 0, lastTWCompute = 0;
-let twDirty = false;
-let reconnectDelay = 1000;
-let isNavigating = false;
+let twDirty = false, isNavigating = false, reconnectDelay = 1000;
 
 let pressTimer, isFocusActive = false;
 
@@ -72,13 +75,16 @@ function ktsToMs(kts) { return kts / 1.94384; }
 function getShortestRotation(curr, target) { let diff = (target - curr) % 360; if (diff > 180) diff -= 360; else if (diff < -180) diff += 360; return curr + diff; }
 
 /**
- * Gestione sicura dei buffer per prevenire memory leak.
+ * Gestione sicura dei buffer per prevenire memory leak (O(1) complexity).
  */
 function safePush(buffer, val, time, maxLen = 200) {
     buffer.push({ val: val, time: time });
     if (buffer.length > maxLen) { buffer.shift(); }
 }
 
+/**
+ * Calcola medie circolari restituendo Radianti.
+ */
 function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
     const now = Date.now();
     const validData = bufferArray.filter(item => (now - item.time) <= windowMs);
@@ -91,8 +97,13 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
     return { val: signed ? avgRad : (avgRad + 2 * Math.PI) % (2 * Math.PI), stable: isStable };
 }
 
+// ==========================================================================
+// 4. LOGICA FISICA E CALCOLI
+// ==========================================================================
+
 /**
- * Calcola il Vento Reale (Acqua e Terra) partendo dagli Apparenti.
+ * Calcola il Vento Reale partendo dagli Apparenti.
+ * Logica Acqua (Vele) vs Terra (Meteo).
  */
 function computeTrueWind() {
     const aws = store.raw["environment.wind.speedApparent"];
@@ -103,11 +114,11 @@ function computeTrueWind() {
     if (aws === undefined || awa === undefined) return;
     if (awa > Math.PI) awa -= 2 * Math.PI;
 
-    // Logica Acqua (TWA/TWS)
+    // Vento Reale su ACQUA (TWA/TWS)
     const tw_water_x = aws * Math.cos(awa) - stw, tw_water_y = aws * Math.sin(awa);
     const tws_water = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y), twa_water = Math.atan2(tw_water_y, tw_water_x);
 
-    // Logica Terra (TWD) con gestione deriva normalizzata
+    // Vento Reale su TERRA (TWD)
     const drift_angle = (cog - hdg + Math.PI * 3) % (2 * Math.PI) - Math.PI;
     const sog_vec_x = sog * Math.cos(drift_angle), sog_vec_y = sog * Math.sin(drift_angle);
     const tw_ground_x = aws * Math.cos(awa) - sog_vec_x, tw_ground_y = aws * Math.sin(awa) - sog_vec_y;
@@ -125,6 +136,7 @@ function processIncomingData(path, val) {
     if (path === "navigation.position") store.raw["navigation.position"] = val;
     if (path === "environment.wind.angleApparent") { safePush(store.smoothBuf.awa, val, now); safePush(store.longBuf.awa, val, now); }
 
+    // Dirty flag + Debounce 100ms
     const twPaths = ["environment.wind.speedApparent", "environment.wind.angleApparent", "navigation.speedThroughWater", "navigation.speedOverGround", "navigation.headingTrue", "navigation.courseOverGroundTrue"];
     if (twPaths.includes(path)) twDirty = true;
     if (twDirty && (now - lastTWCompute > 100)) { computeTrueWind(); lastTWCompute = now; twDirty = false; }
@@ -134,25 +146,15 @@ function processIncomingData(path, val) {
 }
 
 // ==========================================================================
-// 4. AUDIO E ALLARMI
+// 5. AUDIO E ALLARMI
 // ==========================================================================
 function playBingBing() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n; function b(f, s) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f; g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4); o.start(s); o.stop(s + 0.5); } b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6); }
-
-function playGybeAlarm() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const n = Date.now(); if (n - lastAlarmTime < 2000) return; lastAlarmTime = n;
-    function note(f, s, d) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.05, s); g.gain.exponentialRampToValueAtTime(0.001, s + d); o.start(s); o.stop(s + d); }
-    for (let i = 0; i < 4; i++) { note(1800, audioCtx.currentTime + (i * 0.15), 0.1); note(1200, audioCtx.currentTime + (i * 0.15) + 0.07, 0.1); }
-}
-
+function playGybeAlarm() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); const n = Date.now(); if (n - lastAlarmTime < 2000) return; lastAlarmTime = n; function note(f, s, d) { const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.connect(g); g.connect(audioCtx.destination); o.type = 'square'; o.frequency.value = f; g.gain.setValueAtTime(0.05, s); g.gain.exponentialRampToValueAtTime(0.001, s + d); o.start(s); o.stop(s + d); } for (let i = 0; i < 4; i++) { note(1800, audioCtx.currentTime + (i * 0.15), 0.1); note(1200, audioCtx.currentTime + (i * 0.15) + 0.07, 0.1); } }
 function checkDepthAlarm(m) { ui.depth.classList.remove('alarm-warning', 'alarm-danger'); if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); } else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning'); }
 
 // ==========================================================================
-// 5. TREND E TATTICA
+// 6. TREND VENTO E TATTICA
 // ==========================================================================
-/**
- * Monitoraggio Trend Vento Professionale (Tattica + Meteo + Gybe Safety)
- */
 function updateWindTrend() {
     const now = Date.now();
     const twaAvgObj = getCircularAverageFromBuffer(store.longBuf.twa, 60000, true);
@@ -160,14 +162,12 @@ function updateWindTrend() {
     const instantTwaRad = store.raw["environment.wind.angleTrueWater"];
 
     if (!shortAvg || !twaAvgObj || instantTwaRad === undefined) return;
-    const instantTwaDeg = radToDeg(instantTwaRad);
-    const shortAvgDeg = radToDeg(shortAvg.val);
-    const twaAvgDeg = radToDeg(twaAvgObj.val);
+    const instantTwaDeg = radToDeg(instantTwaRad), shortAvgDeg = radToDeg(shortAvg.val), twaAvgDeg = radToDeg(twaAvgObj.val);
 
     if (lastShortAvgVal === null) { lastShortAvgVal = shortAvgDeg; lastInstantTwa = instantTwaDeg; return; }
     const dt = (now - lastTrendTime) / 1000; lastTrendTime = now;
 
-    // --- GYBE SAFETY ---
+    // Gybe Safety
     const gybeDetected = (Math.abs(instantTwaDeg) > 155 && Math.sign(instantTwaDeg) !== Math.sign(lastInstantTwa));
     lastInstantTwa = instantTwaDeg;
     if (gybeDetected && isNavigating && (now - lastGybeAlarmTime > 5000)) { lastGybeAlarmTime = now; playGybeAlarm(); }
@@ -180,12 +180,12 @@ function updateWindTrend() {
         return;
     }
 
-    // --- TREND CALCULATION (°/sec) ---
+    // Trend calculation con Clamping e Alpha adattivo
     let diff = (shortAvgDeg - lastShortAvgVal + 540) % 360 - 180; lastShortAvgVal = shortAvgDeg;
     if (dt > 0) {
-        let currentRate = Math.max(-10, Math.min(10, diff / dt)); // Clamp a 10°/sec per evitare rumore
+        let rate = Math.max(-10, Math.min(10, diff / dt));
         const alpha = Math.min(1, dt / 5);
-        rotationTrend = rotationTrend * (1 - alpha) + currentRate * alpha;
+        rotationTrend = rotationTrend * (1 - alpha) + rate * alpha;
     }
 
     if (Math.abs(rotationTrend) > 1.0) {
@@ -211,31 +211,34 @@ function updateWindTrend() {
 }
 
 // ==========================================================================
-// 6. RENDERING E LOOP PRINCIPALE
+// 7. RENDERING ENGINE (TIERED RENDERING)
 // ==========================================================================
 function updateLeewayDisplay(deg) { const c = 125, px = 125/20; let w = Math.min(Math.abs(deg)*px, 125); ui.leewayMask.setAttribute('x', deg >= 0 ? c : c - w); ui.leewayMask.setAttribute('width', w); ui.leewayVal.textContent = `LEEWAY: ${deg.toFixed(1)}°`; }
 
+function refreshGraph(t) {
+    const type = (t === 'vmg') ? 'sog' : t;
+    const data = store.histories[t]; if (!data || data.length < 2) return;
+    const mode = graphModes[type], cfg = calculateScale(type, data, mode);
+    const graphEl = document.getElementById(type + '-graph');
+    if (graphEl) { const box = graphEl.closest('.data-box'); if (box) box.classList.toggle('box-hercules', mode === 'hercules'); }
+    updateScaleLabels(type, cfg.min, cfg.max); drawGraph(data, type + '-graph', cfg.min, cfg.max, t === 'tws', mode === 'hercules');
+}
+
 function startDisplayLoop() {
-    let tick = 0; // Contatore per i cicli di rendering
-
+    let tick = 0;
     renderInterval = setInterval(() => {
-        const now = Date.now();
-        tick++;
+        const now = Date.now(); tick++;
 
-        // ==========================================================
-        // LIVE TIER (Ogni 1s) - Reattività, Numeri, Allarmi, Lancette
-        // ==========================================================
+        // --- LIVE TIER (1s) ---
         const pathsToWatch = { "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog, "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog, "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth, "environment.wind.speedTrue": ui.tws };
         for (let p in pathsToWatch) { if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) { if (pathsToWatch[p] === ui.awsSvg) ui.awsSvg.textContent = "---"; else pathsToWatch[p].innerText = "---"; delete store.raw[p]; } }
 
         const stwKts = msToKts(store.raw["navigation.speedThroughWater"] || 0), sogKts = msToKts(store.raw["navigation.speedOverGround"] || 0);
         isNavigating = stwKts > CONFIG.averages.minSpeed || sogKts > CONFIG.averages.minSpeed;
 
-        // Numeri veloci
         if (store.raw["navigation.speedThroughWater"] !== undefined) { ui.stw.innerText = stwKts.toFixed(1); manageHistory('stw', stwKts); }
         if (store.raw["navigation.speedOverGround"] !== undefined) {
-            const twaRad = store.raw["environment.wind.angleTrueWater"];
-            const vmgKts = (twaRad !== undefined) ? Math.abs(stwKts * Math.cos(twaRad)) : 0;
+            const twaRad = store.raw["environment.wind.angleTrueWater"], vmgKts = (twaRad !== undefined) ? Math.abs(stwKts * Math.cos(twaRad)) : 0;
             manageHistory('vmg', vmgKts); manageHistory('sog', sogKts);
             if (displayModeSog === 'VMG') { ui.sog.innerText = vmgKts.toFixed(1); ui.sog.style.color = "#64ffda"; document.getElementById('sog-vmg-label').textContent = 'VMG'; }
             else { ui.sog.innerText = sogKts.toFixed(1); ui.sog.style.color = (sogKts-stwKts > 0.3) ? "#2ecc71" : (sogKts-stwKts < -0.3 ? "#e74c3c" : "#fff"); document.getElementById('sog-vmg-label').textContent = 'SOG'; }
@@ -244,38 +247,27 @@ function startDisplayLoop() {
         if (store.raw["environment.wind.speedTrue"] !== undefined) { const twsKts = msToKts(store.raw["environment.wind.speedTrue"]); ui.tws.innerText = twsKts.toFixed(1); ui.tws.style.color = (twsKts >= CONFIG.graphs.reef2) ? "#e74c3c" : (twsKts >= CONFIG.graphs.reef1 ? "#e67e22" : "#fff"); manageHistory('tws', twsKts); }
         if (store.raw["environment.wind.speedApparent"] !== undefined) ui.awsSvg.textContent = msToKts(store.raw["environment.wind.speedApparent"]).toFixed(1);
 
-        // Lancette (Sempre fluide ogni 1s)
         const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, CONFIG.averages.smoothWindow, true);
         if (smAwa) { curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val)); ui.awa.setAttribute('transform', `rotate(${curAwaRot}, 200, 200)`); }
         const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, CONFIG.averages.smoothWindow, true);
         if (smTwa) { curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val)); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
 
-        // Leeway (Ogni 1s)
         if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
-            let driftRad = (store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (Math.PI * 2) - Math.PI;
-            let driftDeg = radToDeg(driftRad);
+            let driftDeg = radToDeg((store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (Math.PI * 2) - Math.PI);
             if (sogKts < CONFIG.averages.minSpeed) smoothedLeeway = 0; else smoothedLeeway = (smoothedLeeway * 0.9) + (driftDeg * 0.1);
             curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway); ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
-            const isContaminated = Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7;
-            ui.leewayVal.style.color = isContaminated ? "#f39c12" : "#fff";
+            const isContaminated = Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7; ui.leewayVal.style.color = isContaminated ? "#f39c12" : "#fff";
             updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
         }
         
-        updateWindTrend(); // Trend calcolato ogni secondo
+        updateWindTrend(); // Fast update
 
-        // ==========================================================
-        // HEAVY TIER (Ogni 2s) - Disegno Sparklines SVG
-        // ==========================================================
+        // --- HEAVY TIER (2s) ---
         if (tick % 2 === 0) {
-            refreshGraph('stw');
-            refreshGraph(displayModeSog === 'VMG' ? 'vmg' : 'sog');
-            refreshGraph('depth');
-            refreshGraph('tws');
+            refreshGraph('stw'); refreshGraph(displayModeSog === 'VMG' ? 'vmg' : 'sog'); refreshGraph('depth'); refreshGraph('tws');
         }
 
-        // ==========================================================
-        // SLOW TIER (Ogni 3s) - Medie MEAN e Calcoli TACK
-        // ==========================================================
+        // --- SLOW TIER (3s) ---
         if (tick % 3 === 0) {
             let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averages.longWindow, false),
                 cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averages.longWindow, false),
@@ -291,7 +283,6 @@ function startDisplayLoop() {
                 }
             };
             upUI(ui.hdg, hObj, true); upUI(ui.cog, cObj, true); upUI(ui.awaAvg, awObj, false); upUI(ui.twaAvg, twObj, false); upUI(ui.twdAvg, twdObj, true);
-            
             if (hObj && twObj && hObj.val !== null) {
                 const tackHdgDeg = radToDeg((hObj.val - (twObj.val * 2) + Math.PI * 2) % (Math.PI * 2));
                 ui.tackHdg.innerHTML = `${Math.round((tackHdgDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
@@ -300,25 +291,18 @@ function startDisplayLoop() {
                     ui.tackCog.innerHTML = `${Math.round((tackCogDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
                 }
             }
-
             const smHdg = getCircularAverageFromBuffer(store.smoothBuf.hdg, 2000, false), smTwd = getCircularAverageFromBuffer(store.smoothBuf.twd, 2000, false);
             if (smHdg && smTwd) {
                 curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(smTwd.val)); ui.twdArrow.setAttribute('transform', `rotate(${curWindCompassRot}, 20, 20)`);
                 curBoatCompassRot = getShortestRotation(curBoatCompassRot, radToDeg(smHdg.val)); ui.twdBoat.setAttribute('transform', `rotate(${curBoatCompassRot}, 20, 20)`);
             }
         }
-
-        // Pulizia buffer
-        if (tick % 60 === 0) { // Ogni minuto pulisce tutto per sicurezza
-            for (let b in store.smoothBuf) { while (store.smoothBuf[b].length > 0 && (now - store.smoothBuf[b][0].time) > CONFIG.averages.smoothWindow) store.smoothBuf[b].shift(); }
-            for (let b in store.longBuf) { while (store.longBuf[b].length > 0 && (now - store.longBuf[b][0].time) > CONFIG.averages.longWindow) store.longBuf[b].shift(); }
-            tick = 0; // Reset contatore
-        }
+        if (tick % 60 === 0) tick = 0;
     }, RENDER_INTERVAL_MS);
 }
 
 // ==========================================================================
-// 7. CONFIGURAZIONE E GRAFICI
+// 8. INTERAZIONI E RETE
 // ==========================================================================
 async function fetchServerConfig() {
     if (!window.location.protocol.includes("http")) return;
@@ -343,43 +327,9 @@ async function fetchServerConfig() {
     }
 }
 
-/**
- * Gestisce l'archiviazione dei dati storici.
- * Il disegno grafico viene ora gestito separatamente nel loop pesante.
- */
 function manageHistory(t, v) {
-    const n = Date.now();
-    const interval = simulationMode ? SIM_SAMPLE_INTERVAL : (CONFIG.graphs.historyMinutes * 60000) / CONFIG.graphs.samples;
-    
-    if (n - store.lastUpdates[t] > interval || store.histories[t].length === 0) {
-        store.histories[t].push(v);
-        if (store.histories[t].length > CONFIG.graphs.samples) store.histories[t].shift();
-        store.lastUpdates[t] = n;
-    }
-}
-
-/**
- * Funzione dedicata al ridisegno dei grafici (chiamata dal loop HEAVY)
- */
-function refreshGraph(t) {
-    const type = (t === 'vmg') ? 'sog' : t;
-    const data = store.histories[t];
-    if (!data || data.length < 2) return;
-
-    const mode = graphModes[type];
-    const cfg = calculateScale(type, data, mode);
-    
-    // Aggiornamento stile box Hercules
-    const graphEl = document.getElementById(type + '-graph');
-    if (graphEl) {
-        const box = graphEl.closest('.data-box');
-        if (box) {
-            if (mode === 'hercules') box.classList.add('box-hercules');
-            else box.classList.remove('box-hercules');
-        }
-    }
-    updateScaleLabels(type, cfg.min, cfg.max);
-    drawGraph(data, type + '-graph', cfg.min, cfg.max, t === 'tws', mode === 'hercules');
+    const n = Date.now(); const interval = simulationMode ? SIM_SAMPLE_INTERVAL : (CONFIG.graphs.historyMinutes * 60000) / CONFIG.graphs.samples;
+    if (n - store.lastUpdates[t] > interval || store.histories[t].length === 0) { store.histories[t].push(v); if (store.histories[t].length > CONFIG.graphs.samples) store.histories[t].shift(); store.lastUpdates[t] = n; }
 }
 
 function calculateScale(type, data, mode) {
@@ -409,9 +359,6 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     svg.innerHTML = isTws ? `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="rgba(255,255,255,0.08)" stroke="none" />${cS}` : `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="${colorKey}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${colorKey}" />`;
 }
 
-// ==========================================================================
-// 8. INTERAZIONI E SIMULATORE
-// ==========================================================================
 function toggleFocusMode(type, element) {
     const container = document.querySelector('.main-container'); const parentPanel = element.closest('.side-panel'); const isLeft = parentPanel.classList.contains('left-panel');
     isFocusActive = !isFocusActive;
@@ -440,44 +387,14 @@ if (ui.hotspot) {
 
 function connect() {
     if (simulationMode) return;
-    
     let addr = (window.location.protocol.includes("http")) ? window.location.host : CONFIG.server.fallbackIp;
     const protocol = (window.location.protocol === 'https:') ? 'wss' : 'ws';
-
     try {
         socket = new WebSocket(`${protocol}://${addr}/signalk/v1/stream?subscribe=self`);
-        
-        socket.onopen = () => {
-            ui.status.className = "online";
-            ui.status.innerText = "ONLINE";
-            reconnectDelay = 1000; // Reset del ritardo dopo una connessione riuscita
-        };
-        
-        socket.onmessage = (e) => {
-            if (simulationMode) return;
-            const d = JSON.parse(e.data);
-            if (d.updates) d.updates.forEach(u => u.values && u.values.forEach(v => processIncomingData(v.path, v.value)));
-        };
-        
-        socket.onclose = () => {
-            if (!simulationMode) {
-                ui.status.className = "offline";
-                ui.status.innerText = "RECONNECTING...";
-                
-                // Exponential Backoff: aumenta il tempo ad ogni tentativo fallito
-                setTimeout(connect, reconnectDelay);
-                reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); // Max 10 secondi
-            }
-        };
-
-        socket.onerror = () => {
-            socket.close(); // Forza il trigger di onclose
-        };
-
-    } catch (e) {
-        setTimeout(connect, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
-    }
+        socket.onopen = () => { ui.status.className = "online"; ui.status.innerText = "ONLINE"; reconnectDelay = 1000; };
+        socket.onmessage = (e) => { if (simulationMode) return; const d = JSON.parse(e.data); if (d.updates) d.updates.forEach(u => u.values && u.values.forEach(v => processIncomingData(v.path, v.value))); };
+        socket.onclose = () => { if (!simulationMode) { ui.status.className = "offline"; ui.status.innerText = "RECONNECTING..."; setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); } };
+    } catch (e) { setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); }
 }
 
 ui.depth.closest('.data-box').addEventListener('click', (function() { let dC = 0, lC = 0; return function() { const n = Date.now(); if (n - lC < 500) dC++; else dC = 1; lC = n; if (dC === 3) { simulationMode = !simulationMode; if (simulationMode) { if (socket) socket.close(); startDynamicSimulation(); } else location.reload(); dC = 0; } }; })());
@@ -507,7 +424,7 @@ function startDynamicSimulation() {
 }
 
 // ==========================================================================
-// 9. INIT
+// 11. INIT
 // ==========================================================================
 window.addEventListener('contextmenu', e => e.preventDefault(), true);
 (function genTicks() { const c = document.getElementById('ticks'); if (c) { for (let i = 0; i < 360; i += 10) { const l = document.createElementNS("http://www.w3.org/2000/svg", "line"); const m = i % 30 === 0; l.setAttribute("x1", "200"); l.setAttribute("y1", "40"); l.setAttribute("x2", "200"); l.setAttribute("y2", (m ? 60 : 50)); l.setAttribute("stroke", m ? "#fff" : "#666"); l.setAttribute("stroke-width", m ? "2" : "1"); l.setAttribute("transform", `rotate(${i}, 200, 200)`); c.appendChild(l); } } })();
