@@ -10,7 +10,6 @@ body {
     height: 100vh;
     width: 100vw;
     overflow: hidden;
-    /* BLOCCO TOTALE GESTI DI SISTEMA: Fondamentale per il Long Press su mobile */
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
@@ -23,11 +22,8 @@ body {
     height: 100%;
     padding: 5px;
     box-sizing: border-box;
-    gap: 8px; /* Spazio costante tra tutti i blocchi della dashboard */
-    
-    /* LAYOUT LIQUIDO:
-       I lati hanno un minimo vitale (180px) per proteggere i testi.
-       Il centro (auto) si adatta millimetricamente al diametro dell'SVG. */
+    gap: 8px;
+    /* Rapporto Standard: Lati 1fr, Centro 1.5fr (Bilanciato) */
     grid-template-columns: minmax(180px, 1fr) minmax(auto, 1.5fr) minmax(180px, 1fr);
     grid-template-rows: 100%;
     transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
@@ -35,7 +31,7 @@ body {
 }
 
 /* ==========================================================================
-   2. PANNELLI E DATA-BOX (DISTRIBUZIONE FR)
+   2. PANNELLI E DATA-BOX
    ========================================================================== */
 .side-panel {
     display: flex;
@@ -48,10 +44,9 @@ body {
 }
 
 .left-panel { grid-column: 1; }
-
 .center-panel {
     grid-column: 2;
-    position: relative; /* Indispensabile per posizionare #status al suo interno */
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -59,7 +54,6 @@ body {
     height: 100%;
     overflow: hidden;
 }
-
 .right-panel {
     grid-column: 3;
     align-items: flex-end;
@@ -69,68 +63,83 @@ body {
 .data-box {
     position: relative;
     border-bottom: 1px solid #222;
-    padding: 2px 4px; /* Padding ottimizzato per il recupero spazio verticale */
+    padding: 2px 4px;
     display: flex;
     flex-direction: column;
     width: 100%;
     box-sizing: border-box;
-    container-type: size; /* Per unità cqh */
-    flex: 1 1 0px; /* Divide lo spazio equamente in 5 parti */
+    container-type: size;
+    flex: 1 1 0px;
     min-height: 0;
     overflow: hidden;
+    transition: background-color 0.2s ease;
 }
 
-/* Allineamento Speculare: SX a sinistra, DX a destra del box */
 .left-panel .data-box { align-items: flex-start; text-align: left; }
 .right-panel .data-box { align-items: flex-end; text-align: right; }
 
 /* ==========================================================================
-   3. TACTICAL FOCUS MODE (AUTO-EXPANDING SPLIT / DUAL SCREEN)
+   3. TACTICAL FOCUS MODE (DUAL SCREEN 60/40)
    ========================================================================== */
 
-/* Nasconde le colonne non focalizzate */
+/* Nasconde i pannelli non attivi */
 .focus-active .side-panel:not(.has-focus) { display: none !important; }
 
-/* In Focus Mode Left: [Pannello Sinistro Largo | Centro Stretto] */
+/* Split 60/40: Grafico a Sinistra */
 .focus-active.focus-side-left {
-    grid-template-columns: 2fr auto !important;
+    grid-template-columns: 3fr 2fr !important;
 }
 .focus-active.focus-side-left .side-panel.has-focus { grid-column: 1 !important; }
-.focus-active.focus-side-left .center-panel { grid-column: 2 !important; justify-content: flex-start; }
-
-/* In Focus Mode Right: [Centro Stretto | Pannello Destro Largo] */
-.focus-active.focus-side-right {
-    grid-template-columns: auto 2fr !important;
+.focus-active.focus-side-left .center-panel {
+    grid-column: 2 !important;
+    justify-content: center !important;
+    align-items: center !important;
 }
-.focus-active.focus-side-right .center-panel { grid-column: 1 !important; justify-content: flex-start; }
+
+/* Split 60/40: Grafico a Destra */
+.focus-active.focus-side-right {
+    grid-template-columns: 2fr 3fr !important;
+}
+.focus-active.focus-side-right .center-panel {
+    grid-column: 1 !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
 .focus-active.focus-side-right .side-panel.has-focus { grid-column: 2 !important; }
 
-/* Styling del box in Focus Mode */
+/* Espansione Box Focalizzato */
 .focus-active .has-focus .data-box:not(.is-focused) { display: none !important; }
 .focus-active .has-focus .data-box.is-focused {
     height: 100vh !important;
     border: none;
     background: rgba(255, 255, 255, 0.05);
-    padding: 20px;
+    padding: 2vw 3vw !important;
+    display: flex;
+    flex-direction: column;
 }
 
-/* Tipografia massiccia in Focus Mode */
-.focus-active .is-focused .value { font-size: clamp(4rem, 25cqh, 4rem) !important; margin-top: 15px; }
-.focus-active .is-focused .scale-labels { font-size: 32px !important; min-width: 40px !important; line-height: 1.2; }
+/* Tipografia Massiccia Focus Mode */
+.focus-active .is-focused .value { font-size: clamp(4rem, 25cqh, 10rem) !important; margin-top: 15px; }
+.focus-active .is-focused .scale-labels { font-size: clamp(14px, 1.8vw, 22px) !important; min-width: 50px !important; }
 .focus-active .is-focused .label-row .label { font-size: 2rem !important; }
 .focus-active .is-focused .label-row .unit { font-size: 2rem !important; }
 
-.focus-active .is-focused .sparkline path { stroke-width: 1px !important; }
+.focus-active .is-focused .sparkline path { stroke-width: 2.5px !important; }
+
+/* Protezione Wind Gauge nel 40% di spazio */
+.focus-active .center-panel svg#wind-gauge {
+    max-width: 95% !important;
+    max-height: 85vh !important;
+}
 
 /* ==========================================================================
-   4. TIPOGRAFIA DINAMICA (ELASTICA CQH)
+   4. TIPOGRAFIA DINAMICA E ELASTICA
    ========================================================================== */
 .label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; width: 100%; }
 
 .label { color: #666; font-size: 0.65rem; font-weight: bold; text-transform: uppercase; }
 .unit { color: #888; font-size: 0.6rem; font-weight: bold; }
 
-/* Numero standard (22% altezza box) */
 .value {
     color: #fff;
     font-size: clamp(1.2rem, 22cqh, 3rem);
@@ -143,14 +152,13 @@ body {
 .value-large, .dual-value-container, .value-with-compass { margin-top: auto; margin-bottom: auto; }
 .value-large { font-size: clamp(1.5rem, 35cqh, 4.5rem); line-height: 0.85; }
 
-/* TACK Layout (Mure opposte) */
 .dual-value-container { display: flex; justify-content: space-between; width: 100%; }
 .dual-value-col { display: flex; flex-direction: column; width: 48%; }
 .dual-label { color: #666; font-size: 0.55rem; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
 .value.dual-val { font-size: clamp(1rem, 22cqh, 2rem); padding-bottom: 0; line-height: 0.9; }
 
 /* ==========================================================================
-   5. BUSSOLA TWD DINAMICA (WIDGET)
+   5. WIDGETS (BUSSOLA TWD)
    ========================================================================== */
 .value-with-compass { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 5px; }
 
@@ -167,7 +175,7 @@ body {
 }
 
 /* ==========================================================================
-   6. GRAFICI E SCALE (OTTIMIZZAZIONE ORIZZONTALE)
+   6. GRAFICI E SCALE
    ========================================================================== */
 .graph-wrapper {
     position: relative; width: 100%; flex-grow: 1; min-height: 0; margin-top: 4px;
@@ -175,7 +183,6 @@ body {
     border-radius: 4px; gap: 0px !important;
 }
 
-/* Allargamento verso il centro */
 .left-panel .graph-wrapper { margin-right: -6px; }
 .right-panel .graph-wrapper { margin-left: -6px; }
 
@@ -188,20 +195,18 @@ body {
     height: 100%; line-height: 1; padding: 0; border: none !important;
 }
 
-/* Simmetria scale */
 .left-panel .scale-labels { order: 2; text-align: left; padding-left: 4px; }
 .left-panel .sparkline { order: 1; }
 .right-panel .scale-labels { order: 1; text-align: right; padding-right: 4px; }
 .right-panel .sparkline { order: 2; }
 
-/* Colori grafici */
 #stw-graph { stroke: #2ecc71; fill: rgba(46, 204, 113, 0.12); }
 #sog-graph { stroke: #f39c12; fill: rgba(243, 156, 18, 0.12); }
 #depth-graph { stroke: #3498db; fill: rgba(52, 152, 219, 0.12); }
 #tws-graph { stroke: #ffffff; fill: rgba(255, 255, 255, 0.08); }
 
 /* ==========================================================================
-   7. HERCULES MODE (ZOOM E VISUALS)
+   7. HERCULES MODE
    ========================================================================== */
 .line-hercules { filter: drop-shadow(0 0 5px #ff0000); stroke-width: 1.8px !important; }
 .box-hercules { background: rgba(255, 0, 0, 0.08) !important; }
@@ -215,20 +220,14 @@ body {
 .right-panel .box-hercules .label:only-child::after { content: " HERCULES"; }
 
 /* ==========================================================================
-   8. STATI, STATUS E ANIMAZIONI
+   8. STATUS E ANIMAZIONI
    ========================================================================== */
 #status {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    font-size: 0.6rem;
-    font-weight: 900;
-    text-transform: uppercase;
-    z-index: 1000;
-    letter-spacing: 1px;
-    background: rgba(0,0,0,0.4);
-    padding: 2px 6px;
-    border-radius: 4px;
+    position: absolute; top: 10px; right: 10px;
+    font-size: 0.6rem; font-weight: 900;
+    text-transform: uppercase; z-index: 1000;
+    letter-spacing: 1px; background: rgba(0,0,0,0.4);
+    padding: 2px 6px; border-radius: 4px;
 }
 .online { color: #2ecc71; opacity: 0.5; }
 .offline { color: #e74c3c; font-weight: bold; }
@@ -245,11 +244,11 @@ body {
 #wind-gauge { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
 
 /* ==========================================================================
-   9. RESPONSIVE (PORTRAIT MODE)
+   9. RESPONSIVE (PORTRAIT)
    ========================================================================== */
 @media (max-aspect-ratio: 0.9 / 1) {
     .main-container { grid-template-columns: 1fr 1fr !important; grid-template-rows: 45vh calc(55vh - 8px) !important; }
-    .center-panel { grid-row: 1 !important; grid-column: 1 / span 2 !important; padding: 5px 0; }
+    .center-panel { grid-row: 1 !important; grid-column: 1 / span 2 !important; }
     .left-panel { grid-row: 2 !important; grid-column: 1 !important; }
     .right-panel { grid-row: 2 !important; grid-column: 2 !important; }
     .main-container.focus-active { display: flex !important; flex-direction: column !important; }
@@ -259,7 +258,7 @@ body {
 }
 
 /* ==========================================================================
-   10. NIGHT MODE (RED ON BLACK - TACTICAL)
+   10. NIGHT MODE (TACTICAL RED)
    ========================================================================== */
 body.night-mode { background-color: #000 !important; color: #ff0000 !important; }
 .night-mode .side-panel { background: rgba(20, 0, 0, 0.4); border: 1px solid #330000; }
@@ -274,19 +273,30 @@ body.night-mode { background-color: #000 !important; color: #ff0000 !important; 
 .night-mode #tws-graph line:not([stroke*="rgba"]) { stroke: #ff3333 !important; stroke-width: 1.8px !important; }
 .night-mode .scale-labels { color: #660000 !important; }
 
-.night-mode .box-hercules { background: rgba(60, 0, 0, 0.2) !important; }
-.night-mode .line-hercules { filter: drop-shadow(0 0 6px #ff0000) !important; }
-
 .night-mode #wind-gauge circle { stroke: #330000; }
 .night-mode #ticks line { stroke: #4d0000 !important; }
 .night-mode #tick-labels { fill: #800000 !important; }
 .night-mode #boat-icon { fill: #330000 !important; opacity: 0.6; }
 .night-mode #aws-val-svg { fill: #ff3333 !important; }
+.night-mode #aws-display-group text { fill: #ff3333 !important; }
+.night-mode #center-glow feDropShadow { flood-color: #ff0000 !important; flood-opacity: 0.6 !important; }
+
+/* Settori Vento Night */
+.night-mode #wind-gauge path[stroke="#ff0000"] { stroke: #660000 !important; opacity: 0.8; }
+.night-mode #wind-gauge path[stroke="#00ff00"] { stroke: #660000 !important; stroke-dasharray: 4, 3; opacity: 0.8; }
+.night-mode #wind-gauge path[stroke="#ff8800"] { stroke: #330000 !important; stroke-width: 8; }
+
+/* Lancette Night */
 .night-mode #awa-pointer path { fill: #ff0000; stroke: #000; }
 .night-mode #twa-pointer path { fill: #800000; stroke: #000; }
 .night-mode #track-pointer path { fill: #ff0000; stroke: #fff; stroke-width: 0.5; }
-.night-mode #aws-display-group text { fill: #ff3333 !important; }
-.night-mode #center-glow feDropShadow { flood-color: #ff0000 !important; flood-opacity: 0.6 !important; }
+
+/* Leeway Night */
+.night-mode rect[fill="url(#leeway-grad)"] { fill: url(#leeway-night-grad) !important; }
+.night-mode #leeway-val { fill: #ff3333 !important; }
+.night-mode g[stroke="#555"] line { stroke: #4d0000 !important; }
+.night-mode g[fill="#555"] text { fill: #660000 !important; }
+.night-mode rect[fill="#222"] { fill: #0a0000 !important; stroke: #200000; }
 
 /* Bussola TWD Night */
 .night-mode .mini-compass { border-color: #330000; background: #000; }
@@ -304,11 +314,4 @@ body.night-mode { background-color: #000 !important; color: #ff0000 !important; 
     transition: opacity 0.3s ease;
 }
 
-.is-trending { animation: blink-trend 1s infinite !important; }
-
-/* Allarme Strambata: Rosso fisso con bagliore neon */
-.is-gybing {
-    opacity: 1 !important;
-    animation: none !important;
-    filter: drop-shadow(0 0 8px #ff0000) !important;
-}
+.is-trending { a
