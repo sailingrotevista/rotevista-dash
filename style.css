@@ -2,235 +2,351 @@
    1. BASE E RESET DI SISTEMA
    ========================================================================== */
 body {
-    background-color: #fff; /* Day Mode Default */
-    color: #000;            /* Day Mode Default */
+    background-color: #fff;
+    color: #000;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    margin: 0;
-    padding: 0;
-    height: 100vh;
-    width: 100vw;
+    margin: 0; padding: 0;
+    height: 100vh; width: 100vw;
     overflow: hidden;
-    /* Inibisce i gesti di sistema per favorire Long Press e Swipe della dashboard */
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    user-select: none;
-    touch-action: none;
+    -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none;
 }
 
 /* ==========================================================================
-   2. LAYOUT PRINCIPALE (LIQUID GRID)
+   2. LAYOUT PRINCIPALE (GRID AREAS)
    ========================================================================== */
 .main-container {
     display: grid;
-    width: 100%;
-    height: 100%;
-    padding: 5px;
-    box-sizing: border-box;
-    gap: 8px;
-    /* Rapporto Standard: Lati flessibili, Centro bilanciato a 1.5fr */
-    grid-template-columns: minmax(180px, 1fr) minmax(auto, 1.5fr) minmax(180px, 1fr);
-    grid-template-rows: 100%;
+    width: 100%; height: 100%;
+    padding: 5px; box-sizing: border-box; gap: 8px;
+    grid-template-areas:
+        "stw   gauge depth"
+        "sog   gauge tws"
+        "hdg   gauge twa"
+        "cog   gauge awa"
+        "tack  gauge twd";
+    grid-template-rows: 1.75fr 1.75fr 0.75fr 0.75fr 1.25fr;
+    grid-template-columns: 1fr 1.5fr 1fr;
     transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    justify-content: stretch;
 }
 
-.side-panel {
-    display: flex;
-    flex-direction: column;
-    background: rgba(0, 0, 0, 0.03); /* Sfondo Day Mode */
-    border-radius: 12px;
-    height: 100%;
-    overflow: hidden;
-    gap: 2px; /* Massimizza lo spazio per i 5 box verticali */
-}
-
-.left-panel { grid-column: 1; align-items: flex-start; }
-.right-panel { grid-column: 3; align-items: flex-end; } /* Forza i box a destra */
-
-.center-panel {
-    grid-column: 2;
-    position: relative; /* Indispensabile per posizionare l'etichetta STATUS in alto a dx */
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    overflow: hidden;
-}
+.box-stw   { grid-area: stw; }
+.box-sog   { grid-area: sog; }
+.box-hdg   { grid-area: hdg; }
+.box-cog   { grid-area: cog; }
+.box-tack  { grid-area: tack; }
+.box-gauge { grid-area: gauge; display: flex; align-items: center; justify-content: center; position: relative; }
+.box-depth { grid-area: depth; }
+.box-tws   { grid-area: tws; }
+.box-twa   { grid-area: twa; }
+.box-awa   { grid-area: awa; }
+.box-twd   { grid-area: twd; }
 
 /* ==========================================================================
-   3. DATA-BOX E TIPOGRAFIA (UNITA' ELASTICHE E NUOVE PROPORZIONI)
+   3. DATA-BOX: STRUTTURA E ALLINEAMENTO (Bordi Schermo & Display Curvi)
    ========================================================================== */
 .data-box {
-    position: relative;
-    border-bottom: 1px solid #eee; /* Day Mode Border */
-    padding: 2px 8px;
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    box-sizing: border-box;
-    container-type: size; /* Permette l'uso di cqh per i font */
-    min-height: 0;
-    overflow: hidden;
+    position: relative; border-bottom: 1px solid #eee;
+    /* Padding alto (1.2rem) per non far toccare il numero al titolo assoluto */
+    padding: 1.2rem 8px 4px 8px;
+    display: flex; flex-direction: column; width: 100%;
+    box-sizing: border-box; container-type: size;
+    min-height: 0; overflow: hidden;
+    background: rgba(0, 0, 0, 0.03); border-radius: 12px;
     transition: background-color 0.2s ease;
+    /* Forza la centratura verticale del valore per display curvi */
+    justify-content: center !important;
 }
 
-/* RIPRISTINO ALLINEAMENTO SPECULARE RIGIDO */
-.left-panel .data-box { align-items: flex-start !important; text-align: left !important; }
-.right-panel .data-box { align-items: flex-end !important; text-align: right !important; }
+/* Titoli ancorati sempre in alto */
+.label-row {
+    position: absolute; top: 4px; left: 8px; right: 8px;
+    display: flex; align-items: baseline; z-index: 10;
+}
 
-/* Inversione etichette colonna destra per aderenza al bordo schermo */
-.right-panel .label-row { flex-direction: row-reverse !important; }
-
-/* NUOVE PROPORZIONI VERTICALI 1.75 / 0.75 / 1.25 */
-.data-box:nth-child(1), .data-box:nth-child(2) { flex: 1.75 1 0px; }
-.data-box:nth-child(3), .data-box:nth-child(4) { flex: 0.75 0.75 0px; }
-.data-box:nth-child(5) { flex: 1.25 1 0px; border-bottom: none; }
-
-.label-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; width: 100%; }
 .label { color: #888; font-size: 0.65rem; font-weight: bold; text-transform: uppercase; }
 .unit { color: #aaa; font-size: 0.6rem; font-weight: bold; }
 
-/* Font dinamico per i valori: massimo 22% dell'altezza del box */
-.value {
-    color: #000;
-    font-size: clamp(1.2rem, 22cqh, 3rem);
-    font-weight: 600;
-    line-height: 0.9;
-    letter-spacing: -1px;
-    padding-bottom: 5px;
+/* --- ALLINEAMENTO SPECULARE RIGIDO --- */
+
+/* COLONNA SINISTRA: Titolo a SX (bordo), Unità a DX */
+.box-stw, .box-sog, .box-hdg, .box-cog, .box-tack { align-items: flex-start !important; text-align: left !important; }
+.box-stw .label-row, .box-sog .label-row, .box-hdg .label-row, .box-cog .label-row, .box-tack .label-row {
+    flex-direction: row !important; justify-content: space-between !important;
 }
 
-/* Centratura verticale automatica per i box senza grafico */
-.value-large, .dual-value-container, .value-with-compass {
-    margin-top: auto;
-    margin-bottom: auto;
+/* COLONNA DESTRA: Titolo a DX (bordo), Unità a SX */
+.box-depth, .box-tws, .box-twa, .box-awa, .box-twd { align-items: flex-end !important; text-align: right !important; }
+.box-depth .label-row, .box-tws .label-row, .box-twa .label-row, .box-awa .label-row, .box-twd .label-row {
+    flex-direction: row-reverse !important; justify-content: space-between !important;
 }
-
-.value-large { font-size: clamp(1.5rem, 35cqh, 4.5rem); line-height: 0.85; }
-
-/* --- BUSSOLA TWD (FIX ALLINEAMENTO) --- */
-.value-with-compass {
-    display: flex;
-    justify-content: space-between; /* Bussola a SX, Valore a DX */
-    align-items: center;
-    width: 100%;
-    align-self: stretch; /* Impedisce al pannello DX di schiacciare il widget a destra */
-    gap: 5px;
-}
-
-/* TACK (Mure opposte) Layout */
-.dual-value-container { display: flex; justify-content: space-between; width: 100%; }
-.dual-value-col { display: flex; flex-direction: column; width: 48%; }
-.dual-label { color: #888; font-size: 0.55rem; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
-.value.dual-val { font-size: clamp(1rem, 22cqh, 2rem); padding-bottom: 0; line-height: 0.9; }
 
 /* ==========================================================================
-   4. TACTICAL FOCUS MODE (DUAL SCREEN 60/40)
+   4. TIPOGRAFIA GERARCHICA (REGOLE BASE)
    ========================================================================== */
-.focus-active .side-panel:not(.has-focus) { display: none !important; }
+.value { color: #000; font-size: clamp(1.2rem, 32cqw, 3.5rem); font-weight: 600; line-height: 0.9; letter-spacing: -1.5px; }
 
-/* Split: 60% per il grafico scelto, 40% per il vento centrale */
-.focus-active.focus-side-left { grid-template-columns: 3fr 2fr !important; }
-.focus-active.focus-side-left .side-panel.has-focus { grid-column: 1 !important; }
-.focus-active.focus-side-left .center-panel { grid-column: 2 !important; justify-content: center !important; align-items: center !important; }
-
-.focus-active.focus-side-right { grid-template-columns: 2fr 3fr !important; }
-.focus-active.focus-side-right .center-panel { grid-column: 1 !important; justify-content: center !important; align-items: center !important; }
-.focus-active.focus-side-right .side-panel.has-focus { grid-column: 2 !important; }
-
-/* Espansione box e tipografia massiccia in Focus Mode */
-.focus-active .has-focus .data-box:not(.is-focused) { display: none !important; }
-.focus-active .has-focus .data-box.is-focused {
-    height: 100vh !important;
-    border: none;
-    background: rgba(0, 0, 0, 0.02);
-    padding: 2vw 3vw !important;
-    display: flex;
-    flex-direction: column;
+/* Valore MASSIVO (Dati reali): 55% altezza box, larghezza protetta a 22% schermo */
+.value-large {
+    font-size: clamp(1.5rem, 55cqh, 22cqw) !important;
+    font-weight: 600; line-height: 0.8; margin: 0 !important;
 }
 
-.focus-active .is-focused .value { font-size: clamp(4rem, 25cqh, 10rem) !important; margin-top: 15px; }
-.focus-active .is-focused .scale-labels { font-size: clamp(14px, 1.8vw, 22px) !important; min-width: 50px !important; }
-.focus-active .is-focused .label-row .label { font-size: 2rem !important; }
-.focus-active .is-focused .label-row .unit { font-size: 2rem !important; }
-.focus-active .is-focused .sparkline path { stroke-width: 2.5px !important; }
+/* BOX TWD: Bussola a SX, Valore a DX, centrati verticalmente */
+.value-with-compass { display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100%; height: 85%; }
+.box-twd .mini-compass { height: 85cqh !important; width: auto !important; aspect-ratio: 1/1; flex-shrink: 0; }
+.box-twd #twd-avg { font-size: clamp(1.5rem, 55cqh, 20cqw) !important; text-align: right; line-height: 1; }
 
-.focus-active .center-panel svg#wind-gauge { max-width: 95% !important; max-height: 85vh !important; }
+/* BOX TACK: HDG a SX, COG a DX, Titoli sopra (Default Landscape/Portrait) */
+.box-tack .dual-value-container { display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100%; height: 100%; }
+.box-tack .dual-value-col { display: flex; flex-direction: column; justify-content: center; }
+.box-tack .dual-value-col:first-child { align-items: flex-start; }
+.box-tack .dual-value-col:last-child { align-items: flex-end; }
+.box-tack .dual-label { color: #888; font-size: 0.5rem; font-weight: 800; margin-bottom: -2px; }
+.box-tack .value.dual-val { font-size: clamp(1rem, 35cqh, 12cqw) !important; line-height: 0.9; }
+
+/* Tag HERCULES: Allineato all'unità (lato interno schermo) */
+.box-hercules { background: rgba(255, 0, 0, 0.05) !important; }
+.box-hercules .unit::before { font-size: 7px; color: #ff4444; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; content: "HERCULES "; }
 
 /* ==========================================================================
-   5. GRAFICI, SCALE E HERCULES MODE
+   5. TACTICAL FOCUS MODE
+   ========================================================================== */
+.focus-active .data-box:not(.is-focused),
+.focus-active .box-gauge { display: none !important; }
+
+.focus-active.focus-side-left {
+    grid-template-columns: 3fr 2fr !important;
+    grid-template-areas: "focused gauge" !important;
+    grid-template-rows: 100% !important;
+}
+.focus-active.focus-side-right {
+    grid-template-columns: 2fr 3fr !important;
+    grid-template-areas: "gauge focused" !important;
+    grid-template-rows: 100% !important;
+}
+
+.focus-active .is-focused {
+    grid-area: focused !important;
+    height: 100vh !important;
+    background: rgba(0, 0, 0, 0.02) !important;
+    padding: 2vw 3vw !important;
+    justify-content: center !important;
+}
+
+/* PRIORITÀ COLORE HERCULES IN FOCUS:
+   Forza lo sfondo rosso anche quando il box è ingrandito */
+.focus-active .is-focused.box-hercules {
+    background: rgba(255, 0, 0, 0.12) !important;
+    box-shadow: inset 0 0 30px rgba(255, 0, 0, 0.1);
+}
+
+.focus-active .is-focused .value { font-size: clamp(4rem, 25cqh, 15rem) !important; margin-top: 20px; }
+.focus-active .box-gauge { display: flex !important; grid-area: gauge !important; }
+
+/* ==========================================================================
+   6. VIEWPORT QUADRATA (U-SHAPE) - LOGICA ANTI-COLLISIONE
+   ========================================================================== */
+@media screen and (min-aspect-ratio: 0.86/1) and (max-aspect-ratio: 1.25/1) {
+    .main-container {
+        grid-template-columns: 1fr 1fr 1fr 1fr !important;
+        grid-template-areas:
+            "stw   gauge gauge depth"
+            "sog   gauge gauge tws"
+            "hdg   gauge gauge twa"
+            "cog   tack  twd   awa" !important;
+        grid-template-rows: 1.75fr 1.75fr 0.75fr 1.25fr !important;
+    }
+
+    /* Sfondo per distinguere la riga tattica inferiore */
+    .box-cog, .box-tack, .box-twd, .box-awa {
+        border-top: 1px solid #eee;
+        background: rgba(0, 0, 0, 0.04) !important;
+    }
+
+    /* --- TACK: Impilamento Verticale Rigido in U-Shape --- */
+        .box-tack .dual-value-container {
+            flex-direction: column !important; /* Forza HDG sopra COG */
+            justify-content: center !important;
+            align-items: flex-start !important; /* Tutto a sinistra */
+            gap: 8px !important; /* Spazio tra i due blocchi */
+        }
+        
+        .box-tack .dual-value-col {
+            display: flex !important;
+            flex-direction: column !important; /* Forza Titolo sopra Numero */
+            align-items: flex-start !important;
+            text-align: left !important;
+            width: 100% !important;
+        }
+
+        /* Font calibrato per non uscire dal box stretto */
+        .box-tack .value.dual-val {
+            font-size: clamp(1rem, 30cqh, 15cqw) !important;
+            line-height: 1 !important;
+        }
+        
+        .box-tack .dual-label {
+            margin-bottom: 0px !important;
+        }
+
+    /* --- TWD: Calibrazione per box stretto --- */
+    .box-twd .value-with-compass { justify-content: center; gap: 5px; }
+    .box-twd .mini-compass { height: 60cqh !important; }
+    .box-twd #twd-avg { font-size: clamp(1.2rem, 50cqh, 20cqw) !important; }
+
+    /* NOTA: COG e AWA non vengono toccati qui, così restano massivi
+       ereditando la regola generale della Sezione 4 */
+}
+
+/* ==========================================================================
+   7. GRAFICI, SCALE E TAG HERCULES
    ========================================================================== */
 .graph-wrapper {
-    position: relative; width: 100%; flex-grow: 1; min-height: 0; margin-top: 4px;
-    display: flex; align-items: stretch; background: rgba(0, 0, 0, 0.04);
-    border-radius: 4px; gap: 0px !important;
+    position: relative;
+    width: 100%;
+    flex-grow: 1;
+    min-height: 0;
+    margin-top: 5px;
+    display: flex;
+    flex-direction: row; /* Forza l'allineamento orizzontale dei componenti */
+    align-items: stretch;
+    background: rgba(0, 0, 0, 0.04);
+    border-radius: 4px;
 }
 
-.left-panel .graph-wrapper { margin-right: -6px; }
-.right-panel .graph-wrapper { margin-left: -6px; }
+.sparkline {
+    flex-grow: 1;
+    height: 100%;
+    width: 100% !important;
+    background: transparent !important;
+}
 
-.sparkline { flex-grow: 1; height: 100%; width: 100% !important; background: transparent !important; display: block; }
-.sparkline path, .sparkline line { stroke-width: 1px !important; transition: all 0.3s ease; }
+/* Forza tutte le linee dei grafici (linee dati e griglie) a 1px per un look chirurgico */
+.sparkline path,
+.sparkline line {
+    stroke-width: 1px !important;
+    transition: all 0.3s ease;
+}
 
 .scale-labels {
-    display: flex; flex-direction: column; justify-content: space-between;
-    font-size: 8px; color: #444; font-weight: bold; min-width: 12px;
-    height: 100%; line-height: 1; padding: 0; border: none !important;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    font-size: 9px;
+    color: #666;
+    font-weight: 800;
+    min-width: 22px;
+    height: 100%;
+    line-height: 1;
+    z-index: 5;
 }
 
-.left-panel .scale-labels { order: 2; text-align: left; padding-left: 4px; }
-.left-panel .sparkline { order: 1; }
-.right-panel .scale-labels { order: 1; text-align: right; padding-right: 4px; }
-.right-panel .sparkline { order: 2; }
+/* --- COLONNA SINISTRA (STW, SOG) --- */
+/* Ordine desiderato: [Grafico] [Scala] -> Scala verso il centro schermo */
+.box-stw .sparkline, .box-sog .sparkline {
+    order: 1;
+}
+.box-stw .scale-labels, .box-sog .scale-labels {
+    order: 2;
+    text-align: left;
+    padding-left: 4px;
+}
 
-/* Hercules Mode Visuals */
-.line-hercules { filter: drop-shadow(0 0 5px #ff0000); stroke-width: 1.8px !important; }
+/* --- COLONNA DESTRA (DEPTH, TWS) --- */
+/* Ordine desiderato: [Scala] [Grafico] -> Scala verso il centro schermo */
+.box-depth .scale-labels, .box-tws .scale-labels {
+    order: 1;
+    text-align: right;
+    padding-right: 4px;
+}
+.box-depth .sparkline, .box-tws .sparkline {
+    order: 2;
+}
+
+/* --- REGOLE HERCULES (Zoom) --- */
 .box-hercules { background: rgba(255, 0, 0, 0.05) !important; }
 .box-hercules .scale-labels { color: #ff5555; }
-.box-hercules .unit::before, .box-hercules .unit::after, .box-hercules .label::before {
-    font-size: 7px; color: #ff4444; font-weight: 900; letter-spacing: 1px; text-transform: uppercase;
+.box-hercules .unit::before {
+    font-size: 7px; color: #ff4444; font-weight: 900;
+    letter-spacing: 1px; text-transform: uppercase; content: "HERCULES ";
 }
-.left-panel .box-hercules .unit::before { content: "HERCULES "; }
-.right-panel .box-hercules .unit::after { content: " HERCULES"; }
-.right-panel .box-hercules .label:only-child::after { content: " HERCULES"; }
 
-/* Colori standard grafici */
-#stw-graph { stroke: #2ecc71; fill: rgba(46, 204, 113, 0.12); }
-#sog-graph { stroke: #f39c12; fill: rgba(243, 156, 18, 0.12); }
-#depth-graph { stroke: #3498db; fill: rgba(52, 152, 219, 0.12); }
-#tws-graph { stroke: #000000; fill: rgba(0, 0, 0, 0.08); }
+/* Anche in modalità Hercules manteniamo 1px per coerenza, affidandoci al filtro per lo stacco visivo */
+.line-hercules {
+    filter: drop-shadow(0 0 5px #ff0000);
+    stroke-width: 1px !important;
+}
 
 /* ==========================================================================
-   6. WIDGETS E STATUS
+   8. RESPONSIVE (PORTRAIT MODE)
    ========================================================================== */
-#status {
-    position: absolute; top: 10px; right: 10px;
-    font-size: 0.6rem; font-weight: 900;
-    text-transform: uppercase; z-index: 1000;
-    letter-spacing: 1px; background: rgba(0,0,0,0.05);
-    padding: 2px 6px; border-radius: 4px;
+@media screen and (max-aspect-ratio: 0.85/1) {
+    .main-container {
+        grid-template-areas:
+            "gauge gauge"
+            "stw   depth"
+            "sog   tws"
+            "hdg   twa"
+            "cog   awa"
+            "tack  twd" !important;
+        grid-template-columns: 1fr 1fr !important;
+        grid-template-rows: 40vh 1.75fr 1.75fr 0.75fr 0.75fr 1.25fr !important;
+    }
+
+    /* Impedisce ai box di collassare in altezza in verticale */
+    .data-box { height: auto !important; }
+
+    /* --- FOCUS MODE IN VERTICALE (STACKED) --- */
+    /* Quando siamo in verticale e attiviamo il focus, impiliamo Sopra/Sotto */
+    .main-container.focus-active {
+        grid-template-columns: 1fr !important; /* Colonna singola */
+        grid-template-rows: 65vh 35vh !important; /* 65% Altezza al dato, 35% alla bussola */
+        grid-template-areas:
+            "focused"
+            "gauge" !important;
+    }
+
+    /* Correzione dimensioni box in Focus Verticale */
+    .focus-active .is-focused {
+        height: 65vh !important;
+        width: 100vw !important;
+        padding: 5vh 5vw !important; /* Più respiro per display curvi */
+    }
+
+    /* Correzione Bussola in Focus Verticale */
+    .focus-active .box-gauge {
+        height: 35vh !important;
+        width: 100vw !important;
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Ridimensionamento font per Focus Verticale (per non sbordare) */
+    .focus-active .is-focused .value {
+        font-size: clamp(4rem, 20cqh, 12rem) !important;
+    }
+
+    /* In verticale il box TACK è largo: forziamo i due valori ai bordi */
+    .box-tack .dual-value-container {
+        flex-direction: row !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+    }
 }
+
+/* ==========================================================================
+   9. WIDGETS E OVERRIDE SVG (GIORNO)
+   ========================================================================== */
+#status { position: absolute; top: 10px; right: 10px; font-size: 0.6rem; font-weight: 900; text-transform: uppercase; z-index: 1000; background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; }
 .online { color: #27ae60; opacity: 0.8; }
 .offline { color: #c0392b; font-weight: bold; }
 
-.mini-compass {
-    width: min(80cqh, 42cqw); height: min(80cqh, 42cqw); aspect-ratio: 1 / 1;
-    flex-shrink: 0; background: #f0f0f0; border-radius: 50%; border: 1.5px solid #ddd;
-    box-shadow: inset 0 0 10px rgba(0,0,0,0.05); transition: all 0.4s ease;
-}
-
+.mini-compass { background: #f0f0f0; border-radius: 50%; border: 1.5px solid #ddd; }
 .mini-compass text:last-of-type { fill: #000 !important; opacity: 0.4; }
 #twd-boat-wrap path { fill: #000 !important; opacity: 0.3; }
 #twd-wind-chevron { stroke: #000 !important; }
 
-#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow, #twd-boat-wrap {
-    transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-#wind-gauge { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
-
-/* Quadrante Vento Centrale - Giorno */
 #wind-gauge circle[fill="#050505"] { fill: #fcfcfc; }
 #wind-gauge circle[fill="#121212"] { fill: #f0f0f0; }
 #boat-icon { fill: #000 !important; opacity: 1; }
@@ -240,85 +356,88 @@ body {
 #fullscreen-hotspot { fill: #eee !important; stroke: #ccc !important; }
 #ticks line[stroke="#fff"] { stroke: #000 !important; }
 #ticks line[stroke="#666"] { stroke: #bbb !important; }
-
-/* Leeway Container - Giorno */
 rect[fill="#222"] { fill: #eee !important; }
 #leeway-val { color: #000 !important; }
 
-/* ==========================================================================
-   7. STATI DI ALLARME E INSTABILITÀ
-   ========================================================================== */
-.unstable-data { animation: blink-unstable 1.5s infinite ease-in-out; color: #e67e22 !important; }
-.alarm-warning { color: #f39c12 !important; }
-.alarm-danger { color: #e74c3c !important; font-weight: 900; animation: blink-unstable 1s infinite; }
-@keyframes blink-unstable { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow, #twd-boat-wrap { transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
+#wind-gauge { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
 
 /* ==========================================================================
-   8. RESPONSIVE (PORTRAIT MODE)
-   ========================================================================== */
-@media (max-aspect-ratio: 0.9 / 1) {
-    .main-container { grid-template-columns: 1fr 1fr !important; grid-template-rows: 45vh calc(55vh - 8px) !important; }
-    .center-panel { grid-row: 1 !important; grid-column: 1 / span 2 !important; }
-    .left-panel { grid-row: 2 !important; grid-column: 1 !important; }
-    .right-panel { grid-row: 2 !important; grid-column: 2 !important; }
-    .main-container.focus-active { display: flex !important; flex-direction: column !important; }
-    .focus-active .center-panel { flex: 0 0 45vh !important; }
-    .focus-active .side-panel.has-focus { flex: 0 0 calc(55vh - 8px) !important; display: flex !important; }
-    .data-box { height: auto !important; }
-}
-
-/* ==========================================================================
-   9. NIGHT MODE (TACTICAL RED)
+   10. NIGHT MODE (TACTICAL RED - INTEGRALE E RIFINITO)
    ========================================================================== */
 body.night-mode { background-color: #000 !important; color: #ff0000 !important; }
-.night-mode .side-panel { background: rgba(20, 0, 0, 0.4) !important; border: 1px solid #330000; }
-.night-mode .data-box { border-bottom-color: #260000; }
-.night-mode .label, .night-mode .unit, .night-mode .dual-label { color: #800000 !important; }
-.night-mode .value, .night-mode .value-large { color: #ff3333 !important; text-shadow: 0 0 8px rgba(255, 0, 0, 0.4); }
 
-/* Grafici Night Mode: Solo linea, no riempimento */
-.night-mode .graph-wrapper { background: rgba(30, 0, 0, 0.3) !important; }
+/* Pannelli e Box */
+.night-mode .data-box { background: rgba(20, 0, 0, 0.4) !important; border-color: #330000; }
+.night-mode .label,
+.night-mode .unit,
+.night-mode .dual-label { color: #800000 !important; }
+
+.night-mode .value,
+.night-mode .value-large {
+    color: #ff3333 !important;
+    text-shadow: 0 0 8px rgba(255, 0, 0, 0.4);
+}
+
+/* --- GRAFICI NIGHT MODE: Solo linee, zero abbagliamento --- */
+.night-mode .graph-wrapper { background: rgba(30, 0, 0, 0.3) !important; border: 1px solid #330000; }
 .night-mode .sparkline path:first-of-type { display: none !important; }
-.night-mode .sparkline path { fill: none !important; stroke: #ff3333 !important; stroke-width: 1.8px !important; opacity: 1 !important; filter: drop-shadow(0 0 2px rgba(255, 0, 0, 0.4)); }
-
-/* Sovrascrittura griglia per Night Mode: Rosso scuro trasparente */
-.night-mode .sparkline line { stroke: rgba(255, 0, 0, 0.15) !important; stroke-width: 0.7px !important; }
-.night-mode #tws-graph line:not([stroke*="rgba"]) { stroke: #ff3333 !important; stroke-width: 1.8px !important; }
+.night-mode .sparkline path {
+    fill: none !important;
+    stroke: #ff3333 !important;
+    stroke-width: 1px !important;
+    filter: drop-shadow(0 0 2px rgba(255, 0, 0, 0.4));
+}
+.night-mode .sparkline line { stroke: rgba(150, 0, 0, 0.1) !important; }
+.night-mode #tws-graph line:not([stroke*="rgba"]) {
+    stroke: #ff3333 !important;
+    stroke-width: 1px !important;
+}
 .night-mode .scale-labels { color: #660000 !important; }
 
+/* Hercules in Night Mode */
 .night-mode .box-hercules { background: rgba(60, 0, 0, 0.2) !important; }
 .night-mode .line-hercules { filter: drop-shadow(0 0 6px #ff0000) !important; }
 
-/* Wind Gauge Night */
-.night-mode #wind-gauge circle { stroke: #330000; }
-.night-mode #wind-gauge circle[fill="#050505"] { fill: #050505 !important; }
-.night-mode #wind-gauge circle[fill="#121212"] { fill: #121212 !important; }
-.night-mode #fullscreen-hotspot { fill: #000 !important; stroke: #330000 !important; }
+/* --- WIND GAUGE NIGHT: Scurimento settori e icone --- */
+.night-mode #wind-gauge circle[fill="#050505"],
+.night-mode #wind-gauge circle[fill="#fcfcfc"] { fill: #050505 !important; }
 
-.night-mode #ticks line { stroke: #4d0000 !important; }
-.night-mode #tick-labels { fill: #800000 !important; }
-.night-mode #boat-icon { fill: #330000 !important; opacity: 0.6 !important; }
-.night-mode #aws-val-svg { fill: #ff3333 !important; }
-.night-mode #aws-display-group text { fill: #ff3333 !important; }
+.night-mode #wind-gauge circle[fill="#121212"],
+.night-mode #wind-gauge circle[fill="#f0f0f0"] { fill: #0a0000 !important; }
+
+/* Glow e Hotspot centrale */
+.night-mode #fullscreen-hotspot { fill: #000 !important; stroke: #330000 !important; }
 .night-mode #center-glow feDropShadow { flood-color: #ff0000 !important; flood-opacity: 0.6 !important; }
 
-/* Settori Vento Night */
+.night-mode #boat-icon { fill: #330000 !important; opacity: 0.6 !important; }
+.night-mode #aws-val-svg { fill: #ff3333 !important; }
+.night-mode #aws-display-group text { fill: #660000 !important; }
+
+/* SCALA GRADUATA BUSSOLA: Tacche e numeri rosso cupo */
+.night-mode #ticks line { stroke: #4d0000 !important; }
+.night-mode #tick-labels { fill: #800000 !important; }
+
+/* SETTORI VENTO: Il verde diventa un rosso scuro trattteggiato */
 .night-mode #wind-gauge path[stroke="#ff0000"] { stroke: #660000 !important; opacity: 0.8; }
-.night-mode #wind-gauge path[stroke="#00ff00"] { stroke: #660000 !important; stroke-dasharray: 4, 3; opacity: 0.8; }
+.night-mode #wind-gauge path[stroke="#00ff00"] { stroke: #440000 !important; stroke-dasharray: 4, 3; opacity: 0.6; }
 .night-mode #wind-gauge path[stroke="#ff8800"] { stroke: #330000 !important; stroke-width: 8; }
 
-/* Leeway & Pointer Night */
+/* --- LEEWAY & POINTERS NIGHT --- */
 .night-mode rect[fill="url(#leeway-grad)"] { fill: url(#leeway-night-grad) !important; }
 .night-mode #leeway-val { fill: #ff3333 !important; }
-.night-mode g[stroke="#555"] line { stroke: #4d0000 !important; }
-.night-mode g[fill="#555"] text { fill: #660000 !important; }
 .night-mode rect[fill="#222"], .night-mode rect[fill="#eee"] { fill: #0a0000 !important; stroke: #200000; }
 
+/* Scala graduata Leeway: tacche e numeri */
+.night-mode g[stroke="#555"] line { stroke: #4d0000 !important; }
+.night-mode g[fill="#555"] text { fill: #660000 !important; }
+
+/* Lancette */
 .night-mode #awa-pointer path { fill: #ff0000; stroke: #000; }
 .night-mode #twa-pointer path { fill: #800000; stroke: #000; }
 .night-mode #track-pointer path { fill: #ff0000; stroke: #fff; stroke-width: 0.5; }
 
-/* Bussola TWD Night */
+/* --- MINI BUSSOLA TWD NIGHT --- */
 .night-mode .mini-compass { border-color: #330000; background: #000; }
 .night-mode .mini-compass text { fill: #800000 !important; }
 .night-mode .mini-compass text:last-of-type { fill: #800000 !important; opacity: 1; }
@@ -326,25 +445,10 @@ body.night-mode { background-color: #000 !important; color: #ff0000 !important; 
 .night-mode #twd-arrow #twd-wind-chevron { stroke: #ff3333 !important; filter: drop-shadow(0 0 4px #ff0000); }
 
 /* ==========================================================================
-   11. TREND VENTO E ALLARME STRAMBATA (GYBE)
+   11. TREND E ANIMAZIONI
    ========================================================================== */
 @keyframes blink-trend { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-
-/* Stato base dei pallini di trend: discreti al 30% */
-#trend-dot-cw, #trend-dot-ccw, #trend-gauge-cw, #trend-gauge-ccw {
-    opacity: 0.3;
-    transition: opacity 0.3s ease;
-}
-
-/* Quando attivi: brillano al 100% e lampeggiano */
-.is-trending {
-    opacity: 1 !important;
-    animation: blink-trend 1s infinite !important;
-}
-
-/* Allarme Strambata: Rosso fisso con bagliore neon massimo */
-.is-gybing {
-    opacity: 1 !important;
-    animation: none !important;
-    filter: drop-shadow(0 0 8px #ff0000) !important;
-}
+#trend-dot-cw, #trend-dot-ccw, #trend-gauge-cw, #trend-gauge-ccw { opacity: 0.3; transition: opacity 0.3s ease; }
+.is-trending { opacity: 1 !important; animation: blink-trend 1s infinite !important; }
+.is-gybing { opacity: 1 !important; animation: none !important; filter: drop-shadow(0 0 8px #ff0000) !important; }
+.unstable-data { animation: blink-trend 1.5s infinite ease-in-out; color: #e67e22 !important; }

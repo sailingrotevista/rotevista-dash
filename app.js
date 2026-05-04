@@ -308,10 +308,14 @@ function startDisplayLoop() {
         if (tick % 2 === 0) { refreshGraph('stw'); refreshGraph(displayModeSog === 'VMG' ? 'vmg' : 'sog'); refreshGraph('depth'); refreshGraph('tws'); }
 
         // SLOW TIER (3s)
-        if (tick % 3 === 0) {
-            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, 30000, false), cObj = getCircularAverageFromBuffer(store.longBuf.cog, 30000, false),
-                awObj = getCircularAverageFromBuffer(store.longBuf.awa, 30000, true), twObj = getCircularAverageFromBuffer(store.longBuf.twa, 30000, true),
-                twdObj = getCircularAverageFromBuffer(store.longBuf.twd, 30000, false);
+            if (tick % 3 === 0) {
+                // Utilizziamo CONFIG.averages.longWindow (che ora è 30000ms)
+                // In questo modo, se cambi il tempo su Signal K, la dashboard si aggiorna da sola.
+                let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averages.longWindow, false),
+                    cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averages.longWindow, false),
+                    awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averages.longWindow, true),
+                    twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averages.longWindow, true),
+                    twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averages.longWindow, false);
 
             const upUI = (el, obj, isCompass = false) => {
                 if (!obj || obj.val === null) { el.innerHTML = "---&deg;"; el.classList.remove('unstable-data'); }
@@ -418,47 +422,72 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
 // 8. INTERAZIONI E RETE
 // ==========================================================================
 function toggleFocusMode(type, element) {
-    const container = document.querySelector('.main-container'); const parentPanel = element.closest('.side-panel'); const isLeft = parentPanel.classList.contains('left-panel');
+    const container = document.querySelector('.main-container');
+    
+    // Con la nuova struttura Flat HTML, non abbiamo più '.left-panel'.
+    // Dobbiamo determinare il lato guardando il tipo di box.
+    const leftBoxes = ['stw', 'sog', 'hdg', 'cog', 'tack'];
+    const isLeft = leftBoxes.includes(type);
+
     isFocusActive = !isFocusActive;
-    if (isFocusActive) { container.classList.add('focus-active', isLeft ? 'focus-side-left' : 'focus-side-right'); parentPanel.classList.add('has-focus'); element.classList.add('is-focused'); }
-    else { container.classList.remove('focus-active', 'focus-side-left', 'focus-side-right'); document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('has-focus')); document.querySelectorAll('.data-box').forEach(b => b.classList.remove('is-focused')); }
+    
+    if (isFocusActive) {
+        container.classList.add('focus-active', isLeft ? 'focus-side-left' : 'focus-side-right');
+        element.classList.add('is-focused');
+    } else {
+        container.classList.remove('focus-active', 'focus-side-left', 'focus-side-right');
+        document.querySelectorAll('.data-box').forEach(b => b.classList.remove('is-focused'));
+    }
 }
 
 ['stw', 'sog', 'tws', 'depth'].forEach(type => {
+    // Risale dal grafico al contenitore principale (funziona con la nuova struttura)
     const el = document.getElementById(type + '-graph').closest('.data-box');
     let lastTapTime = 0, tapTimeout, isLongPressActive = false;
-    el.addEventListener('pointerdown', (e) => { isLongPressActive = false; pressTimer = setTimeout(() => { if (!isFocusActive) { isLongPressActive = true; toggleFocusMode(type, el); lastTapTime = 0; } }, 1000); });
-    el.addEventListener('pointerup', (e) => {
-            clearTimeout(pressTimer); if (isLongPressActive) return;
-            const currentTime = new Date().getTime(), tapDelay = currentTime - lastTapTime;
-
-            // RILEVAMENTO DOPPIO TAP (HERCULES)
-            if (tapDelay < 300 && tapDelay > 0) {
-                clearTimeout(tapTimeout); // Cancella l'azione del tap singolo (uscita dal focus)
-                
-                // Permette il toggle Hercules sempre, sia in vista normale che in Focus
-                graphModes[type] = graphModes[type] === 'standard' ? 'hercules' : 'standard';
-                localStorage.setItem('mode_' + type, graphModes[type]);
-                
+    
+    el.addEventListener('pointerdown', (e) => {
+        isLongPressActive = false;
+        pressTimer = setTimeout(() => {
+            if (!isFocusActive) {
+                isLongPressActive = true;
+                toggleFocusMode(type, el);
                 lastTapTime = 0;
             }
-            // RILEVAMENTO TAP SINGOLO (ESCI DA FOCUS o CAMBIA SOG/VMG)
-            else {
-                lastTapTime = currentTime;
-                tapTimeout = setTimeout(() => {
-                    // Se siamo in focus e clicchiamo il box ingrandito, usciamo
-                    if (isFocusActive && el.classList.contains('is-focused')) {
-                        toggleFocusMode(type, el);
-                    }
-                    // Se siamo in vista normale e clicchiamo SOG, cambiamo in VMG
-                    else if (!isFocusActive && type === 'sog') {
-                        displayModeSog = (displayModeSog === 'SOG') ? 'VMG' : 'SOG';
-                        el.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
-                        setTimeout(() => el.style.backgroundColor = "", 150);
-                    }
-                }, 250);
-            }
-        });
+        }, 1000);
+    });
+    
+    el.addEventListener('pointerup', (e) => {
+        clearTimeout(pressTimer);
+        if (isLongPressActive) return; // Se era focus, ignora l'up
+        
+        const currentTime = new Date().getTime(), tapDelay = currentTime - lastTapTime;
+        
+        // DOPPIO TAP: Toggle Hercules Mode (Funziona anche in Focus)
+        if (tapDelay < 300 && tapDelay > 0) {
+            clearTimeout(tapTimeout); // Cancella l'uscita dal Focus
+            graphModes[type] = graphModes[type] === 'standard' ? 'hercules' : 'standard';
+            localStorage.setItem('mode_' + type, graphModes[type]);
+            refreshGraph(type); // Mostra istantaneamente
+            lastTapTime = 0;
+        }
+        // TAP SINGOLO (con ritardo di 250ms per aspettare l'eventuale doppio tap)
+        else {
+            lastTapTime = currentTime;
+            tapTimeout = setTimeout(() => {
+                // Uscita Focus
+                if (isFocusActive && el.classList.contains('is-focused')) {
+                    toggleFocusMode(type, el);
+                }
+                // Toggle SOG/VMG (solo se non in focus)
+                else if (!isFocusActive && type === 'sog') {
+                    displayModeSog = (displayModeSog === 'SOG') ? 'VMG' : 'SOG';
+                    el.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                    setTimeout(() => el.style.backgroundColor = "", 150);
+                }
+            }, 250); // Attesa critica per il doppio tap
+        }
+    });
+    
     el.addEventListener('pointerleave', () => clearTimeout(pressTimer));
 });
 
