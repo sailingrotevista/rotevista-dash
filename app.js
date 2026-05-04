@@ -429,11 +429,36 @@ function toggleFocusMode(type, element) {
     let lastTapTime = 0, tapTimeout, isLongPressActive = false;
     el.addEventListener('pointerdown', (e) => { isLongPressActive = false; pressTimer = setTimeout(() => { if (!isFocusActive) { isLongPressActive = true; toggleFocusMode(type, el); lastTapTime = 0; } }, 1000); });
     el.addEventListener('pointerup', (e) => {
-        clearTimeout(pressTimer); if (isLongPressActive) return;
-        const currentTime = new Date().getTime(), tapDelay = currentTime - lastTapTime;
-        if (tapDelay < 300 && tapDelay > 0) { clearTimeout(tapTimeout); if (!isFocusActive) { graphModes[type] = graphModes[type] === 'standard' ? 'hercules' : 'standard'; localStorage.setItem('mode_' + type, graphModes[type]); } lastTapTime = 0; }
-        else { lastTapTime = currentTime; tapTimeout = setTimeout(() => { if (isFocusActive && el.classList.contains('is-focused')) toggleFocusMode(type, el); else if (!isFocusActive && type === 'sog') { displayModeSog = (displayModeSog === 'SOG') ? 'VMG' : 'SOG'; el.style.backgroundColor = "rgba(0, 0, 0, 0.05)"; setTimeout(() => el.style.backgroundColor = "", 150); } }, 250); }
-    });
+            clearTimeout(pressTimer); if (isLongPressActive) return;
+            const currentTime = new Date().getTime(), tapDelay = currentTime - lastTapTime;
+
+            // RILEVAMENTO DOPPIO TAP (HERCULES)
+            if (tapDelay < 300 && tapDelay > 0) {
+                clearTimeout(tapTimeout); // Cancella l'azione del tap singolo (uscita dal focus)
+                
+                // Permette il toggle Hercules sempre, sia in vista normale che in Focus
+                graphModes[type] = graphModes[type] === 'standard' ? 'hercules' : 'standard';
+                localStorage.setItem('mode_' + type, graphModes[type]);
+                
+                lastTapTime = 0;
+            }
+            // RILEVAMENTO TAP SINGOLO (ESCI DA FOCUS o CAMBIA SOG/VMG)
+            else {
+                lastTapTime = currentTime;
+                tapTimeout = setTimeout(() => {
+                    // Se siamo in focus e clicchiamo il box ingrandito, usciamo
+                    if (isFocusActive && el.classList.contains('is-focused')) {
+                        toggleFocusMode(type, el);
+                    }
+                    // Se siamo in vista normale e clicchiamo SOG, cambiamo in VMG
+                    else if (!isFocusActive && type === 'sog') {
+                        displayModeSog = (displayModeSog === 'SOG') ? 'VMG' : 'SOG';
+                        el.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                        setTimeout(() => el.style.backgroundColor = "", 150);
+                    }
+                }, 250);
+            }
+        });
     el.addEventListener('pointerleave', () => clearTimeout(pressTimer));
 });
 
