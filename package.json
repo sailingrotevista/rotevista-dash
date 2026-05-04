@@ -1,6 +1,6 @@
 {
   "name": "@sailingrotevista/rotevista-dash",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Public Wind Dashboard with navigation and course aids",
   "main": "index.js",
   "publishConfig": {
