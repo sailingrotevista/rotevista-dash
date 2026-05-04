@@ -338,7 +338,21 @@ body {
 /* ==========================================================================
    9. WIDGETS E OVERRIDE SVG (GIORNO)
    ========================================================================== */
-#status { position: absolute; top: 10px; right: 10px; font-size: 0.6rem; font-weight: 900; text-transform: uppercase; z-index: 1000; background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; }
+#status {
+    position: absolute;
+    /* Posizionato con un po' di margine dal bordo del riquadro bussola */
+    top: 15px;
+    right: 15px;
+    font-size: 0.6rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    z-index: 1000;
+    /* Sfondo leggermente più marcato per leggerlo sopra il quadrante */
+    background: rgba(0,0,0,0.08);
+    padding: 3px 8px;
+    border-radius: 4px;
+    letter-spacing: 1px;
+}
 .online { color: #27ae60; opacity: 0.8; }
 .offline { color: #c0392b; font-weight: bold; }
 
@@ -377,6 +391,11 @@ body.night-mode { background-color: #000 !important; color: #ff0000 !important; 
 .night-mode .value-large {
     color: #ff3333 !important;
     text-shadow: 0 0 8px rgba(255, 0, 0, 0.4);
+}
+
+.night-mode #status {
+    background: rgba(255, 0, 0, 0.1);
+    color: #ff0000;
 }
 
 /* --- GRAFICI NIGHT MODE: Solo linee, zero abbagliamento --- */
