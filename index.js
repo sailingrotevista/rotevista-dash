@@ -63,8 +63,8 @@ module.exports = function (app) {
           longWindow: {
             type: 'number',
             title: 'Long Average Window (ms)',
-            description: "Time buffer used for 'MEAN' values (e.g., 60000ms = 1 min). Higher values provide more stability but slower reaction.",
-            default: 60000
+            description: "Time buffer for 'MEAN' values. Larger windows produce smoother numbers but increase the 'Unstable' (orange) alerts during maneuvers or in gusty conditions, as data coherence decreases over time.",
+            default: 30000
           },
           smoothWindow: {
             type: 'number',

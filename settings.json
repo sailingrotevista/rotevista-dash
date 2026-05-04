@@ -8,7 +8,7 @@
     "red": 20.0
   },
   "averages": {
-    "long_window": 60000,
+    "long_window": 3000,
     "smooth_window": 2000
   },
   "hercules_ranges": {
