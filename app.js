@@ -559,34 +559,32 @@ function startDisplayLoop() {
 // ==========================================================================
 // 8. CONFIGURAZIONE E GRAFICI UTILS
 // ==========================================================================
+
 /**
- * Recupera la configurazione provando i percorsi standard e quelli "scoped".
- * Gestisce il parsing dei numeri e la mappatura dei grafici.
+ * Recupera la configurazione dal server Signal K.
+ * Prova i percorsi API ufficiali e quelli scoped (@sailingrotevista).
+ * Converte i testi in numeri per garantire la precisione dei calcoli.
  */
 async function fetchServerConfig() {
     if (!window.location.protocol.includes("http")) return;
     
-    // Elenco di tutti i percorsi dove Signal K potrebbe aver salvato i settings
     const urls = [
-        '/plugins/rotevista-dash/settings',
-        '/plugins/@sailingrotevista%2frotevista-dash/settings',
-        '/signalk/v1/api/plugins/rotevista-dash/settings',
-        '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash/settings',
-        '/plugins/rotevista-dash/config' // Quello che ti ha dato 401
+        '/signalk/v1/api/plugins/rotevista-dash',
+        '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash',
+        '/plugins/rotevista-dash/settings'
     ];
 
     for (let url of urls) {
         try {
             const response = await fetch(url);
-            
             if (response.ok) {
                 const data = await response.json();
                 
-                // Signal K può restituire i dati direttamente, in 'configuration' o in 'settings'
+                // Signal K può incapsulare i dati in settings o configuration
                 const actual = data.settings || data.configuration || data.options || data;
                 
                 if (actual && (actual.alarms || actual.averaging || actual.graphs)) {
-                    // FUNZIONE DI PARSING: Trasforma i testi in numeri per i calcoli
+                    // FUNZIONE DI PARSING: Trasforma eventuali testi "12.5" in numeri 12.5 reali
                     const parseNumbers = (obj) => {
                         for (let k in obj) {
                             if (typeof obj[k] === 'object') parseNumbers(obj[k]);
@@ -597,7 +595,7 @@ async function fetchServerConfig() {
                     };
                     parseNumbers(actual);
 
-                    // APPLICAZIONE CONFIGURAZIONE (Ora include anche i grafici!)
+                    // MAPPATURA INTEGRALE NEL CONFIG LOCALE
                     if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
                     if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
                     if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
@@ -606,13 +604,14 @@ async function fetchServerConfig() {
                             CONFIG.scales[k] = { ...CONFIG.scales[k], ...actual.scales[k] };
                         }
                     }
-                    console.log("✅ CONFIGURAZIONE CARICATA DA:", url);
-                    return; // Abbiamo trovato i dati, usciamo dal loop
+                    console.log("✅ Configurazione caricata correttamente da:", url);
+                    return;
                 }
             }
-        } catch (e) { }
+        } catch (e) {
+            console.warn(`⚠️ Tentativo fallito su ${url}`);
+        }
     }
-    console.warn("⚠️ Nessun dato di configurazione trovato nei percorsi standard. Uso i default.");
 }
 
 function manageHistory(t, v) {
@@ -637,12 +636,24 @@ function calculateScale(type, data, mode) {
     return { min: 0, max: Math.max(s.stdMax, Math.ceil(aMax / s.step) * s.step) };
 }
 
-function updateScaleLabels(t, min, max) { const el = document.getElementById(t + '-scale'); if (el) el.innerHTML = `<span>${Math.round(max)}</span><span>${Math.round((min+max)/2)}</span><span>${Math.round(min)}</span>`; }
+function updateScaleLabels(t, min, max) {
+    const el = document.getElementById(t + '-scale');
+    if (el) el.innerHTML = `<span>${Math.round(max)}</span><span>${Math.round((min+max)/2)}</span><span>${Math.round(min)}</span>`;
+}
 
+/**
+ * drawGraph: Disegna i grafici con griglia temporale intelligente
+ */
 function drawGraph(d, id, min, max, isTws, isHercules) {
     const svg = document.getElementById(id); if (!svg || d.length < 2) return;
     const w = 200, h = 40, range = max - min || 1;
-    let grids = ""; [0.25, 0.5, 0.75].forEach(p => { grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`; });
+    
+    // Griglia orizzontale
+    let grids = "";
+    [0.25, 0.5, 0.75].forEach(p => {
+        grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`;
+    });
+
     /**
      * Griglia Temporale Intelligente:
      * - Storia <= 15 min: linee ogni 1 minuto.
@@ -654,18 +665,24 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
         const x = w - (m / CONFIG.graphs.historyMinutes) * w;
         grids += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="rgba(0,0,0,0.08)" stroke-width="0.5" />`;
     }
+
     let pD = ""; let cS = "";
     d.forEach((v, i) => {
         const x = (i/(CONFIG.graphs.samples-1))*w, y = h-(Math.max(0,Math.min(1,(v-min)/range))*h); pD += `${i===0?'M':'L'} ${x} ${y} `;
         if (isTws && i > 0) {
             const px = ((i-1)/(CONFIG.graphs.samples-1))*w, py = h-(Math.max(0,Math.min(1,(d[i-1]-min)/range))*h);
             let c = (v >= CONFIG.graphs.reef2) ? "#e74c3c" : (v >= CONFIG.graphs.reef1 ? "#e67e22" : "#000");
+            // Aggiunta della classe 'tws-reef-line' per la gestione Night Mode
             cS += `<line x1="${px}" y1="${py}" x2="${x}" y2="${y}" stroke="${c}" class="tws-reef-line ${isHercules?'line-hercules':''}" />`;
         }
     });
+
     const clrs = { 'stw-graph': '#2ecc71', 'sog-graph': '#f39c12', 'depth-graph': '#3498db', 'tws-graph': '#000' };
     const colorKey = id === 'sog-graph' && displayModeSog === 'VMG' ? '#16a085' : clrs[id];
-    svg.innerHTML = isTws ? `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="rgba(0,0,0,0.05)" stroke="none" />${cS}` : `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="${colorKey}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${colorKey}" />`;
+    
+    svg.innerHTML = isTws ?
+        `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="rgba(0,0,0,0.05)" stroke="none" />${cS}` :
+        `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="${colorKey}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${colorKey}" />`;
 }
 
 // ==========================================================================
