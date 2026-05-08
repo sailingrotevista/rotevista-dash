@@ -12,36 +12,23 @@
 // 1. CONFIGURAZIONE E DEFAULT
 // ==========================================================================
 let CONFIG = {
-    alarms: {
-        depthDanger: 2.5,
-        depthWarning: 5.0
-    },
-    // Gestione parametri di stabilità e medie
+    alarms: { depthDanger: 2.5, depthWarning: 5.0 },
     averaging: {
-        smoothWindow: 2000,         // Smoothing puntatori (2s)
-        longWindow: 30000,          // Finestra per i valori MEAN (30s)
-        stabilityTolerance: 2000,   // Millisecondi per considerare il buffer "pieno"
-        stabilityThreshold: 0.85,   // Soglia coerenza R per il lampeggio (0.7 - 0.98)
-        minSpeed: 0,               // Nodi minimi per attivare gli allarmi di instabilità
+        smoothWindow: 2000,
+        longWindow: 30000,
+        stabilityTolerance: 2000,
+        stabilityThreshold: 0.85,
+        minSpeed: 0.5,
         stabilityBreakout: 15
     },
-    // Parametri per i grafici sparkline
-    graphs: {
-        reef1: 15.0,                // Soglia primo reef (Orange)
-        reef2: 20.0,                // Soglia secondo reef (Red)
-        historyMinutes: 5,          // Finestra temporale visualizzata
-        samples: 60                 // Numero di punti di campionamento
-    },
-    // Configurazioni scale automatiche
+    graphs: { reef1: 15.0, reef2: 20.0, historyMinutes: 5, samples: 60 },
     scales: {
         stw: { stdMax: 12, hercSpan: 4, step: 2 },
         sog: { stdMax: 12, hercSpan: 4, step: 2 },
         tws: { stdMax: 25, hercSpan: 10, step: 5 },
         depth: { stdMax: 20, hercSpan: 10, step: 10 }
     },
-    server: {
-        fallbackIp: "192.168.111.240:3000"
-    }
+    server: { fallbackIp: "192.168.111.240:3000" }
 };
 
 const RENDER_INTERVAL_MS = 1000;
@@ -560,18 +547,15 @@ function startDisplayLoop() {
 // 8. CONFIGURAZIONE E GRAFICI UTILS
 // ==========================================================================
 /**
- * Recupera la configurazione dal server con log di debug estesi.
+ * Recupera la configurazione e forza la sovrascrittura di ogni parametro.
  */
 async function fetchServerConfig() {
     try {
         const response = await fetch('/rotevista-config');
-        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-        
+        if (!response.ok) throw new Error(`Server offline o rotta non trovata`);
         const data = await response.json();
-        
-        // DEBUG 1: Visualizza i dati esattamente come arrivano dal server
-        console.log("📥 [DEBUG] Dati grezzi ricevuti dal server:", data);
 
+        // 1. Funzione di pulizia: trasforma stringhe in numeri
         const parse = (obj) => {
             for (let k in obj) {
                 if (typeof obj[k] === 'object' && obj[k] !== null) parse(obj[k]);
@@ -580,36 +564,31 @@ async function fetchServerConfig() {
             }
             return obj;
         };
+        const actual = parse(data);
 
-        const actual = parse(JSON.parse(JSON.stringify(data))); // Cloniamo per sicurezza
-
-        // DEBUG 2: Visualizza i dati dopo la conversione numerica
-        console.log("⚙️ [DEBUG] Dati convertiti (numeric):", actual);
-
-        // ASSEGNAZIONE E FUSIONE (Mappatura dei blocchi)
+        // 2. Mappatura Forzata (Deep Merge)
         if (actual.alarms) Object.assign(CONFIG.alarms, actual.alarms);
-        if (actual.graphs) Object.assign(CONFIG.graphs, actual.graphs);
         
-        // Gestione specifica per averaging (il blocco più critico)
-        if (actual.averaging) {
-            Object.assign(CONFIG.averaging, actual.averaging);
-            // DEBUG 3: Tabella comparativa per verificare minSpeed e soglie
-            console.table({
-                "Parametro": ["longWindow", "minSpeed", "stabilityThreshold", "stabilityBreakout"],
-                "Valore Attuale": [
-                    CONFIG.averaging.longWindow,
-                    CONFIG.averaging.minSpeed,
-                    CONFIG.averaging.stabilityThreshold,
-                    CONFIG.averaging.stabilityBreakout
-                ]
-            });
+        if (actual.graphs) {
+            Object.assign(CONFIG.graphs, actual.graphs);
+            console.log(`📈 GRAFICI: Durata ${CONFIG.graphs.historyMinutes}m | Reef1: ${CONFIG.graphs.reef1}kts | Reef2: ${CONFIG.graphs.reef2}kts`);
         }
         
-        if (actual.scales) Object.assign(CONFIG.scales, actual.scales);
+        if (actual.averaging) {
+            Object.assign(CONFIG.averaging, actual.averaging);
+            console.log(`⏱️ STABILITÀ: MinSpeed ${CONFIG.averaging.minSpeed}kts | Breakout: ${CONFIG.averaging.stabilityBreakout}°`);
+        }
+        
+        if (actual.scales) {
+            // Per le scale facciamo un merge profondo per ogni box
+            for (let key in actual.scales) {
+                if (CONFIG.scales[key]) Object.assign(CONFIG.scales[key], actual.scales[key]);
+            }
+        }
 
-        console.log("✅ [SUCCESS] Configurazione sincronizzata correttamente.");
+        console.log("✅ Configurazione sincronizzata con successo.");
     } catch (err) {
-        console.warn("⚠️ [WARNING] Utilizzo default locali. Motivo:", err.message);
+        console.warn("⚠️ Utilizzo default locali. Motivo:", err.message);
     }
 }
 
