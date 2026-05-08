@@ -1,8 +1,16 @@
+/**
+ * ==========================================================================
+ * Rotevista Dash Configuration Plugin
+ * ==========================================================================
+ * Definisce l'interfaccia di configurazione in Signal K Admin.
+ * Le descrizioni sono ottimizzate per riflettere l'utilizzo tattico e strategico.
+ */
+
 module.exports = function (app) {
   const plugin = {};
   plugin.id = 'rotevista-dash';
   plugin.name = 'Rotevista Dash Configuration';
-  plugin.description = 'Configure boat-specific parameters for the Dashboard';
+  plugin.description = 'Configure boat-specific tactical and safety parameters for the Dashboard';
 
   plugin.start = function (options) { };
   plugin.stop = function () { };
@@ -11,128 +19,132 @@ module.exports = function (app) {
     type: 'object',
     title: 'Rotevista Dashboard Settings',
     properties: {
+      // --- SEZIONE ALLARMI PROFONDITÀ ---
       alarms: {
         type: 'object',
-        title: 'Depth Alarms (meters)',
-        description: "Configure safety thresholds for depth monitoring.",
+        title: 'Depth Safety Alarms',
+        description: "Configure safety thresholds for depth monitoring based on your boat's draft.",
         properties: {
           depthDanger: {
             type: 'number',
-            title: 'Danger Threshold (Red + Sound)',
-            description: "Critical depth level. When depth is below this value, the display turns red and an audible alarm is triggered.",
+            title: 'Emergency Depth (Red + Sound)',
+            description: "Critical depth level. Below this limit, the display turns RED and the audible 'Bing-Bing' alarm starts.",
             default: 2.5
           },
           depthWarning: {
             type: 'number',
-            title: 'Warning Threshold (Yellow)',
-            description: "Shallow water margin. When depth is below this value, the display turns yellow as a safety warning.",
+            title: 'Safety Margin (Yellow)',
+            description: "Shallow water warning. The depth value turns YELLOW below this threshold to alert you to pay attention.",
             default: 5.0
           }
         }
       },
+      // --- SEZIONE GRAFICI E REEF ---
       graphs: {
         type: 'object',
-        title: 'Graph & Reef Alerts',
-        description: "General settings for graph sampling and tactical wind alerts.",
+        title: 'Performance History & Reef Alerts',
+        description: "Settings for chart timelines and tactical wind alerts.",
         properties: {
           reef1: {
             type: 'number',
-            title: '1st Reef Threshold (Orange)',
-            description: "TWS knots at which the wind graph turns orange, indicating it's time to prepare for the first reef.",
+            title: '1st Reef Alert (Orange)',
+            description: "Wind speed (TWS) at which the graph turns orange, suggesting it's time to prepare for the first sail reduction.",
             default: 15.0
           },
           reef2: {
             type: 'number',
-            title: '2nd Reef Threshold (Red)',
-            description: "TWS knots at which the wind graph turns red, indicating urgent reefing is required.",
+            title: '2nd Reef Alert (Red)',
+            description: "Wind speed (TWS) at which the graph turns red, indicating urgent need for sail reduction.",
             default: 20.0
           },
           historyMinutes: {
             type: 'number',
-            title: 'Graph History Duration (minutes)',
-            description: "Total timeframe shown in the sparklines. Vertical grid lines will automatically mark each elapsed minute.",
-            default: 5
+            title: 'Strategic Timeline (Minutes)',
+            description: "Total duration shown in the charts. Vertical grid lines mark 1-minute intervals for short durations and 5-minute intervals for long ones.",
+            default: 5,
+            // Menu a tendina per evitare inserimenti errati
+            enum: [5, 10, 15, 30, 60]
           }
         }
       },
+      // --- SEZIONE MEDIE E STABILITÀ ---
       averaging: {
         type: 'object',
-        title: 'Averaging & Stability',
-        description: "Fine-tune data smoothing and maneuver detection.",
+        title: 'Tactical Brain & Stability',
+        description: "Fine-tune how the dashboard reacts to boat movements and maneuvers.",
         properties: {
           longWindow: {
             type: 'number',
-            title: 'Long Average Window (ms)',
-            description: "Time buffer for 'MEAN' values. Larger windows produce smoother numbers but increase the 'Unstable' (orange) alerts during maneuvers or in gusty conditions, as data coherence decreases over time.",
+            title: 'Decision Stability Window (ms)',
+            description: "The time range used to calculate MEAN values. A longer window (e.g. 30s) provides a solid base for strategy, while a shorter one reacts faster to ogni oscillation.",
             default: 30000
           },
-            smoothWindow: {
+          smoothWindow: {
             type: 'number',
-            title: 'Pointer Smoothing Window (ms)',
-            description: "Buffer for gauge needles and pointers. Removes sensor jitter while maintaining real-time responsiveness.",
+            title: 'Needle Fluidity (ms)',
+            description: "Controls how smoothly pointers move. It filters out sensor 'shaking' without delaying the real-time feel.",
             default: 2000
           },
-            minSpeed: {
+          minSpeed: {
             type: 'number',
-            title: 'Min Speed for Stability (knots)',
-            description: "SOG threshold below which stability alerts (blinking orange) are suppressed to avoid GPS noise while docked.",
+            title: 'Harbor Silence (knots)',
+            description: "Minimum speed required to enable orange blinking alerts. This prevents the display from flashing due to GPS noise while docked or at anchor.",
             default: 0.5
           },
           stabilityThreshold: {
             type: 'number',
-            title: 'Stability Sensitivity (R value: 0.7 - 0.98)',
-            description: "Determines when the number blinks orange. 0.95 = very sensitive (blinks with small movements), 0.85 = standard (balanced for sea), 0.75 = sturdy (blinks only in very rough conditions).",
-            default: 0.93
+            title: 'Steering Precision (Sensitivity)',
+            description: "Controls how strictly the system judges your course coherence. 0.95 requires pro precision; 0.85 is more realistic for cruising in waves.",
+            default: 0.85
+          },
+          stabilityBreakout: {
+            type: 'number',
+            title: 'Maneuver Detection Limit (degrees)',
+            description: "If the boat or wind shifts more than these degrees, the display blinks orange to warn you that the current average is no longer reliable.",
+            default: 15
           }
         }
       },
+      // --- SEZIONE CALIBRAZIONE SCALE ---
       scales: {
         type: 'object',
-        title: 'Graph Scale Configurations',
-        description: "Customize how scales adapt to your boat's performance in both Standard and Hercules modes.",
+        title: 'Chart Scale Calibration',
+        description: "Customize how charts adapt to your boat's performance in both Standard and Hercules Zoom modes.",
         properties: {
           stw: {
-            type: 'object', title: 'STW (Speed Through Water)',
+            type: 'object',
+            title: 'STW (Speed Through Water)',
             properties: {
-              stdMax: {
-                type: 'number', title: 'Standard Mode Max',
-                description: "The initial top limit of the graph (base 0) during normal navigation.",
-                default: 12
-              },
-              step: {
-                type: 'number', title: 'Rounding Step',
-                description: "The fixed increment used when speed exceeds the Max (e.g., scale jumps from 0-12 to 0-14, 0-16).",
-                default: 2
-              },
-              hercSpan: {
-                type: 'number', title: 'Hercules Zoom Span',
-                description: "The minimum knots window centered on current speed. Smaller values increase 'zoom' on small variations.",
-                default: 4
-              }
+              stdMax: { type: 'number', title: 'Standard Max', description: "Default top limit of the graph.", default: 12 },
+              step: { type: 'number', title: 'Scale Jump', description: "Amount the scale increases when you exceed the limit.", default: 2 },
+              hercSpan: { type: 'number', title: 'Hercules Zoom Span', description: "Width of the zoom window around your current speed.", default: 4 }
             }
           },
           sog: {
-            type: 'object', title: 'SOG (Speed Over Ground)',
+            type: 'object',
+            title: 'SOG (Speed Over Ground)',
             properties: {
-              stdMax: { type: 'number', title: 'Standard Mode Max', description: "Initial top limit for the base-0 scale.", default: 12 },
-              step: { type: 'number', title: 'Rounding Step', description: "Scale jump interval to keep labels tidy.", default: 2 },
-              hercSpan: { type: 'number', title: 'Hercules Zoom Span', description: "Minimum window amplitude during active zoom.", default: 4 }
+              stdMax: { type: 'number', title: 'Standard Max', default: 12 },
+              step: { type: 'number', title: 'Scale Jump', default: 2 },
+              hercSpan: { type: 'number', title: 'Hercules Zoom Span', default: 4 }
             }
           },
           tws: {
-            type: 'object', title: 'TWS (True Wind Speed)',
+            type: 'object',
+            title: 'TWS (True Wind Speed)',
             properties: {
-              stdMax: { type: 'number', title: 'Standard Mode Max', description: "Maximum wind speed shown in standard view (base 0).", default: 25 },
-              step: { type: 'number', title: 'Rounding Step', description: "Incremental jump for wind scales (usually 5 or 10 knots).", default: 5 },
-              hercSpan: { type: 'number', title: 'Hercules Zoom Span', description: "Minimum knots window for high-detail gust monitoring.", default: 10 }
+              stdMax: { type: 'number', title: 'Standard Max', default: 25 },
+              step: { type: 'number', title: 'Scale Jump', default: 5 },
+              hercSpan: { type: 'number', title: 'Hercules Zoom Span', default: 10 }
             }
           },
           depth: {
-            type: 'object', title: 'Depth',
+            type: 'object',
+            title: 'Depth',
             properties: {
-              stdMax: { type: 'number', title: 'Standard Mode Max', description: "Default maximum depth for the graph scale.", default: 20 },
-              step: { type: 'number', title: 'Rounding Step', description: "Gradual increment steps for deep water navigation.", default: 10 },
-              hercSpan: { type: 'number', title: 'Hercules Zoom Span', description: "Minimum meters window to highlight bottom profile changes.", default: 10 }
+              stdMax: { type: 'number', title: 'Standard Max', default: 20 },
+              step: { type: 'number', title: 'Scale Jump', default: 10 },
+              hercSpan: { type: 'number', title: 'Hercules Zoom Span', default: 10 }
             }
           }
         }

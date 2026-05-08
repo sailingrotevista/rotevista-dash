@@ -3,16 +3,22 @@
     "depthDanger": 2.5,
     "depthWarning": 5.0
   },
-  "reef_thresholds": {
-    "orange": 15.0,
-    "red": 20.0
+  "graphs": {
+    "reef1": 15.0,
+    "reef2": 20.0,
+    "historyMinutes": 5
   },
-  "averages": {
-    "long_window": 3000,
-    "smooth_window": 2000
+  "averaging": {
+    "longWindow": 30000,
+    "smoothWindow": 2000,
+    "minSpeed": 0.5,
+    "stabilityThreshold": 0.85,
+    "stabilityBreakout": 15
   },
-  "hercules_ranges": {
-    "speed": 4.0,
-    "wind": 10.0
+  "scales": {
+    "stw": { "stdMax": 12, "step": 2, "hercSpan": 4 },
+    "sog": { "stdMax": 12, "step": 2, "hercSpan": 4 },
+    "tws": { "stdMax": 25, "step": 5, "hercSpan": 10 },
+    "depth": { "stdMax": 20, "step": 10, "hercSpan": 10 }
   }
 }
