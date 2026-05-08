@@ -135,6 +135,34 @@ body {
 }
 
 /* ==========================================================================
+   AGGIUNTA: Gestione Allarmi Profondità
+   ========================================================================== */
+
+.alarm-warning {
+    color: #e67e22 !important; /* Arancione per Warning */
+}
+
+.alarm-danger {
+    color: #c0392b !important; /* Rosso per Danger */
+}
+
+.blink-alarm {
+    animation: blink-depth 0.8s infinite alternate;
+}
+
+@keyframes blink-depth {
+    from { opacity: 1; }
+    to { opacity: 0.3; }
+}
+
+/* Override per la Night Mode: se siamo in modalità notte,
+   il rosso deve restare ben visibile o diventare più acceso */
+body.night-mode .alarm-danger {
+    color: #ff0000 !important;
+    text-shadow: 0 0 10px rgba(255, 0, 0, 0.8) !important;
+}
+
+/* ==========================================================================
    5. TACTICAL FOCUS MODE
    ========================================================================== */
 .focus-active .data-box:not(.is-focused),

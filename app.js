@@ -18,15 +18,15 @@ let CONFIG = {
         longWindow: 30000,
         stabilityTolerance: 2000,
         stabilityThreshold: 0.85,
-        minSpeed: 0.5,
+        minSpeed: 1,
         stabilityBreakout: 15
     },
-    graphs: { reef1: 15.0, reef2: 20.0, historyMinutes: 5, samples: 60 },
+    graphs: { reef1: 20.0, reef2: 25.0, historyMinutes: 10, samples: 60 },
     scales: {
-        stw: { stdMax: 12, hercSpan: 4, step: 2 },
-        sog: { stdMax: 12, hercSpan: 4, step: 2 },
-        tws: { stdMax: 25, hercSpan: 10, step: 5 },
-        depth: { stdMax: 20, hercSpan: 10, step: 10 }
+        stw: { stdMax: 8, hercSpan: 4, step: 2 },
+        sog: { stdMax: 8, hercSpan: 4, step: 2 },
+        tws: { stdMax: 15, hercSpan: 10, step: 5 },
+        depth: { stdMax: 10, hercSpan: 10, step: 10 }
     },
     server: { fallbackIp: "192.168.111.240:3000" }
 };
@@ -241,9 +241,16 @@ function playGybeAlarm() {
 }
 
 function checkDepthAlarm(m) {
-    ui.depth.classList.remove('alarm-warning', 'alarm-danger');
-    if (m < CONFIG.alarms.depthDanger) { ui.depth.classList.add('alarm-danger'); playBingBing(); }
-    else if (m < CONFIG.alarms.depthWarning) ui.depth.classList.add('alarm-warning');
+    // Rimuoviamo sempre le classi prima di riapplicarle
+    ui.depth.classList.remove('alarm-warning', 'alarm-danger', 'blink-alarm');
+    
+    // Logica di confronto dinamica
+    if (m < CONFIG.alarms.depthDanger) {
+        ui.depth.classList.add('alarm-danger', 'blink-alarm');
+        playBingBing(); // Il tuo suono di allarme
+    } else if (m < CONFIG.alarms.depthWarning) {
+        ui.depth.classList.add('alarm-warning');
+    }
 }
 
 function updateLeewayDisplay(deg) {
@@ -552,41 +559,25 @@ function startDisplayLoop() {
 async function fetchServerConfig() {
     try {
         const response = await fetch('/rotevista-config');
-        if (!response.ok) throw new Error(`Server offline o rotta non trovata`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
 
-        // 1. Funzione di pulizia: trasforma stringhe in numeri
-        const parse = (obj) => {
-            for (let k in obj) {
-                if (typeof obj[k] === 'object' && obj[k] !== null) parse(obj[k]);
-                else if (!isNaN(obj[k]) && typeof obj[k] === 'string' && obj[k] !== "")
-                    obj[k] = parseFloat(obj[k]);
-            }
-            return obj;
-        };
-        const actual = parse(data);
+        // Stampa di debug per verificare cosa riceve il client
+        console.log("🔍 Configurazione ricevuta dal Server:", data);
 
-        // 2. Mappatura Forzata (Deep Merge)
-        if (actual.alarms) Object.assign(CONFIG.alarms, actual.alarms);
+        // Merge intelligente dei dati ricevuti nel CONFIG esistente
+        Object.assign(CONFIG.alarms, data.alarms || {});
+        Object.assign(CONFIG.graphs, data.graphs || {});
+        Object.assign(CONFIG.averaging, data.averaging || {});
         
-        if (actual.graphs) {
-            Object.assign(CONFIG.graphs, actual.graphs);
-            console.log(`📈 GRAFICI: Durata ${CONFIG.graphs.historyMinutes}m | Reef1: ${CONFIG.graphs.reef1}kts | Reef2: ${CONFIG.graphs.reef2}kts`);
-        }
-        
-        if (actual.averaging) {
-            Object.assign(CONFIG.averaging, actual.averaging);
-            console.log(`⏱️ STABILITÀ: MinSpeed ${CONFIG.averaging.minSpeed}kts | Breakout: ${CONFIG.averaging.stabilityBreakout}°`);
-        }
-        
-        if (actual.scales) {
-            // Per le scale facciamo un merge profondo per ogni box
-            for (let key in actual.scales) {
-                if (CONFIG.scales[key]) Object.assign(CONFIG.scales[key], actual.scales[key]);
+        // Per le scale, siccome sono nidificate, facciamo un loop
+        if (data.scales) {
+            for (let key in data.scales) {
+                if (CONFIG.scales[key]) Object.assign(CONFIG.scales[key], data.scales[key]);
             }
         }
 
-        console.log("✅ Configurazione sincronizzata con successo.");
+        console.log("✅ Configurazione applicata. Alarmi attivi:", CONFIG.alarms);
     } catch (err) {
         console.warn("⚠️ Utilizzo default locali. Motivo:", err.message);
     }
