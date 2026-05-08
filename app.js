@@ -567,10 +567,52 @@ async function fetchServerConfig() {
     if (!window.location.protocol.includes("http")) return;
     
     // Proviamo i due percorsi standard di Signal K per i settings dei plugin
-    const urls = [
-        '/plugins/rotevista-dash/settings',
-        '/plugins/@sailingrotevista%2frotevista-dash/settings'
-    ];
+    /**
+     * Recupera la configurazione tramite le API ufficiali di Signal K.
+     */
+    async function fetchServerConfig() {
+        if (!window.location.protocol.includes("http")) return;
+        
+        // Usiamo il percorso API ufficiale di Signal K per i plugin
+        const urls = [
+            '/signalk/v1/api/plugins/rotevista-dash',
+            '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash'
+        ];
+
+        for (let url of urls) {
+            try {
+                const response = await fetch(url);
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Nelle API ufficiali, i tuoi dati sono dentro 'data.settings' o 'data.configuration'
+                    const actual = data.settings || data.configuration || data;
+                    
+                    if (actual) {
+                        const parseObj = (obj) => {
+                            for (let k in obj) {
+                                if (typeof obj[k] === 'object') parseObj(obj[k]);
+                                else if (!isNaN(obj[k]) && obj[k] !== "") obj[k] = parseFloat(obj[k]);
+                            }
+                        };
+                        parseObj(actual);
+
+                        if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
+                        if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
+                        if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
+                        if (actual.scales) {
+                            for (let k in actual.scales) {
+                                CONFIG.scales[k] = { ...CONFIG.scales[k], ...actual.scales[k] };
+                            }
+                        }
+                        console.log("Configurazione caricata con successo dall'API ufficiale.");
+                        return;
+                    }
+                }
+            } catch (e) { }
+        }
+        console.warn("Impossibile caricare la configurazione. Verificare 'Anonymous Read' nelle impostazioni di Signal K.");
+    }
 
     for (let url of urls) {
         try {
