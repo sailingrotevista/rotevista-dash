@@ -560,79 +560,42 @@ function startDisplayLoop() {
 // 8. CONFIGURAZIONE E GRAFICI UTILS
 // ==========================================================================
 /**
- * Recupera la configurazione dal server Signal K e sovrascrive i default.
- * Include una funzione di parsing per garantire che i valori siano numeri.
+ * Recupera la configurazione tramite le API ufficiali di Signal K.
+ * Sovrascrive i default locali con i parametri impostati nel server.
  */
 async function fetchServerConfig() {
+    // Evita di cercare il server se siamo in locale (file://)
     if (!window.location.protocol.includes("http")) return;
     
-    // Proviamo i due percorsi standard di Signal K per i settings dei plugin
-    /**
-     * Recupera la configurazione tramite le API ufficiali di Signal K.
-     */
-    async function fetchServerConfig() {
-        if (!window.location.protocol.includes("http")) return;
-        
-        // Usiamo il percorso API ufficiale di Signal K per i plugin
-        const urls = [
-            '/signalk/v1/api/plugins/rotevista-dash',
-            '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash'
-        ];
-
-        for (let url of urls) {
-            try {
-                const response = await fetch(url);
-                if (response.ok) {
-                    const data = await response.json();
-                    
-                    // Nelle API ufficiali, i tuoi dati sono dentro 'data.settings' o 'data.configuration'
-                    const actual = data.settings || data.configuration || data;
-                    
-                    if (actual) {
-                        const parseObj = (obj) => {
-                            for (let k in obj) {
-                                if (typeof obj[k] === 'object') parseObj(obj[k]);
-                                else if (!isNaN(obj[k]) && obj[k] !== "") obj[k] = parseFloat(obj[k]);
-                            }
-                        };
-                        parseObj(actual);
-
-                        if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
-                        if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
-                        if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
-                        if (actual.scales) {
-                            for (let k in actual.scales) {
-                                CONFIG.scales[k] = { ...CONFIG.scales[k], ...actual.scales[k] };
-                            }
-                        }
-                        console.log("Configurazione caricata con successo dall'API ufficiale.");
-                        return;
-                    }
-                }
-            } catch (e) { }
-        }
-        console.warn("Impossibile caricare la configurazione. Verificare 'Anonymous Read' nelle impostazioni di Signal K.");
-    }
+    // Percorsi API ufficiali di Signal K per i plugin
+    const urls = [
+        '/signalk/v1/api/plugins/rotevista-dash',
+        '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash'
+    ];
 
     for (let url of urls) {
         try {
             const response = await fetch(url);
             if (response.ok) {
                 const data = await response.json();
-                // Signal K mette i dati reali dentro l'oggetto configuration o direttamente nel body
-                const actual = data.configuration || data;
                 
-                if (actual) {
-                    // FUNZIONE DI PULIZIA: Trasforma le stringhe "123" in numeri 123 reali
-                    const parseObj = (obj) => {
+                // Nelle API SK, i dati utente sono spesso in 'data.enabled' o 'data.settings'
+                // Noi cerchiamo l'oggetto che contiene le nostre chiavi (alarms, averaging, ecc.)
+                const actual = data.settings || data.configuration || data.options || data;
+                
+                if (actual && (actual.alarms || actual.averaging || actual.graphs)) {
+                    // FUNZIONE DI PARSING: Trasforma eventuali testi "12.5" in numeri 12.5 reali
+                    const parseNumbers = (obj) => {
                         for (let k in obj) {
-                            if (typeof obj[k] === 'object') parseObj(obj[k]);
-                            else if (!isNaN(obj[k]) && obj[k] !== "") obj[k] = parseFloat(obj[k]);
+                            if (typeof obj[k] === 'object') parseNumbers(obj[k]);
+                            else if (!isNaN(obj[k]) && obj[k] !== "" && typeof obj[k] === 'string') {
+                                obj[k] = parseFloat(obj[k]);
+                            }
                         }
                     };
-                    parseObj(actual);
+                    parseNumbers(actual);
 
-                    // MAPPATURA INTELLIGENTE: Sovrascrive CONFIG solo con i dati ricevuti
+                    // MAPPATURA DEI PARAMETRI NEL CONFIG LOCALE
                     if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
                     if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
                     if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
@@ -641,11 +604,15 @@ async function fetchServerConfig() {
                             CONFIG.scales[k] = { ...CONFIG.scales[k], ...actual.scales[k] };
                         }
                     }
-                    console.log("Configurazione caricata correttamente da:", url);
-                    return; // Esci dal loop se il caricamento ha avuto successo
+                    console.log("✅ Configurazione caricata correttamente da:", url);
+                    return; // Successo: usciamo dal ciclo dei tentativi
                 }
+            } else if (response.status === 401) {
+                console.error("❌ Errore 401: Accesso negato. Abilita 'Anonymous Read' in Signal K Security.");
             }
-        } catch (e) { console.warn(`Tentativo su ${url} fallito.`); }
+        } catch (e) {
+            console.warn(`⚠️ Tentativo fallito su ${url}:`, e.message);
+        }
     }
 }
 
