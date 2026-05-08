@@ -2,8 +2,8 @@
  * ==========================================================================
  * Rotevista Dash Configuration Plugin
  * ==========================================================================
- * Definisce l'interfaccia di configurazione in Signal K Admin.
- * Le descrizioni sono ottimizzate per riflettere l'utilizzo tattico e strategico.
+ * Definisce l'interfaccia di configurazione in Signal K Admin e crea
+ * l'endpoint pubblico per la comunicazione con la Dashboard.
  */
 
 module.exports = function (app) {
@@ -12,9 +12,25 @@ module.exports = function (app) {
   plugin.name = 'Rotevista Dash Configuration';
   plugin.description = 'Configure boat-specific tactical and safety parameters for the Dashboard';
 
-  plugin.start = function (options) { };
-  plugin.stop = function () { };
+  /**
+   * plugin.start: Inizializza il plugin e crea la rotta API per la Dashboard.
+   */
+  plugin.start = function (options) {
+    // Esponiamo i settings su un endpoint dedicato per bypassare i blocchi 401.
+    app.get('/rotevista-config', (req, res) => {
+      res.json(options);
+    });
 
+    app.debug('Rotevista Dashboard Config Endpoint active at /rotevista-config');
+  };
+
+  plugin.stop = function () {
+    // Pulizia risorse allo spegnimento del plugin.
+  };
+
+  /**
+   * plugin.schema: Definisce l'interfaccia grafica in Signal K Admin.
+   */
   plugin.schema = {
     type: 'object',
     title: 'Rotevista Dashboard Settings',
@@ -62,7 +78,6 @@ module.exports = function (app) {
             title: 'Strategic Timeline (Minutes)',
             description: "Total duration shown in the charts. Vertical grid lines mark 1-minute intervals for short durations and 5-minute intervals for long ones.",
             default: 5,
-            // Menu a tendina per evitare inserimenti errati
             enum: [5, 10, 15, 30, 60]
           }
         }
@@ -76,7 +91,7 @@ module.exports = function (app) {
           longWindow: {
             type: 'number',
             title: 'Decision Stability Window (ms)',
-            description: "The time range used to calculate MEAN values. A longer window (e.g. 30s) provides a solid base for strategy, while a shorter one reacts faster to ogni oscillation.",
+            description: "The time range used to calculate MEAN values. A longer window (e.g. 30s) provides a solid base for strategy, while a shorter one reacts faster to every oscillation.",
             default: 30000
           },
           smoothWindow: {

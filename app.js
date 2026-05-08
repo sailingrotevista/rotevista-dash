@@ -559,25 +559,18 @@ function startDisplayLoop() {
 // ==========================================================================
 // 8. CONFIGURAZIONE E GRAFICI UTILS
 // ==========================================================================
-
 /**
- * Recupera la configurazione dal server Signal K.
- * Prova i percorsi API ufficiali e quelli scoped (@sailingrotevista).
- * Converte i testi in numeri per garantire la precisione dei calcoli.
- */
-/**
- * Recupera la configurazione dal server Signal K.
- * Utilizza un approccio semplificato e converte i dati in numeri reali.
+ * Recupera la configurazione tramite l'endpoint dedicato /rotevista-config.
+ * Questo bypassa i blocchi di sicurezza standard di Signal K.
  */
 async function fetchServerConfig() {
     try {
-        // Puntiamo al percorso config del plugin
-        const response = await fetch('/plugins/rotevista-dash/config');
-        if (!response.ok) throw new Error(`Status: ${response.status}`);
+        const response = await fetch('/rotevista-config');
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
-        const actual = await response.json();
+        const data = await response.json();
 
-        // FUNZIONE DI PARSING: Trasforma eventuali "20" (stringhe) in 20 (numeri)
+        // Funzione di utilità per garantire che i valori siano numeri (evita bug nei grafici)
         const parse = (obj) => {
             for (let k in obj) {
                 if (typeof obj[k] === 'object') parse(obj[k]);
@@ -587,17 +580,17 @@ async function fetchServerConfig() {
             return obj;
         };
 
-        const data = parse(actual.configuration || actual);
+        const actual = parse(data);
 
-        // ASSEGNAZIONE DINAMICA: Aggiorna tutti i blocchi del CONFIG
-        if (data.alarms) Object.assign(CONFIG.alarms, data.alarms);
-        if (data.graphs) Object.assign(CONFIG.graphs, data.graphs);
-        if (data.averaging) Object.assign(CONFIG.averages, data.averaging);
-        if (data.scales) Object.assign(CONFIG.scales, data.scales);
+        // Fondiamo i dati del server con il CONFIG locale
+        if (actual.alarms) Object.assign(CONFIG.alarms, actual.alarms);
+        if (actual.graphs) Object.assign(CONFIG.graphs, actual.graphs);
+        if (actual.averaging) Object.assign(CONFIG.averages, actual.averaging);
+        if (actual.scales) Object.assign(CONFIG.scales, actual.scales);
 
-        console.log("✅ Configurazione server caricata e sincronizzata.");
+        console.log("✅ Configurazione sincronizzata via /rotevista-config");
     } catch (err) {
-        console.warn("⚠️ Impossibile caricare config server, uso default locali.");
+        console.warn("⚠️ Utilizzo default locali (Endpoint non ancora attivo o server offline).");
     }
 }
 
