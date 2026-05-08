@@ -670,16 +670,16 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
                 
                 // Assegnazione specifica di Opacità e Spessore Linea
                 let fillOpacity = "0.15"; // Default per valori base
-                let strokeWidth = "1.5";
+                let strokeWidth = "1";
 
                 if (color === "#ff3b30") {
                     // ROSSO (Danger / Reef 2): Molto solido
                     fillOpacity = "0.85";
-                    strokeWidth = "2.5";
+                    strokeWidth = "1.5";
                 } else if (color === "#ff9800") {
                     // ARANCIONE (Warning / Reef 1): Più trasparente (Velo)
                     fillOpacity = "0.45";
-                    strokeWidth = "2.5"; // Manteniamo la linea spessa per leggerla bene
+                    strokeWidth = "1"; // Manteniamo la linea spessa per leggerla bene
                 }
 
         // GRADIENTE: Due stop alla stessa percentuale per creare uno stacco di colore netto (no sfumature)

@@ -12,20 +12,40 @@ module.exports = function (app) {
   plugin.name = 'Rotevista Dash Configuration';
   plugin.description = 'Configure boat-specific tactical and safety parameters for the Dashboard';
 
+  let currentConfig = {};
+  let routeRegistered = false;
+
   /**
-   * plugin.start: Inizializza il plugin e crea la rotta API per la Dashboard.
+   * plugin.start: Inizializza il plugin.
+   * Viene chiamato all'avvio e OGNI VOLTA che clicchi "Save" nelle impostazioni.
    */
   plugin.start = function (options) {
-    // Esponiamo i settings su un endpoint dedicato per bypassare i blocchi 401.
-    app.get('/rotevista-config', (req, res) => {
-      res.json(options);
-    });
+    // 1. Aggiorna la configurazione in memoria (per l'endpoint pubblico)
+    currentConfig = options;
 
-    app.debug('Rotevista Dashboard Config Endpoint active at /rotevista-config');
+    // 2. Log di debug nel server Signal K
+    app.debug(`${plugin.name} started/updated with new options`);
+
+    // 3. Registra la rotta API solo la prima volta
+    if (!routeRegistered) {
+      app.get('/rotevista-config', (req, res) => {
+        res.json(currentConfig);
+      });
+      routeRegistered = true;
+      app.debug('Public API endpoint registered at /rotevista-config');
+    }
   };
 
+  /**
+   * plugin.stop: Chiamato quando il plugin viene disattivato o prima di un aggiornamento.
+   */
   plugin.stop = function () {
-    // Pulizia risorse allo spegnimento del plugin.
+    app.debug(`${plugin.name} stopped`);
+  };
+
+  // Se desideri avere una funzione plugin.debug personalizzata (opzionale)
+  plugin.debug = function(msg) {
+    app.debug(msg);
   };
 
   /**
