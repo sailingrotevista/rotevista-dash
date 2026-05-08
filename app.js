@@ -566,124 +566,23 @@ function startDisplayLoop() {
  * Converte i testi in numeri per garantire la precisione dei calcoli.
  */
 async function fetchServerConfig() {
-    if (!window.location.protocol.startsWith("http")) {
-        console.warn("Non in ambiente HTTP");
-        return;
+    try {
+        const response = await fetch(
+            '/plugins/rotevista-dash/public-config'
+        );
+
+        if (!response.ok) throw new Error();
+
+        const actual = await response.json();
+
+        Object.assign(CONFIG.alarms, actual.alarms || {});
+        Object.assign(CONFIG.graphs, actual.graphs || {});
+        Object.assign(CONFIG.averages, actual.averaging || {});
+
+        console.log("✅ Config caricata");
+    } catch {
+        console.warn("⚠️ Default locali");
     }
-
-    const urls = [
-        '/signalk/v1/api/plugins/rotevista-dash/config',
-        '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash/config',
-        '/signalk/v1/api/plugins/rotevista-dash',
-        '/plugins/rotevista-dash/settings'
-    ];
-
-    for (const url of urls) {
-        try {
-            console.log(`🔍 Provo: ${url}`);
-
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json'
-                }
-            });
-
-            console.log(`Status ${response.status}`);
-
-            if (!response.ok) continue;
-
-            const text = await response.text();
-
-            console.log("RAW RESPONSE:", text);
-
-            let data;
-
-            try {
-                data = JSON.parse(text);
-            } catch (e) {
-                console.warn("❌ Non è JSON valido");
-                continue;
-            }
-
-            console.log("JSON:", data);
-
-            const actual =
-                data.settings ||
-                data.configuration ||
-                data.options ||
-                data;
-
-            if (!actual || typeof actual !== 'object') {
-                console.warn("❌ Config non valida");
-                continue;
-            }
-
-            const parseNumbers = (obj) => {
-                if (!obj || typeof obj !== 'object') return;
-
-                for (const k in obj) {
-                    const v = obj[k];
-
-                    if (v && typeof v === 'object') {
-                        parseNumbers(v);
-                    }
-                    else if (
-                        typeof v === 'string' &&
-                        v.trim() !== '' &&
-                        !isNaN(v)
-                    ) {
-                        obj[k] = parseFloat(v);
-                    }
-                }
-            };
-
-            parseNumbers(actual);
-
-            console.log("CONFIG PARSATA:", actual);
-
-            if (actual.alarms) {
-                CONFIG.alarms = {
-                    ...CONFIG.alarms,
-                    ...actual.alarms
-                };
-            }
-
-            if (actual.graphs) {
-                CONFIG.graphs = {
-                    ...CONFIG.graphs,
-                    ...actual.graphs
-                };
-            }
-
-            // ATTENZIONE:
-            // averaging -> averages
-            if (actual.averaging) {
-                CONFIG.averages = {
-                    ...CONFIG.averages,
-                    ...actual.averaging
-                };
-            }
-
-            if (actual.scales) {
-                for (const k in actual.scales) {
-                    CONFIG.scales[k] = {
-                        ...CONFIG.scales[k],
-                        ...actual.scales[k]
-                    };
-                }
-            }
-
-            console.log(`✅ Config caricata da ${url}`);
-
-            return actual;
-
-        } catch (e) {
-            console.error(`❌ Errore su ${url}`, e);
-        }
-    }
-
-    console.error("❌ Nessuna configurazione trovata");
 }
 
 function manageHistory(t, v) {
