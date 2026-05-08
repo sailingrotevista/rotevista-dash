@@ -66,17 +66,23 @@ module.exports = function (app) {
             description: "Time buffer for 'MEAN' values. Larger windows produce smoother numbers but increase the 'Unstable' (orange) alerts during maneuvers or in gusty conditions, as data coherence decreases over time.",
             default: 30000
           },
-          smoothWindow: {
+            smoothWindow: {
             type: 'number',
             title: 'Pointer Smoothing Window (ms)',
             description: "Buffer for gauge needles and pointers. Removes sensor jitter while maintaining real-time responsiveness.",
             default: 2000
           },
-          minSpeed: {
+            minSpeed: {
             type: 'number',
             title: 'Min Speed for Stability (knots)',
             description: "SOG threshold below which stability alerts (blinking orange) are suppressed to avoid GPS noise while docked.",
             default: 0.5
+          },
+          stabilityThreshold: {
+            type: 'number',
+            title: 'Stability Sensitivity (R value: 0.7 - 0.98)',
+            description: "Determines when the number blinks orange. 0.95 = very sensitive (blinks with small movements), 0.85 = standard (balanced for sea), 0.75 = sturdy (blinks only in very rough conditions).",
+            default: 0.93
           }
         }
       },

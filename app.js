@@ -8,8 +8,8 @@ let CONFIG = {
         smoothWindow: 2000,
         longWindow: 30000,
         stabilityTolerance: 2000,
-        stabilityThreshold: 0.85,
-        minSpeed: 0.5
+        stabilityThreshold: 0.93,
+        minSpeed: 2
     },
     graphs: { reef1: 15.0, reef2: 20.0, historyMinutes: 5, samples: 60 },
     scales: {
@@ -94,10 +94,22 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
     if (validData.length === 0) return null;
     let sSin = 0, sCos = 0;
     validData.forEach(item => { sSin += Math.sin(item.val); sCos += Math.cos(item.val); });
+    
     let R = Math.sqrt(sSin * sSin + sCos * sCos) / validData.length;
     let isStable = (validData.length > 2) && (validData[validData.length - 1].time - validData[0].time >= windowMs - CONFIG.averages.stabilityTolerance) && (R > CONFIG.averages.stabilityThreshold);
     let avgRad = Math.atan2(sSin, sCos);
-    return { val: signed ? avgRad : (avgRad + 2 * Math.PI) % (2 * Math.PI), stable: isStable };
+
+    // Calcolo deviazione standard (scarto) in gradi
+    let deviation = 0;
+    if (R < 1 && R > 0) {
+        deviation = Math.round(Math.sqrt(-2 * Math.log(R)) * (180 / Math.PI));
+    }
+
+    return {
+        val: signed ? avgRad : (avgRad + 2 * Math.PI) % (2 * Math.PI),
+        stable: isStable,
+        dev: deviation
+    };
 }
 
 function playBingBing() {
@@ -311,29 +323,89 @@ function startDisplayLoop() {
             if (tick % 3 === 0) {
                 // Utilizziamo CONFIG.averages.longWindow (che ora è 30000ms)
                 // In questo modo, se cambi il tempo su Signal K, la dashboard si aggiorna da sola.
-                let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averages.longWindow, false),
+                let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averages.longWindow * 2, false)
                     cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averages.longWindow, false),
                     awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averages.longWindow, true),
                     twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averages.longWindow, true),
                     twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averages.longWindow, false);
 
-            const upUI = (el, obj, isCompass = false) => {
-                if (!obj || obj.val === null) { el.innerHTML = "---&deg;"; el.classList.remove('unstable-data'); }
-                else {
-                    let valDeg = Math.round(radToDeg(obj.val)); el.innerHTML = (isCompass ? ((valDeg + 360) % 360).toString().padStart(3, '0') : valDeg) + "&deg;";
-                    if (obj.stable || !isNavigating) el.classList.remove('unstable-data'); else el.classList.add('unstable-data');
-                }
-            };
-            upUI(ui.hdg, hObj, true); upUI(ui.cog, cObj, true); upUI(ui.awaAvg, awObj, false); upUI(ui.twaAvg, twObj, false); upUI(ui.twdAvg, twdObj, true);
+                const upUI = (el, obj, instantRaw, isCompass = false) => {
+                    if (!obj || obj.val === null || instantRaw === undefined) {
+                        el.innerHTML = "---&deg;";
+                        el.classList.remove('unstable-data');
+                    } else {
+                        let valDeg = Math.round(radToDeg(obj.val));
+                        let mainVal = (isCompass ? ((valDeg + 360) % 360).toString().padStart(3, '0') : valDeg) + "&deg;";
+                        
+                        // Mostriamo lo scarto medio (±)
+                        let devDisplay = (obj.dev > 1 && obj.dev < 90) ?
+                            `<span style="font-size: 0.35em; opacity: 0.5; margin-left: 4px; vertical-align: middle;">&plusmn;${obj.dev}</span>` : "";
+                        
+                        el.innerHTML = mainVal + devDisplay;
+
+                        // --- LOGICA ALLARME ISTANTANEA (ANTI-RITARDO) ---
+                        // Calcoliamo la differenza tra istantaneo e media (con gestione giro bussola)
+                        let instantDeg = radToDeg(instantRaw);
+                        let diff = Math.abs((instantDeg - radToDeg(obj.val) + 540) % 360 - 180);
+
+                        // Lampeggia se:
+                        // 1. La statistica R è bassa (obj.stable è false)
+                        // 2. Lo scarto medio è alto (> 15°)
+                        // 3. C'è un salto improvviso tra istantaneo e media (> 15°)
+                        if (isNavigating && (!obj.stable || obj.dev > 15 || diff > 15)) {
+                                                el.classList.add('unstable-data');
+                                            } else {
+                                                el.classList.remove('unstable-data');
+                                            }
+                    }
+                };
+                // Passiamo: (elemento UI, oggetto media, valore istantaneo dal sensore, è una bussola?)
+                upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
+                upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
+                upUI(ui.awaAvg, awObj, store.raw["environment.wind.angleApparent"], false);
+                upUI(ui.twaAvg, twObj, store.raw["environment.wind.angleTrueWater"], false);
+                upUI(ui.twdAvg, twdObj, store.raw["environment.wind.directionTrue"], true);
             
-            if (hObj && twObj) {
-                const tackHdgDeg = radToDeg((hObj.val + twObj.val * 2 + Math.PI * 2) % (Math.PI * 2));
-                ui.tackHdg.innerHTML = `${Math.round((tackHdgDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
-                if (cObj) {
-                    const tackCogDeg = radToDeg((cObj.val + twObj.val * 2 + Math.PI * 2) % (Math.PI * 2));
-                    ui.tackCog.innerHTML = `${Math.round((tackCogDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
+                // --- CALCOLO E VALIDAZIONE TACK ---
+                if (hObj && twObj) {
+                    // Calcoliamo i valori teorici
+                    const tackHdgDeg = radToDeg((hObj.val + twObj.val * 2 + Math.PI * 2) % (Math.PI * 2));
+                    const tackCogDeg = cObj ? radToDeg((cObj.val + twObj.val * 2 + Math.PI * 2) % (Math.PI * 2)) : null;
+
+                    // Condizione di instabilità tecnica (durante la manovra)
+                    const isTackUnstable = !hObj.stable || !twObj.stable || hObj.dev > 15 || twObj.dev > 15;
+
+                    // --- GESTIONE INTERFACCIA TACK HDG ---
+                    if (!isNavigating) {
+                        // Caso 1: Barca ferma -> Trattini fissi
+                        ui.tackHdg.innerHTML = "---&deg;";
+                        ui.tackHdg.classList.remove('unstable-data');
+                    } else if (isTackUnstable) {
+                        // Caso 2: Manovra in corso -> Trattini lampeggianti
+                        ui.tackHdg.innerHTML = "---&deg;";
+                        ui.tackHdg.classList.add('unstable-data');
+                    } else {
+                        // Caso 3: Navigazione stabile -> Mostra valore
+                        ui.tackHdg.innerHTML = `${Math.round((tackHdgDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
+                        ui.tackHdg.classList.remove('unstable-data');
+                    }
+
+                    // --- GESTIONE INTERFACCIA TACK COG ---
+                    if (cObj) {
+                        const isCogTackUnstable = !cObj.stable || !twObj.stable || cObj.dev > 15 || twObj.dev > 15;
+                        
+                        if (!isNavigating) {
+                            ui.tackCog.innerHTML = "---&deg;";
+                            ui.tackCog.classList.remove('unstable-data');
+                        } else if (isCogTackUnstable) {
+                            ui.tackCog.innerHTML = "---&deg;";
+                            ui.tackCog.classList.add('unstable-data');
+                        } else {
+                            ui.tackCog.innerHTML = `${Math.round((tackCogDeg + 360) % 360).toString().padStart(3, '0')}&deg;`;
+                            ui.tackCog.classList.remove('unstable-data');
+                        }
+                    }
                 }
-            }
             const smHdg = getCircularAverageFromBuffer(store.smoothBuf.hdg, 2000, false), smTwd = getCircularAverageFromBuffer(store.smoothBuf.twd, 2000, false);
             if (smHdg && smTwd) {
                 curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(smTwd.val)); ui.twdArrow.setAttribute('transform', `rotate(${curWindCompassRot}, 20, 20)`);
