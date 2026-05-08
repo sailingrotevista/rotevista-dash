@@ -12,21 +12,21 @@
 // 1. CONFIGURAZIONE E DEFAULT
 // ==========================================================================
 let CONFIG = {
-    alarms: { depthDanger: 2.5, depthWarning: 5.0 },
+    alarms: { depthDanger: 2.5, depthWarning: 3.5 },
     averaging: {
         smoothWindow: 2000,
         longWindow: 30000,
         stabilityTolerance: 2000,
         stabilityThreshold: 0.85,
-        minSpeed: 1,
+        minSpeed: 0,
         stabilityBreakout: 15
     },
-    graphs: { reef1: 20.0, reef2: 25.0, historyMinutes: 10, samples: 60 },
+    graphs: { reef1: 8, reef2: 10.0, historyMinutes: 30, samples: 60 },
     scales: {
         stw: { stdMax: 8, hercSpan: 4, step: 2 },
         sog: { stdMax: 8, hercSpan: 4, step: 2 },
         tws: { stdMax: 15, hercSpan: 10, step: 5 },
-        depth: { stdMax: 10, hercSpan: 10, step: 10 }
+        depth: { stdMax: 8, hercSpan: 5, step: 5 }
     },
     server: { fallbackIp: "192.168.111.240:3000" }
 };
@@ -437,19 +437,21 @@ function startDisplayLoop() {
             const labelEl = document.getElementById('sog-vmg-label');
             if (displayModeSog === 'VMG') {
                 ui.sog.innerText = vmg.toFixed(1);
-                ui.sog.style.setProperty('color', '#16a085', 'important'); // Verde Petrolio
+                // AGGIORNATO AL NUOVO COLORE CYAN VIBRANTE (#00b8d4)
+                ui.sog.style.setProperty('color', '#00b8d4', 'important');
                 if (labelEl) labelEl.textContent = 'VMG';
             } else {
                 ui.sog.innerText = sogKts.toFixed(1);
                 if (labelEl) labelEl.textContent = 'SOG';
                 
-                // Colore Corrente: se neutro usiamo "", così il CSS Night Mode può agire
-                if (sogKts - stwKts > 0.3) ui.sog.style.setProperty('color', '#27ae60', 'important');
-                else if (sogKts - stwKts < -0.3) ui.sog.style.setProperty('color', '#c0392b', 'important');
-                else ui.sog.style.color = "";
+                // Colore Corrente: Giallo Caldo per corrente a favore, Rosso per corrente contraria
+                // (Allineiamo il colore della corrente a favore con il #ffbb33 usato nei grafici)
+                if (sogKts - stwKts > 0.3) ui.sog.style.setProperty('color', '#ffbb33', 'important');
+                else if (sogKts - stwKts < -0.3) ui.sog.style.setProperty('color', '#ff3b30', 'important'); // Rosso vivido
+                else ui.sog.style.color = ""; // Torna normale
             }
         }
-        
+
         if (store.raw["environment.depth.belowTransducer"] !== undefined) {
             ui.depth.innerText = store.raw["environment.depth.belowTransducer"].toFixed(1);
             checkDepthAlarm(store.raw["environment.depth.belowTransducer"]);
@@ -612,46 +614,108 @@ function updateScaleLabels(t, min, max) {
 
 /**
  * drawGraph: Disegna i grafici con griglia temporale intelligente
+ * Usa un Gradiente Lineare SVG dinamico per eliminare le giunzioni dei poligoni.
  */
 function drawGraph(d, id, min, max, isTws, isHercules) {
-    const svg = document.getElementById(id); if (!svg || d.length < 2) return;
-    const w = 200, h = 40, range = max - min || 1;
-    
-    // Griglia orizzontale
+    const svg = document.getElementById(id);
+    if (!svg || d.length < 2) return;
+
+    const w = 200, h = 40;
+    const range = max - min || 1;
+    const isDepth = (id === 'depth-graph');
+    const samples = CONFIG.graphs.samples;
+
+    // 1. Griglia
     let grids = "";
     [0.25, 0.5, 0.75].forEach(p => {
         grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`;
     });
-
-    /**
-     * Griglia Temporale Intelligente:
-     * - Storia <= 15 min: linee ogni 1 minuto.
-     * - Storia > 15 min: linee ogni 5 minuti.
-     */
     const gridInterval = (CONFIG.graphs.historyMinutes <= 15) ? 1 : 5;
-
     for (let m = gridInterval; m < CONFIG.graphs.historyMinutes; m += gridInterval) {
         const x = w - (m / CONFIG.graphs.historyMinutes) * w;
         grids += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="rgba(0,0,0,0.08)" stroke-width="0.5" />`;
     }
 
-    let pD = ""; let cS = "";
-    d.forEach((v, i) => {
-        const x = (i/(CONFIG.graphs.samples-1))*w, y = h-(Math.max(0,Math.min(1,(v-min)/range))*h); pD += `${i===0?'M':'L'} ${x} ${y} `;
-        if (isTws && i > 0) {
-            const px = ((i-1)/(CONFIG.graphs.samples-1))*w, py = h-(Math.max(0,Math.min(1,(d[i-1]-min)/range))*h);
-            let c = (v >= CONFIG.graphs.reef2) ? "#e74c3c" : (v >= CONFIG.graphs.reef1 ? "#e67e22" : "#000");
-            // Aggiunta della classe 'tws-reef-line' per la gestione Night Mode
-            cS += `<line x1="${px}" y1="${py}" x2="${x}" y2="${y}" stroke="${c}" class="tws-reef-line ${isHercules?'line-hercules':''}" />`;
-        }
-    });
+    // 2. Colori (Tavolozza Vivida)
+    const baseColorTws = "#2c3e50";
+    const baseColorDepth = "#0088cc";
 
-    const clrs = { 'stw-graph': '#2ecc71', 'sog-graph': '#f39c12', 'depth-graph': '#3498db', 'tws-graph': '#000' };
-    const colorKey = id === 'sog-graph' && displayModeSog === 'VMG' ? '#16a085' : clrs[id];
+    const getColor = (val) => {
+        if (isTws) return (val >= CONFIG.graphs.reef2) ? "#ff3b30" : (val >= CONFIG.graphs.reef1 ? "#ff9800" : baseColorTws);
+        if (isDepth) return (val < CONFIG.alarms.depthDanger) ? "#ff3b30" : (val < CONFIG.alarms.depthWarning ? "#ff9800" : baseColorDepth);
+        switch(id) {
+            case 'stw-graph': return "#00C851";
+            case 'sog-graph': return (displayModeSog === 'VMG') ? "#00b8d4" : "#ffbb33";
+            default: return baseColorTws;
+        }
+    };
+
+    // 3. Creazione Gradiente e Linee
+    let gradientStops = "";
+    let lines = "";
+    let areaPath = `M 0 ${h} `;
+
+    for (let i = 1; i < d.length; i++) {
+        // Calcolo Percentuali per il gradiente
+        const percentPrev = ((i - 1) / (samples - 1)) * 100;
+        const percentCurr = (i / (samples - 1)) * 100;
+
+        // Coordinate geometriche
+        const x1 = ((i - 1) / (samples - 1)) * w;
+        const y1 = h - (Math.max(0, Math.min(1, (d[i - 1] - min) / range)) * h);
+        const x2 = (i / (samples - 1)) * w;
+        const y2 = h - (Math.max(0, Math.min(1, (d[i] - min) / range)) * h);
+        
+        const color = getColor(d[i]);
+                
+                // Assegnazione specifica di Opacità e Spessore Linea
+                let fillOpacity = "0.15"; // Default per valori base
+                let strokeWidth = "1.5";
+
+                if (color === "#ff3b30") {
+                    // ROSSO (Danger / Reef 2): Molto solido
+                    fillOpacity = "0.85";
+                    strokeWidth = "2.5";
+                } else if (color === "#ff9800") {
+                    // ARANCIONE (Warning / Reef 1): Più trasparente (Velo)
+                    fillOpacity = "0.45";
+                    strokeWidth = "2.5"; // Manteniamo la linea spessa per leggerla bene
+                }
+
+        // GRADIENTE: Due stop alla stessa percentuale per creare uno stacco di colore netto (no sfumature)
+        gradientStops += `<stop offset="${percentPrev}%" stop-color="${color}" stop-opacity="${fillOpacity}" />`;
+        gradientStops += `<stop offset="${percentCurr}%" stop-color="${color}" stop-opacity="${fillOpacity}" />`;
+
+        // LINEE: Disegnate normalmente sopra l'area
+        lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" 
+                 style="stroke: ${color}; stroke-width: ${strokeWidth}; stroke-linecap: round;" />`;
+                 
+        // AGGIORNAMENTO PATH UNICO
+        if (i === 1) areaPath += `L ${x1} ${y1} `;
+        areaPath += `L ${x2} ${y2} `;
+    }
     
-    svg.innerHTML = isTws ?
-        `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="rgba(0,0,0,0.05)" stroke="none" />${cS}` :
-        `${grids}<path d="${pD} L ${((d.length-1)/(CONFIG.graphs.samples-1))*w} ${h} L 0 ${h} Z" fill="${colorKey}22" stroke="none" /><path d="${pD}" class="${isHercules?'line-hercules':''}" fill="none" stroke="${colorKey}" />`;
+    // Chiusura del path dell'area
+    areaPath += `L ${w} ${h} Z`;
+
+    // 4. Iniezione del <defs> (Gradiente) nell'SVG
+    const gradId = `grad-${id}`;
+    const defs = `
+        <defs>
+            <linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="0%">
+                ${gradientStops}
+            </linearGradient>
+        </defs>
+    `;
+
+    // 5. Render Finale
+    // Se è Depth o Tws applichiamo il gradiente, altrimenti colore standard fisso (per SOG/STW)
+    if (isTws || isDepth) {
+        svg.innerHTML = `${defs}${grids}<path d="${areaPath}" fill="url(#${gradId})" stroke="none" />${lines}`;
+    } else {
+        const standardColor = getColor(d[d.length - 1]);
+        svg.innerHTML = `${grids}<path d="${areaPath}" fill="${standardColor}" fill-opacity="0.15" stroke="none" />${lines}`;
+    }
 }
 
 // ==========================================================================

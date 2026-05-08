@@ -112,7 +112,7 @@ body {
 /* --- BOX TWD (Bussola Meteo) --- */
 .value-with-compass {
     display: flex; flex-direction: row; justify-content: space-between;
-    align-items: center; width: 100%; height: 85%; 
+    align-items: center; width: 100%; height: 85%;
 }
 .box-twd .mini-compass {
     height: 85cqh !important; width: auto !important; aspect-ratio: 1/1; flex-shrink: 0;
@@ -137,7 +137,6 @@ body {
 /* ==========================================================================
    AGGIUNTA: Gestione Allarmi Profondità
    ========================================================================== */
-
 .alarm-warning {
     color: #e67e22 !important; /* Arancione per Warning */
 }
@@ -170,7 +169,7 @@ body.night-mode .alarm-danger {
 
 .focus-active .is-focused .sparkline path,
 .focus-active .is-focused .sparkline line {
-    stroke-width: 1.5px !important; /* Un briciolo più spessa per la stabilità visiva su schermi grandi */
+    stroke-width: 1.5px !important;
 }
 
 .focus-active.focus-side-left {
@@ -236,42 +235,38 @@ body.night-mode .alarm-danger {
     }
 
     /* --- TACK: Impilamento Verticale Rigido in U-Shape --- */
-        .box-tack .dual-value-container {
-            flex-direction: column !important; /* Forza HDG sopra COG */
-            justify-content: center !important;
-            align-items: flex-start !important; /* Tutto a sinistra */
-            gap: 8px !important; /* Spazio tra i due blocchi */
-        }
-        
-        .box-tack .dual-value-col {
-            display: flex !important;
-            flex-direction: column !important; /* Forza Titolo sopra Numero */
-            align-items: flex-start !important;
-            text-align: left !important;
-            width: 100% !important;
-        }
+    .box-tack .dual-value-container {
+        flex-direction: column !important;
+        justify-content: center !important;
+        align-items: flex-start !important;
+        gap: 8px !important;
+    }
+    
+    .box-tack .dual-value-col {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        text-align: left !important;
+        width: 100% !important;
+    }
 
-        /* Font calibrato per non uscire dal box stretto */
-        .box-tack .value.dual-val {
-            font-size: clamp(1rem, 30cqh, 15cqw) !important;
-            line-height: 1 !important;
-        }
-        
-        .box-tack .dual-label {
-            margin-bottom: 0px !important;
-        }
+    .box-tack .value.dual-val {
+        font-size: clamp(1rem, 30cqh, 15cqw) !important;
+        line-height: 1 !important;
+    }
+    
+    .box-tack .dual-label {
+        margin-bottom: 0px !important;
+    }
 
     /* --- TWD: Calibrazione per box stretto --- */
     .box-twd .value-with-compass { justify-content: center; gap: 5px; }
     .box-twd .mini-compass { height: 60cqh !important; }
     .box-twd #twd-avg { font-size: clamp(1.2rem, 50cqh, 20cqw) !important; }
-
-    /* NOTA: COG e AWA non vengono toccati qui, così restano massivi
-       ereditando la regola generale della Sezione 4 */
 }
 
 /* ==========================================================================
-   7. GRAFICI, SCALE E TAG HERCULES
+   7. GRAFICI, SCALE E STILE DINAMICO
    ========================================================================== */
 .graph-wrapper {
     position: relative;
@@ -280,7 +275,7 @@ body.night-mode .alarm-danger {
     min-height: 0;
     margin-top: 5px;
     display: flex;
-    flex-direction: row; /* Forza l'allineamento orizzontale dei componenti */
+    flex-direction: row;
     align-items: stretch;
     background: rgba(0, 0, 0, 0.04);
     border-radius: 4px;
@@ -293,15 +288,15 @@ body.night-mode .alarm-danger {
     background: transparent !important;
 }
 
-/* Forza tutte le linee dei grafici (linee dati e griglie) a 1px per un look chirurgico */
-.sparkline path,
-.sparkline line {
-    stroke-width: 1px !important;
+/* I componenti interni dell'SVG gestiscono autonomamente spessori e colori via JS */
+.graph-wrapper polygon,
+.graph-wrapper line {
     transition: all 0.3s ease;
-    /* --- FIX LINEE SPEZZATE --- */
-    stroke-linecap: round;    /* Arrotonda le estremità dei segmenti */
-    stroke-linejoin: round;   /* Arrotonda le giunture tra i segmenti */
-    shape-rendering: geometricPrecision; /* Forza il browser a calcolare la linea con precisione sub-pixel */
+    shape-rendering: geometricPrecision;
+}
+
+.graph-wrapper polygon {
+    filter: drop-shadow(0 0 2px rgba(0,0,0,0.05));
 }
 
 .scale-labels {
@@ -318,26 +313,12 @@ body.night-mode .alarm-danger {
 }
 
 /* --- COLONNA SINISTRA (STW, SOG) --- */
-/* Ordine desiderato: [Grafico] [Scala] -> Scala verso il centro schermo */
-.box-stw .sparkline, .box-sog .sparkline {
-    order: 1;
-}
-.box-stw .scale-labels, .box-sog .scale-labels {
-    order: 2;
-    text-align: left;
-    padding-left: 4px;
-}
+.box-stw .sparkline, .box-sog .sparkline { order: 1; }
+.box-stw .scale-labels, .box-sog .scale-labels { order: 2; text-align: left; padding-left: 4px; }
 
 /* --- COLONNA DESTRA (DEPTH, TWS) --- */
-/* Ordine desiderato: [Scala] [Grafico] -> Scala verso il centro schermo */
-.box-depth .scale-labels, .box-tws .scale-labels {
-    order: 1;
-    text-align: right;
-    padding-right: 4px;
-}
-.box-depth .sparkline, .box-tws .sparkline {
-    order: 2;
-}
+.box-depth .scale-labels, .box-tws .scale-labels { order: 1; text-align: right; padding-right: 4px; }
+.box-depth .sparkline, .box-tws .sparkline { order: 2; }
 
 /* --- REGOLE HERCULES (Zoom) --- */
 .box-hercules { background: rgba(255, 0, 0, 0.05) !important; }
@@ -347,10 +328,8 @@ body.night-mode .alarm-danger {
     letter-spacing: 1px; text-transform: uppercase; content: "HERCULES ";
 }
 
-/* Anche in modalità Hercules manteniamo 1px per coerenza, affidandoci al filtro per lo stacco visivo */
 .line-hercules {
     filter: drop-shadow(0 0 5px #ff0000);
-    stroke-width: 1px !important;
 }
 
 /* ==========================================================================
@@ -365,44 +344,24 @@ body.night-mode .alarm-danger {
 
     .data-box { height: auto !important; }
 
-    /* --- OTTIMIZZAZIONE COMPATTA PER I BOX CON GRAFICO --- */
-    .box-stw, .box-sog, .box-depth, .box-tws {
-        justify-content: flex-start !important;
-        /* Ridotto lo spazio superiore per avvicinare il valore al titolo */
-        padding-top: 1.2rem !important;
-    }
+    .box-stw, .box-sog, .box-depth, .box-tws { justify-content: flex-start !important; padding-top: 1.2rem !important; }
 
-    /* --- OTTIMIZZAZIONE FONT VALORI CON GRAFICO IN VERTICALE --- */
-    .box-stw .value,
-    .box-sog .value,
-    .box-depth .value,
-    .box-tws .value {
-        /* Aumentato a 30cqh per pareggiare il peso visivo di HEADING */
-        /* Alzato anche il limite cqw a 35 per permettere al numero di allargarsi */
+    .box-stw .value, .box-sog .value, .box-depth .value, .box-tws .value {
         font-size: clamp(1.2rem, 30cqh, 35cqw) !important;
         line-height: 0.8 !important;
-        margin-top: -4px !important; /* Saliamo ancora un briciolo verso il titolo */
+        margin-top: -4px !important;
         margin-bottom: 4px !important;
         padding-bottom: 0 !important;
-        font-weight: 700; /* Leggermente più marcato */
+        font-weight: 700;
     }
 
-    /* Espansione del grafico per occupare tutto il resto del box */
-    .box-stw .graph-wrapper,
-    .box-sog .graph-wrapper,
-    .box-depth .graph-wrapper,
-    .box-tws .graph-wrapper {
+    .box-stw .graph-wrapper, .box-sog .graph-wrapper, .box-depth .graph-wrapper, .box-tws .graph-wrapper {
         margin-top: 0 !important;
         flex-grow: 1 !important;
     }
 
-    /* --- ALTRI BOX (HEADING, COG, ecc.) RESTANO CENTRATI --- */
-    .box-hdg, .box-cog, .box-twa, .box-awa, .box-twd, .box-tack {
-        justify-content: center !important;
-        padding-top: 1.2rem !important;
-    }
+    .box-hdg, .box-cog, .box-twa, .box-awa, .box-twd, .box-tack { justify-content: center !important; padding-top: 1.2rem !important; }
 
-    /* --- FOCUS MODE IN VERTICALE --- */
     .main-container.focus-active {
         grid-template-columns: 1fr !important;
         grid-template-rows: 65vh 35vh !important;
@@ -412,7 +371,6 @@ body.night-mode .alarm-danger {
     .focus-active .is-focused .value { font-size: clamp(4rem, 20cqh, 15rem) !important; margin-top: 20px !important; }
     .focus-active .box-gauge { height: 35vh !important; width: 100vw !important; display: flex !important; align-items: center; justify-content: center; }
 
-    /* --- TACK IN VERTICALE --- */
     .box-tack .dual-value-container { flex-direction: row !important; justify-content: space-between !important; align-items: center !important; }
     .box-tack .dual-value-col { display: flex !important; flex-direction: column !important; justify-content: center; }
     .box-tack .dual-value-col:first-child { align-items: flex-start !important; text-align: left !important; }
@@ -425,18 +383,11 @@ body.night-mode .alarm-danger {
    ========================================================================== */
 #status {
     position: absolute;
-    /* Posizionato con un po' di margine dal bordo del riquadro bussola */
-    top: 15px;
-    right: 15px;
-    font-size: 0.6rem;
-    font-weight: 900;
-    text-transform: uppercase;
-    z-index: 1000;
-    /* Sfondo leggermente più marcato per leggerlo sopra il quadrante */
+    top: 15px; right: 15px;
+    font-size: 0.6rem; font-weight: 900;
+    text-transform: uppercase; z-index: 1000;
     background: rgba(0,0,0,0.08);
-    padding: 3px 8px;
-    border-radius: 4px;
-    letter-spacing: 1px;
+    padding: 3px 8px; border-radius: 4px; letter-spacing: 1px;
 }
 .online { color: #27ae60; opacity: 0.8; }
 .offline { color: #c0392b; font-weight: bold; }
@@ -463,11 +414,7 @@ rect[fill="#222"] { fill: #eee !important; }
 
 /* ==========================================================================
    10. NIGHT MODE (TACTICAL RED - ARCHITETTURA INTEGRALE)
-   ==========================================================================
-   Questa sezione sovrascrive interamente lo schema Day Mode.
-   Obiettivo: Massima leggibilità, zero abbagliamento, preservazione visione notturna.
    ========================================================================== */
-
 body.night-mode {
     background-color: #000 !important;
     color: #ff3333 !important;
@@ -476,130 +423,62 @@ body.night-mode {
 /* --- 10.1 STRUTTURA DEI CONTENITORI --- */
 .night-mode .data-box {
     background: rgba(20, 0, 0, 0.4) !important;
-    border-color: #440000 !important; /* Confini rossi cupi per orientamento spaziale */
+    border-color: #440000 !important;
     box-shadow: inset 0 0 15px rgba(255, 0, 0, 0.05) !important;
 }
 
 /* --- 10.2 TIPOGRAFIA E TESTI --- */
-/* Etichette primarie (Titoli dei box) */
-.night-mode .label,
-.night-mode .unit,
-.night-mode .dual-label {
-    color: #800000 !important; /* Rosso sangue scuro per non distrarre */
-}
+.night-mode .label, .night-mode .unit, .night-mode .dual-label { color: #800000 !important; }
+.night-mode .value-large { color: #ff3333 !important; text-shadow: 0 0 8px rgba(255, 0, 0, 0.4) !important; }
+.night-mode .value { color: #ff3333; text-shadow: 0 0 8px rgba(255, 0, 0, 0.3); }
+.night-mode #status { background: rgba(255, 0, 0, 0.1) !important; color: #ff3333 !important; }
 
-/* Valori digitali primari (Heading, Cog, Awa, Twa) */
-.night-mode .value-large {
-    color: #ff3333 !important;
-    text-shadow: 0 0 8px rgba(255, 0, 0, 0.4) !important;
-}
-
-/* Valori dinamici (SOG, TWS, STW):
-   Non usiamo !important per permettere al JavaScript di iniettare i colori dei Reef/Corrente */
-.night-mode .value {
-    color: #ff3333;
-    text-shadow: 0 0 8px rgba(255, 0, 0, 0.3);
-}
-
-/* Widget di Stato */
-.night-mode #status {
-    background: rgba(255, 0, 0, 0.1) !important;
-    color: #ff3333 !important;
-}
-
-/* --- 10.3 GRAFICI (STILE CHIRURGICO 1PX) --- */
+/* --- 10.3 GRAFICI (STILE DINAMICO NIGHT MODE) --- */
 .night-mode .graph-wrapper {
-    background: rgba(0, 0, 0, 0.6) !important;
+    background: rgba(10, 0, 0, 0.8) !important;
     border: 1px solid #330000;
 }
 
-/* Rimuove l'area di riempimento per evitare luce diffusa sul display */
-.night-mode .sparkline path:first-of-type {
-    display: none !important;
+.night-mode .sparkline line[stroke="rgba(0,0,0,0.12)"],
+.night-mode .sparkline line[stroke="rgba(0,0,0,0.08)"] {
+    stroke: rgba(255, 0, 0, 0.1) !important; /* Griglia temporale rossa soffusa */
 }
 
-/* Linea dati: rossa, sottile e nitida */
-.night-mode .sparkline path {
-    fill: none !important;
-    stroke: #ff3333 !important;
+/* Regolazione della luminosità notturna per preservare i gradienti e i colori del JS */
+.night-mode .graph-wrapper svg {
+    filter: brightness(0.6) contrast(1.2);
+}
+
+.night-mode .graph-wrapper line[style] {
     stroke-width: 1px !important;
-    filter: drop-shadow(0 0 2px rgba(255, 0, 0, 0.4));
+    filter: drop-shadow(0 0 2px rgba(255, 0, 0, 0.3));
 }
 
-/* Griglia temporale (minuti e livelli): quasi impercettibile */
-.night-mode .sparkline line {
-    stroke: rgba(150, 0, 0, 0.15) !important;
-}
-
-/* LOGICA REEF TWS: Mantiene i colori degli allarmi sul grafico */
-.night-mode .tws-reef-line { stroke-width: 1px !important; opacity: 0.9 !important; }
-.night-mode .tws-reef-line[stroke="#000000"],
-.night-mode .tws-reef-line[stroke="#000"] { stroke: #440000 !important; } /* Vento basso */
-.night-mode .tws-reef-line[stroke="#e67e22"] { stroke: #b35500 !important; } /* 1° Reef */
-.night-mode .tws-reef-line[stroke="#e74c3c"] {
-    stroke: #ff0000 !important;
-    filter: drop-shadow(0 0 2px #ff0000);
-} /* 2° Reef */
-
-/* Scale graduate dei grafici */
 .night-mode .scale-labels { color: #800000 !important; }
 .night-mode .is-focused .scale-labels { color: #ff3333 !important; }
 
 /* --- 10.4 WIND GAUGE (STRUMENTO CENTRALE) --- */
-/* Oscuramento cerchi concentrici per eliminare bagliori bianchi */
-.night-mode #wind-gauge circle {
-    fill: #000 !important;
-    stroke: #220000 !important;
-}
-
-/* Cerchio interno e hotspot centrale (nero profondo) */
-.night-mode #wind-gauge circle:nth-of-type(2),
-.night-mode #fullscreen-hotspot {
-    fill: #050000 !important;
-    stroke: #330000 !important;
-}
-
-/* Effetto Glow e Logo Barca */
+.night-mode #wind-gauge circle { fill: #000 !important; stroke: #220000 !important; }
+.night-mode #wind-gauge circle:nth-of-type(2), .night-mode #fullscreen-hotspot { fill: #050000 !important; stroke: #330000 !important; }
 .night-mode #center-glow feDropShadow { flood-color: #ff0000 !important; flood-opacity: 0.6 !important; }
-/* ICONA BARCA NIGHT: Definizione migliorata con bordo rosso */
-.night-mode #boat-icon {
-    fill: #220000 !important;      /* Rosso scurissimo per il corpo della barca */
-    stroke: #ff0000 !important;    /* Bordo rosso vivo per definire la sagoma */
-    stroke-width: 0.8px !important; /* Spessore sottile ma netto */
-    opacity: 1 !important;         /* Piena opacità per far risaltare il bordo */
-}
-/* Valori interni (AWS) */
+.night-mode #boat-icon { fill: #220000 !important; stroke: #ff0000 !important; stroke-width: 0.8px !important; opacity: 1 !important; }
 .night-mode #aws-display-group text { fill: #800000 !important; }
 .night-mode #aws-val-svg { fill: #ff3333 !important; }
-
-/* Tacche e Numeri Gradi della Bussola */
 .night-mode #ticks line { stroke: #550000 !important; }
 .night-mode #tick-labels { fill: #800000 !important; }
-
-/* SETTORI VENTO: Conversione sicura per la notte */
 .night-mode #wind-gauge path[stroke="#ff0000"] { stroke: #800000 !important; opacity: 0.8; }
-.night-mode #wind-gauge path[stroke="#00ff00"] {
-    stroke: #440000 !important;
-    stroke-dasharray: 5, 4 !important;
-    opacity: 0.7;
-} /* Verde Starboard -> Rosso tratteggiato */
+.night-mode #wind-gauge path[stroke="#00ff00"] { stroke: #440000 !important; stroke-dasharray: 5, 4 !important; opacity: 0.7; }
 .night-mode #wind-gauge path[stroke="#ff8800"] { stroke: #330000 !important; opacity: 0.6; }
-
-/* Lancette AWA/TWA e COG */
 .night-mode #awa-pointer path { fill: #ff0000 !important; stroke: #000 !important; }
 .night-mode #twa-pointer path { fill: #800000 !important; stroke: #000 !important; }
 .night-mode #track-pointer path { fill: #ff3333 !important; stroke: none !important; }
 
 /* --- 10.5 WIDGETS ACCESSORI --- */
-/* Barra Leeway */
 .night-mode #leeway-val { fill: #ff3333 !important; color: #ff3333 !important; }
 .night-mode rect[fill="url(#leeway-grad)"] { fill: url(#leeway-night-grad) !important; }
-.night-mode rect[fill="#eee"],
-.night-mode rect[fill="#222"] { fill: #0a0000 !important; stroke: #330000 !important; }
+.night-mode rect[fill="#eee"], .night-mode rect[fill="#222"] { fill: #0a0000 !important; stroke: #330000 !important; }
 .night-mode g[stroke="#555"] line { stroke: #440000 !important; }
 .night-mode g[fill="#555"] text { fill: #800000 !important; }
-
-/* Mini Bussola TWD */
 .night-mode .mini-compass { border-color: #330000 !important; background: #000 !important; }
 .night-mode .mini-compass text { fill: #800000 !important; }
 .night-mode .mini-compass text:last-of-type { fill: #800000 !important; opacity: 1; }
@@ -607,10 +486,9 @@ body.night-mode {
 .night-mode #twd-arrow #twd-wind-chevron { stroke: #ff3333 !important; }
 
 /* --- 10.6 LOGICA RED-SHIFT TREND --- */
-/* Converte i colori generati dal JS per i pallini di trend */
-.night-mode circle[fill="#bbb"], .night-mode circle[fill="#bbbbbb"] { fill: #440000 !important; } /* Neutro */
-.night-mode circle[fill="#27ae60"] { fill: #ff0000 !important; } /* Lift */
-.night-mode circle[fill="#c0392b"] { fill: #800000 !important; } /* Header */
+.night-mode circle[fill="#bbb"], .night-mode circle[fill="#bbbbbb"] { fill: #440000 !important; }
+.night-mode circle[fill="#27ae60"] { fill: #ff0000 !important; }
+.night-mode circle[fill="#c0392b"] { fill: #800000 !important; }
 
 /* ==========================================================================
    11. TREND E ANIMAZIONI
@@ -620,3 +498,20 @@ body.night-mode {
 .is-trending { opacity: 1 !important; animation: blink-trend 1s infinite !important; }
 .is-gybing { opacity: 1 !important; animation: none !important; filter: drop-shadow(0 0 8px #ff0000) !important; }
 .unstable-data { animation: blink-trend 1.5s infinite ease-in-out; color: #e67e22 !important; }
+
+/* --- CORREZIONE VISIBILITÀ COLORI BASE SCURI IN NIGHT MODE --- */
+/* Il Navy Slate (#2c3e50) diventa nero con il filtro notturno. Lo schiariamo a un Grigio-Azzurro. */
+.night-mode .graph-wrapper line[style*="#2c3e50"] {
+    stroke: #6c8ea0 !important;
+}
+.night-mode .graph-wrapper polygon[style*="#2c3e50"] {
+    fill: #6c8ea0 !important;
+}
+
+/* Opzionale: Diamo una piccola "spinta" anche all'azzurro della Depth per bilanciarlo */
+.night-mode .graph-wrapper line[style*="#0088cc"] {
+    stroke: #33aadd !important;
+}
+.night-mode .graph-wrapper polygon[style*="#0088cc"] {
+    fill: #33aadd !important;
+}
