@@ -566,52 +566,124 @@ function startDisplayLoop() {
  * Converte i testi in numeri per garantire la precisione dei calcoli.
  */
 async function fetchServerConfig() {
-    if (!window.location.protocol.includes("http")) return;
-    
+    if (!window.location.protocol.startsWith("http")) {
+        console.warn("Non in ambiente HTTP");
+        return;
+    }
+
     const urls = [
+        '/signalk/v1/api/plugins/rotevista-dash/config',
+        '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash/config',
         '/signalk/v1/api/plugins/rotevista-dash',
-        '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash',
         '/plugins/rotevista-dash/settings'
     ];
 
-    for (let url of urls) {
+    for (const url of urls) {
         try {
-            const response = await fetch(url);
-            if (response.ok) {
-                const data = await response.json();
-                
-                // Signal K può incapsulare i dati in settings o configuration
-                const actual = data.settings || data.configuration || data.options || data;
-                
-                if (actual && (actual.alarms || actual.averaging || actual.graphs)) {
-                    // FUNZIONE DI PARSING: Trasforma eventuali testi "12.5" in numeri 12.5 reali
-                    const parseNumbers = (obj) => {
-                        for (let k in obj) {
-                            if (typeof obj[k] === 'object') parseNumbers(obj[k]);
-                            else if (!isNaN(obj[k]) && obj[k] !== "" && typeof obj[k] === 'string') {
-                                obj[k] = parseFloat(obj[k]);
-                            }
-                        }
-                    };
-                    parseNumbers(actual);
+            console.log(`🔍 Provo: ${url}`);
 
-                    // MAPPATURA INTEGRALE NEL CONFIG LOCALE
-                    if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
-                    if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
-                    if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
-                    if (actual.scales) {
-                        for (let k in actual.scales) {
-                            CONFIG.scales[k] = { ...CONFIG.scales[k], ...actual.scales[k] };
-                        }
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+
+            console.log(`Status ${response.status}`);
+
+            if (!response.ok) continue;
+
+            const text = await response.text();
+
+            console.log("RAW RESPONSE:", text);
+
+            let data;
+
+            try {
+                data = JSON.parse(text);
+            } catch (e) {
+                console.warn("❌ Non è JSON valido");
+                continue;
+            }
+
+            console.log("JSON:", data);
+
+            const actual =
+                data.settings ||
+                data.configuration ||
+                data.options ||
+                data;
+
+            if (!actual || typeof actual !== 'object') {
+                console.warn("❌ Config non valida");
+                continue;
+            }
+
+            const parseNumbers = (obj) => {
+                if (!obj || typeof obj !== 'object') return;
+
+                for (const k in obj) {
+                    const v = obj[k];
+
+                    if (v && typeof v === 'object') {
+                        parseNumbers(v);
                     }
-                    console.log("✅ Configurazione caricata correttamente da:", url);
-                    return;
+                    else if (
+                        typeof v === 'string' &&
+                        v.trim() !== '' &&
+                        !isNaN(v)
+                    ) {
+                        obj[k] = parseFloat(v);
+                    }
+                }
+            };
+
+            parseNumbers(actual);
+
+            console.log("CONFIG PARSATA:", actual);
+
+            if (actual.alarms) {
+                CONFIG.alarms = {
+                    ...CONFIG.alarms,
+                    ...actual.alarms
+                };
+            }
+
+            if (actual.graphs) {
+                CONFIG.graphs = {
+                    ...CONFIG.graphs,
+                    ...actual.graphs
+                };
+            }
+
+            // ATTENZIONE:
+            // averaging -> averages
+            if (actual.averaging) {
+                CONFIG.averages = {
+                    ...CONFIG.averages,
+                    ...actual.averaging
+                };
+            }
+
+            if (actual.scales) {
+                for (const k in actual.scales) {
+                    CONFIG.scales[k] = {
+                        ...CONFIG.scales[k],
+                        ...actual.scales[k]
+                    };
                 }
             }
+
+            console.log(`✅ Config caricata da ${url}`);
+
+            return actual;
+
         } catch (e) {
-            console.warn(`⚠️ Tentativo fallito su ${url}`);
+            console.error(`❌ Errore su ${url}`, e);
         }
     }
+
+    console.error("❌ Nessuna configurazione trovata");
 }
 
 function manageHistory(t, v) {
