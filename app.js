@@ -559,22 +559,52 @@ function startDisplayLoop() {
 // ==========================================================================
 // 8. CONFIGURAZIONE E GRAFICI UTILS
 // ==========================================================================
+/**
+ * Recupera la configurazione dal server Signal K e sovrascrive i default.
+ * Include una funzione di parsing per garantire che i valori siano numeri.
+ */
 async function fetchServerConfig() {
     if (!window.location.protocol.includes("http")) return;
-    try {
-        const response = await fetch(`/plugins/rotevista-dash/config`);
-        if (response.ok) {
-            const data = await response.json();
-            const actual = data.configuration || data;
-            if (actual) {
-                const pN = (obj) => { for (let k in obj) { if (typeof obj[k] === 'object') pN(obj[k]); else if (!isNaN(obj[k]) && obj[k] !== "") obj[k] = parseFloat(obj[k]); } };
-                pN(actual);
-                if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
-                if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
-                if (actual.scales) { for (let k in actual.scales) CONFIG.scales[k] = { ...CONFIG.scales[k], ...actual.scales[k] }; }
+    
+    // Proviamo i due percorsi standard di Signal K per i settings dei plugin
+    const urls = [
+        '/plugins/rotevista-dash/settings',
+        '/plugins/@sailingrotevista%2frotevista-dash/settings'
+    ];
+
+    for (let url of urls) {
+        try {
+            const response = await fetch(url);
+            if (response.ok) {
+                const data = await response.json();
+                // Signal K mette i dati reali dentro l'oggetto configuration o direttamente nel body
+                const actual = data.configuration || data;
+                
+                if (actual) {
+                    // FUNZIONE DI PULIZIA: Trasforma le stringhe "123" in numeri 123 reali
+                    const parseObj = (obj) => {
+                        for (let k in obj) {
+                            if (typeof obj[k] === 'object') parseObj(obj[k]);
+                            else if (!isNaN(obj[k]) && obj[k] !== "") obj[k] = parseFloat(obj[k]);
+                        }
+                    };
+                    parseObj(actual);
+
+                    // MAPPATURA INTELLIGENTE: Sovrascrive CONFIG solo con i dati ricevuti
+                    if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
+                    if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
+                    if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
+                    if (actual.scales) {
+                        for (let k in actual.scales) {
+                            CONFIG.scales[k] = { ...CONFIG.scales[k], ...actual.scales[k] };
+                        }
+                    }
+                    console.log("Configurazione caricata correttamente da:", url);
+                    return; // Esci dal loop se il caricamento ha avuto successo
+                }
             }
-        }
-    } catch (e) { }
+        } catch (e) { console.warn(`Tentativo su ${url} fallito.`); }
+    }
 }
 
 function manageHistory(t, v) {
