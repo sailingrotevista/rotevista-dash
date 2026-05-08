@@ -560,36 +560,33 @@ function startDisplayLoop() {
 // 8. CONFIGURAZIONE E GRAFICI UTILS
 // ==========================================================================
 /**
- * Recupera la configurazione tramite le API ufficiali di Signal K.
- * Sovrascrive i default locali con i parametri impostati nel server.
- */
-/**
- * Recupera la configurazione dal server Signal K provando diversi percorsi.
- * Gestisce i permessi e converte i dati in formato numerico.
+ * Recupera la configurazione provando i percorsi standard e quelli "scoped".
+ * Gestisce il parsing dei numeri e la mappatura dei grafici.
  */
 async function fetchServerConfig() {
     if (!window.location.protocol.includes("http")) return;
-
-    // Elenco percorsi dal più probabile (WebApp Data) al più tecnico (Plugin API)
+    
+    // Elenco di tutti i percorsi dove Signal K potrebbe aver salvato i settings
     const urls = [
-        '/signalk/v1/applicationData/user/rotevista-dash/1.0/settings',
-        '/signalk/v1/api/plugins/rotevista-dash',
-        '/plugins/rotevista-dash/config'
+        '/plugins/rotevista-dash/settings',
+        '/plugins/@sailingrotevista%2frotevista-dash/settings',
+        '/signalk/v1/api/plugins/rotevista-dash/settings',
+        '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash/settings',
+        '/plugins/rotevista-dash/config' // Quello che ti ha dato 401
     ];
 
     for (let url of urls) {
         try {
-            console.log(`Tentativo di caricamento configurazione da: ${url}`);
             const response = await fetch(url);
             
             if (response.ok) {
                 const data = await response.json();
                 
-                // Signal K può incapsulare i dati in 'settings', 'configuration' o 'value'
-                const actual = data.settings || data.configuration || data.value || data;
-
+                // Signal K può restituire i dati direttamente, in 'configuration' o in 'settings'
+                const actual = data.settings || data.configuration || data.options || data;
+                
                 if (actual && (actual.alarms || actual.averaging || actual.graphs)) {
-                    // FUNZIONE DI PARSING: Garantisce che i valori siano numeri reali
+                    // FUNZIONE DI PARSING: Trasforma i testi in numeri per i calcoli
                     const parseNumbers = (obj) => {
                         for (let k in obj) {
                             if (typeof obj[k] === 'object') parseNumbers(obj[k]);
@@ -600,7 +597,7 @@ async function fetchServerConfig() {
                     };
                     parseNumbers(actual);
 
-                    // APPLICAZIONE DEI PARAMETRI (Inclusi i grafici che prima mancavano)
+                    // APPLICAZIONE CONFIGURAZIONE (Ora include anche i grafici!)
                     if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
                     if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
                     if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
@@ -609,15 +606,13 @@ async function fetchServerConfig() {
                             CONFIG.scales[k] = { ...CONFIG.scales[k], ...actual.scales[k] };
                         }
                     }
-                    console.log("✅ Configurazione applicata con successo da:", url);
-                    return; // Uscita al primo successo
+                    console.log("✅ CONFIGURAZIONE CARICATA DA:", url);
+                    return; // Abbiamo trovato i dati, usciamo dal loop
                 }
             }
-        } catch (e) {
-            console.warn(`⚠️ Errore durante il fetch su ${url}:`, e.message);
-        }
+        } catch (e) { }
     }
-    console.warn("⚠️ Nessun percorso di configurazione valido trovato. Uso i default locali.");
+    console.warn("⚠️ Nessun dato di configurazione trovato nei percorsi standard. Uso i default.");
 }
 
 function manageHistory(t, v) {
