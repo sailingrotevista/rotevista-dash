@@ -81,32 +81,82 @@ body {
 }
 
 /* ==========================================================================
-   4. TIPOGRAFIA GERARCHICA (REGOLE BASE)
+   4. TIPOGRAFIA GERARCHICA (REGOLE BASE + PROTEZIONE SCHERMI BASSI)
    ========================================================================== */
-.value { color: #000; font-size: clamp(1.2rem, 32cqw, 3.5rem); font-weight: 600; line-height: 0.9; letter-spacing: -1.5px; }
 
-/* Valore MASSIVO (Dati reali): 55% altezza box, larghezza protetta a 22% schermo */
-.value-large {
-    font-size: clamp(1.5rem, 55cqh, 22cqw) !important;
-    font-weight: 600; line-height: 0.8; margin: 0 !important;
+/* --- VALORI STANDARD (STW, SOG, DEPTH, TWS) --- */
+.value {
+    color: #000;
+    /* Default Tablet: Usiamo cqw per la larghezza ma controlliamo l'altezza con cqh */
+    font-size: clamp(1.2rem, 25cqh, 32cqw);
+    font-weight: 600; line-height: 0.85; letter-spacing: -1.5px;
+    margin-top: auto; margin-bottom: 2px;
 }
 
-/* BOX TWD: Bussola a SX, Valore a DX, centrati verticalmente */
-.value-with-compass { display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100%; height: 85%; }
-.box-twd .mini-compass { height: 85cqh !important; width: auto !important; aspect-ratio: 1/1; flex-shrink: 0; }
-.box-twd #twd-avg { font-size: clamp(1.5rem, 55cqh, 20cqw) !important; text-align: right; line-height: 1; }
+/* PROTEZIONE IPHONE LANDSCAPE: Se lo schermo è basso (<450px), riduciamo l'altezza del font */
+@media screen and (max-height: 450px) {
+    .value { font-size: clamp(1.1rem, 18cqh, 28cqw) !important; }
+}
 
-/* BOX TACK: HDG a SX, COG a DX, Titoli sopra (Default Landscape/Portrait) */
+/* PROTEZIONE SMART: Se il box è stretto (Split View), riduciamo leggermente */
+@container (max-width: 300px) {
+    .value { font-size: clamp(1.1rem, 24cqw, 2.8rem) !important; letter-spacing: -1px; }
+}
+
+/* --- VALORI MEDIATI (HEADING, COG, TWA, AWA) --- */
+.value-large {
+    font-weight: 600; line-height: 1; margin: auto 0;
+    /* Default Tablet: 55% dell'altezza del box */
+    font-size: clamp(1.5rem, 55cqh, 25cqw) !important;
+}
+
+/* PROTEZIONE IPHONE LANDSCAPE: Se lo schermo è basso, abbassiamo al 40% */
+@media screen and (max-height: 450px) {
+    .value-large { font-size: clamp(1.4rem, 40cqh, 22cqw) !important; }
+}
+
+@container (max-width: 300px) {
+    .value-large { font-size: clamp(1.4rem, 45cqh, 25cqw) !important; }
+}
+
+/* --- BOX TWD (Bussola Meteo) --- */
+.value-with-compass {
+    display: flex; flex-direction: row; justify-content: space-between;
+    align-items: center; width: 100%; height: 85%;
+}
+
+.box-twd .mini-compass {
+    height: 85cqh !important; width: auto !important; aspect-ratio: 1/1; flex-shrink: 0;
+}
+
+/* PROTEZIONE IPHONE LANDSCAPE: Rimpiccioliamo la bussola se il box è basso */
+@media screen and (max-height: 450px) {
+    .box-twd .mini-compass { height: 65cqh !important; }
+    .box-twd #twd-avg { font-size: clamp(1.4rem, 45cqh, 22cqw) !important; }
+}
+
+/* --- BOX TACK (Mure Opposte) --- */
 .box-tack .dual-value-container { display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100%; height: 100%; }
 .box-tack .dual-value-col { display: flex; flex-direction: column; justify-content: center; }
 .box-tack .dual-value-col:first-child { align-items: flex-start; }
 .box-tack .dual-value-col:last-child { align-items: flex-end; }
 .box-tack .dual-label { color: #888; font-size: 0.5rem; font-weight: 800; margin-bottom: -2px; }
-.box-tack .value.dual-val { font-size: clamp(1rem, 35cqh, 12cqw) !important; line-height: 0.9; }
 
-/* Tag HERCULES: Allineato all'unità (lato interno schermo) */
+.box-tack .value.dual-val {
+    font-size: clamp(1rem, 35cqh, 12cqw) !important; line-height: 0.9;
+}
+
+/* PROTEZIONE IPHONE LANDSCAPE: TACK ancora più sottile */
+@media screen and (max-height: 450px) {
+    .box-tack .value.dual-val { font-size: clamp(0.9rem, 28cqh, 10cqw) !important; }
+}
+
+/* --- TAG HERCULES --- */
 .box-hercules { background: rgba(255, 0, 0, 0.05) !important; }
-.box-hercules .unit::before { font-size: 7px; color: #ff4444; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; content: "HERCULES "; }
+.box-hercules .unit::before {
+    font-size: 7px; color: #ff4444; font-weight: 900;
+    letter-spacing: 1px; text-transform: uppercase; content: "HERCULES ";
+}
 
 /* ==========================================================================
    5. TACTICAL FOCUS MODE
@@ -278,61 +328,70 @@ body {
 }
 
 /* ==========================================================================
-   8. RESPONSIVE (PORTRAIT MODE)
+   8. RESPONSIVE (PORTRAIT MODE - Rapporto < 0.85)
    ========================================================================== */
 @media screen and (max-aspect-ratio: 0.85/1) {
     .main-container {
-        grid-template-areas:
-            "gauge gauge"
-            "stw   depth"
-            "sog   tws"
-            "hdg   twa"
-            "cog   awa"
-            "tack  twd" !important;
+        grid-template-areas: "gauge gauge" "stw depth" "sog tws" "hdg twa" "cog awa" "tack twd" !important;
         grid-template-columns: 1fr 1fr !important;
         grid-template-rows: 40vh 1.75fr 1.75fr 0.75fr 0.75fr 1.25fr !important;
     }
 
-    /* Impedisce ai box di collassare in altezza in verticale */
     .data-box { height: auto !important; }
 
-    /* --- FOCUS MODE IN VERTICALE (STACKED) --- */
-    /* Quando siamo in verticale e attiviamo il focus, impiliamo Sopra/Sotto */
+    /* --- OTTIMIZZAZIONE COMPATTA PER I BOX CON GRAFICO --- */
+    .box-stw, .box-sog, .box-depth, .box-tws {
+        justify-content: flex-start !important;
+        /* Ridotto lo spazio superiore per avvicinare il valore al titolo */
+        padding-top: 1.2rem !important;
+    }
+
+    /* --- OTTIMIZZAZIONE FONT VALORI CON GRAFICO IN VERTICALE --- */
+    .box-stw .value,
+    .box-sog .value,
+    .box-depth .value,
+    .box-tws .value {
+        /* Aumentato a 30cqh per pareggiare il peso visivo di HEADING */
+        /* Alzato anche il limite cqw a 35 per permettere al numero di allargarsi */
+        font-size: clamp(1.2rem, 30cqh, 35cqw) !important;
+        line-height: 0.8 !important;
+        margin-top: -4px !important; /* Saliamo ancora un briciolo verso il titolo */
+        margin-bottom: 4px !important;
+        padding-bottom: 0 !important;
+        font-weight: 700; /* Leggermente più marcato */
+    }
+
+    /* Espansione del grafico per occupare tutto il resto del box */
+    .box-stw .graph-wrapper,
+    .box-sog .graph-wrapper,
+    .box-depth .graph-wrapper,
+    .box-tws .graph-wrapper {
+        margin-top: 0 !important;
+        flex-grow: 1 !important;
+    }
+
+    /* --- ALTRI BOX (HEADING, COG, ecc.) RESTANO CENTRATI --- */
+    .box-hdg, .box-cog, .box-twa, .box-awa, .box-twd, .box-tack {
+        justify-content: center !important;
+        padding-top: 1.2rem !important;
+    }
+
+    /* --- FOCUS MODE IN VERTICALE --- */
     .main-container.focus-active {
-        grid-template-columns: 1fr !important; /* Colonna singola */
-        grid-template-rows: 65vh 35vh !important; /* 65% Altezza al dato, 35% alla bussola */
-        grid-template-areas:
-            "focused"
-            "gauge" !important;
+        grid-template-columns: 1fr !important;
+        grid-template-rows: 65vh 35vh !important;
+        grid-template-areas: "focused" "gauge" !important;
     }
+    .focus-active .is-focused { height: 65vh !important; width: 100vw !important; padding: 5vh 5vw !important; justify-content: center !important; }
+    .focus-active .is-focused .value { font-size: clamp(4rem, 20cqh, 15rem) !important; margin-top: 20px !important; }
+    .focus-active .box-gauge { height: 35vh !important; width: 100vw !important; display: flex !important; align-items: center; justify-content: center; }
 
-    /* Correzione dimensioni box in Focus Verticale */
-    .focus-active .is-focused {
-        height: 65vh !important;
-        width: 100vw !important;
-        padding: 5vh 5vw !important; /* Più respiro per display curvi */
-    }
-
-    /* Correzione Bussola in Focus Verticale */
-    .focus-active .box-gauge {
-        height: 35vh !important;
-        width: 100vw !important;
-        display: flex !important;
-        align-items: center;
-        justify-content: center;
-    }
-
-    /* Ridimensionamento font per Focus Verticale (per non sbordare) */
-    .focus-active .is-focused .value {
-        font-size: clamp(4rem, 20cqh, 12rem) !important;
-    }
-
-    /* In verticale il box TACK è largo: forziamo i due valori ai bordi */
-    .box-tack .dual-value-container {
-        flex-direction: row !important;
-        justify-content: space-between !important;
-        align-items: center !important;
-    }
+    /* --- TACK IN VERTICALE --- */
+    .box-tack .dual-value-container { flex-direction: row !important; justify-content: space-between !important; align-items: center !important; }
+    .box-tack .dual-value-col { display: flex !important; flex-direction: column !important; justify-content: center; }
+    .box-tack .dual-value-col:first-child { align-items: flex-start !important; text-align: left !important; }
+    .box-tack .dual-value-col:last-child { align-items: flex-end !important; text-align: right !important; }
+    .box-tack .value.dual-val { font-size: clamp(1rem, 38cqh, 15cqw) !important; }
 }
 
 /* ==========================================================================
