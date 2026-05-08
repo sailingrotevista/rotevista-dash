@@ -616,6 +616,10 @@ function updateScaleLabels(t, min, max) {
  * drawGraph: Disegna i grafici con griglia temporale intelligente
  * Usa un Gradiente Lineare SVG dinamico per eliminare le giunzioni dei poligoni.
  */
+/**
+ * drawGraph: Disegna i grafici con griglia temporale intelligente
+ * Versione bilanciata: 1.5px per allarmi critici, 1px per il resto.
+ */
 function drawGraph(d, id, min, max, isTws, isHercules) {
     const svg = document.getElementById(id);
     if (!svg || d.length < 2) return;
@@ -625,7 +629,7 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     const isDepth = (id === 'depth-graph');
     const samples = CONFIG.graphs.samples;
 
-    // 1. Griglia
+    // 1. Griglia (Sottile 0.5px)
     let grids = "";
     [0.25, 0.5, 0.75].forEach(p => {
         grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`;
@@ -636,7 +640,7 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
         grids += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="rgba(0,0,0,0.08)" stroke-width="0.5" />`;
     }
 
-    // 2. Colori (Tavolozza Vivida)
+    // 2. Tavolozza Colori Vividi
     const baseColorTws = "#2c3e50";
     const baseColorDepth = "#0088cc";
 
@@ -656,49 +660,43 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     let areaPath = `M 0 ${h} `;
 
     for (let i = 1; i < d.length; i++) {
-        // Calcolo Percentuali per il gradiente
         const percentPrev = ((i - 1) / (samples - 1)) * 100;
         const percentCurr = (i / (samples - 1)) * 100;
 
-        // Coordinate geometriche
         const x1 = ((i - 1) / (samples - 1)) * w;
         const y1 = h - (Math.max(0, Math.min(1, (d[i - 1] - min) / range)) * h);
         const x2 = (i / (samples - 1)) * w;
         const y2 = h - (Math.max(0, Math.min(1, (d[i] - min) / range)) * h);
         
         const color = getColor(d[i]);
-                
-                // Assegnazione specifica di Opacità e Spessore Linea
-                let fillOpacity = "0.15"; // Default per valori base
-                let strokeWidth = "1";
+        
+        // Logica Opacità e Spessore (Tua configurazione)
+        let fillOpacity = "0.15";
+        let strokeWidth = "1";
 
-                if (color === "#ff3b30") {
-                    // ROSSO (Danger / Reef 2): Molto solido
-                    fillOpacity = "0.85";
-                    strokeWidth = "1.5";
-                } else if (color === "#ff9800") {
-                    // ARANCIONE (Warning / Reef 1): Più trasparente (Velo)
-                    fillOpacity = "0.45";
-                    strokeWidth = "1"; // Manteniamo la linea spessa per leggerla bene
-                }
+        if (color === "#ff3b30") {
+            fillOpacity = "0.85"; // Rosso: Molto visibile
+            strokeWidth = "1.5";  // Rosso: Più marcato
+        } else if (color === "#ff9800") {
+            fillOpacity = "0.45"; // Arancio: Velo medio
+            strokeWidth = "1";    // Arancio: Sottile
+        }
 
-        // GRADIENTE: Due stop alla stessa percentuale per creare uno stacco di colore netto (no sfumature)
+        // Costruzione Gradiente (stacchi netti tra i colori)
         gradientStops += `<stop offset="${percentPrev}%" stop-color="${color}" stop-opacity="${fillOpacity}" />`;
         gradientStops += `<stop offset="${percentCurr}%" stop-color="${color}" stop-opacity="${fillOpacity}" />`;
 
-        // LINEE: Disegnate normalmente sopra l'area
+        // Disegno Linea con precisione geometrica
         lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" 
-                 style="stroke: ${color}; stroke-width: ${strokeWidth}; stroke-linecap: round;" />`;
+                 style="stroke: ${color}; stroke-width: ${strokeWidth}; stroke-linecap: round; shape-rendering: geometricPrecision;" />`;
                  
-        // AGGIORNAMENTO PATH UNICO
         if (i === 1) areaPath += `L ${x1} ${y1} `;
         areaPath += `L ${x2} ${y2} `;
     }
     
-    // Chiusura del path dell'area
     areaPath += `L ${w} ${h} Z`;
 
-    // 4. Iniezione del <defs> (Gradiente) nell'SVG
+    // 4. Iniezione del Gradiente
     const gradId = `grad-${id}`;
     const defs = `
         <defs>
@@ -709,12 +707,12 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     `;
 
     // 5. Render Finale
-    // Se è Depth o Tws applichiamo il gradiente, altrimenti colore standard fisso (per SOG/STW)
     if (isTws || isDepth) {
         svg.innerHTML = `${defs}${grids}<path d="${areaPath}" fill="url(#${gradId})" stroke="none" />${lines}`;
     } else {
-        const standardColor = getColor(d[d.length - 1]);
-        svg.innerHTML = `${grids}<path d="${areaPath}" fill="${standardColor}" fill-opacity="0.15" stroke="none" />${lines}`;
+        // Per STW/SOG usiamo il colore dell'ultimo punto con area fissa 0.15
+        const currentPathColor = getColor(d[d.length - 1]);
+        svg.innerHTML = `${grids}<path d="${areaPath}" fill="${currentPathColor}" fill-opacity="0.15" stroke="none" />${lines}`;
     }
 }
 
