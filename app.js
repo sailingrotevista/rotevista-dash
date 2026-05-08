@@ -17,7 +17,7 @@ let CONFIG = {
         depthWarning: 5.0
     },
     // Gestione parametri di stabilità e medie
-    averages: {
+    averaging: {
         smoothWindow: 2000,         // Smoothing puntatori (2s)
         longWindow: 30000,          // Finestra per i valori MEAN (30s)
         stabilityTolerance: 2000,   // Millisecondi per considerare il buffer "pieno"
@@ -146,7 +146,7 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
     let historyDuration = (validData.length > 2) ? (validData[validData.length - 1].time - validData[0].time) : 0;
     
     // Un dato è stabile se abbiamo abbastanza storia e la coerenza vettoriale R è alta
-    let isStable = (historyDuration > 10000) && (R > CONFIG.averages.stabilityThreshold);
+    let isStable = (historyDuration > 10000) && (R > CONFIG.averaging.stabilityThreshold);
     let avgRad = Math.atan2(sSin, sCos);
 
     // Calcolo della Deviazione Standard Circolare (±) in gradi
@@ -401,7 +401,7 @@ const upUI = (el, obj, instantRaw, isCompass = false) => {
         
         let diff = Math.abs((radToDeg(instantRaw) - radToDeg(obj.val) + 540) % 360 - 180);
         // Allarme lampeggio solo se in navigazione E (R bassa O deviazione alta O salto istantaneo brusco)
-        if (isNavigating && (!obj.stable || obj.dev > CONFIG.averages.stabilityBreakout || diff > CONFIG.averages.stabilityBreakout)) el.classList.add('unstable-data');
+        if (isNavigating && (!obj.stable || obj.dev > CONFIG.averaging.stabilityBreakout || diff > CONFIG.averaging.stabilityBreakout)) el.classList.add('unstable-data');
         else el.classList.remove('unstable-data');
     }
 };
@@ -420,7 +420,7 @@ function startDisplayLoop() {
         const sogKts = msToKts(store.raw["navigation.speedOverGround"] || 0);
         
         // Verifica stato navigazione basato su soglia impostata
-        isNavigating = stwKts > CONFIG.averages.minSpeed || sogKts > CONFIG.averages.minSpeed;
+        isNavigating = stwKts > CONFIG.averaging.minSpeed || sogKts > CONFIG.averaging.minSpeed;
 
         // --- TIER LIVE (1s): CONTROLLO TIMEOUT DATI ---
         const watch = { "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog, "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog, "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth, "environment.wind.speedTrue": ui.tws };
@@ -488,7 +488,7 @@ function startDisplayLoop() {
         if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
             let driftDeg = radToDeg((store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (Math.PI * 2) - Math.PI);
             // Azzeramento sotto soglia minima impostata
-            smoothedLeeway = (sogKts < CONFIG.averages.minSpeed) ? 0 : (smoothedLeeway * 0.9) + (driftDeg * 0.1);
+            smoothedLeeway = (sogKts < CONFIG.averaging.minSpeed) ? 0 : (smoothedLeeway * 0.9) + (driftDeg * 0.1);
             curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway); ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
             ui.leewayVal.style.color = (Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7) ? "#e67e22" : "";
             updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
@@ -504,11 +504,11 @@ function startDisplayLoop() {
 
         // TIER SLOW (3s) - Medie Lunghe e Calcolo TACK
         if (lastAvgUIUpdate % 3 === 0) {
-            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averages.longWindow * 2, false);
-            let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averages.longWindow, false);
-            let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averages.longWindow, true);
-            let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averages.longWindow, true);
-            let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averages.longWindow, false);
+            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false);
+            let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false);
+            let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true);
+            let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true);
+            let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false);
 
             upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
             upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
@@ -519,7 +519,7 @@ function startDisplayLoop() {
             // --- LOGICA TACK STRATEGICA (Riflessione geometrica su TWD) ---
             if (hObj && twdObj) {
                 const tH = radToDeg((2 * twdObj.val - hObj.val + Math.PI * 2) % (Math.PI * 2));
-                const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averages.stabilityBreakout || twdObj.dev > CONFIG.averages.stabilityBreakout;
+                const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout || twdObj.dev > CONFIG.averaging.stabilityBreakout;
 
                 if (!isNavigating) {
                     ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.remove('unstable-data');
@@ -532,7 +532,7 @@ function startDisplayLoop() {
 
                 if (cObj) {
                     const tC = radToDeg((2 * twdObj.val - cObj.val + Math.PI * 2) % (Math.PI * 2));
-                    const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averages.stabilityBreakout || twdObj.dev > CONFIG.averages.stabilityBreakout;
+                    const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout || twdObj.dev > CONFIG.averaging.stabilityBreakout;
                     
                     if (!isNavigating) {
                         ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.remove('unstable-data');
@@ -560,37 +560,56 @@ function startDisplayLoop() {
 // 8. CONFIGURAZIONE E GRAFICI UTILS
 // ==========================================================================
 /**
- * Recupera la configurazione tramite l'endpoint dedicato /rotevista-config.
- * Questo bypassa i blocchi di sicurezza standard di Signal K.
+ * Recupera la configurazione dal server con log di debug estesi.
  */
 async function fetchServerConfig() {
     try {
         const response = await fetch('/rotevista-config');
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
+        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+        
         const data = await response.json();
+        
+        // DEBUG 1: Visualizza i dati esattamente come arrivano dal server
+        console.log("📥 [DEBUG] Dati grezzi ricevuti dal server:", data);
 
-        // Funzione di utilità per garantire che i valori siano numeri (evita bug nei grafici)
         const parse = (obj) => {
             for (let k in obj) {
-                if (typeof obj[k] === 'object') parse(obj[k]);
+                if (typeof obj[k] === 'object' && obj[k] !== null) parse(obj[k]);
                 else if (!isNaN(obj[k]) && typeof obj[k] === 'string' && obj[k] !== "")
                     obj[k] = parseFloat(obj[k]);
             }
             return obj;
         };
 
-        const actual = parse(data);
+        const actual = parse(JSON.parse(JSON.stringify(data))); // Cloniamo per sicurezza
 
-        // Fondiamo i dati del server con il CONFIG locale
+        // DEBUG 2: Visualizza i dati dopo la conversione numerica
+        console.log("⚙️ [DEBUG] Dati convertiti (numeric):", actual);
+
+        // ASSEGNAZIONE E FUSIONE (Mappatura dei blocchi)
         if (actual.alarms) Object.assign(CONFIG.alarms, actual.alarms);
         if (actual.graphs) Object.assign(CONFIG.graphs, actual.graphs);
-        if (actual.averaging) Object.assign(CONFIG.averages, actual.averaging);
+        
+        // Gestione specifica per averaging (il blocco più critico)
+        if (actual.averaging) {
+            Object.assign(CONFIG.averaging, actual.averaging);
+            // DEBUG 3: Tabella comparativa per verificare minSpeed e soglie
+            console.table({
+                "Parametro": ["longWindow", "minSpeed", "stabilityThreshold", "stabilityBreakout"],
+                "Valore Attuale": [
+                    CONFIG.averaging.longWindow,
+                    CONFIG.averaging.minSpeed,
+                    CONFIG.averaging.stabilityThreshold,
+                    CONFIG.averaging.stabilityBreakout
+                ]
+            });
+        }
+        
         if (actual.scales) Object.assign(CONFIG.scales, actual.scales);
 
-        console.log("✅ Configurazione sincronizzata via /rotevista-config");
+        console.log("✅ [SUCCESS] Configurazione sincronizzata correttamente.");
     } catch (err) {
-        console.warn("⚠️ Utilizzo default locali (Endpoint non ancora attivo o server offline).");
+        console.warn("⚠️ [WARNING] Utilizzo default locali. Motivo:", err.message);
     }
 }
 
