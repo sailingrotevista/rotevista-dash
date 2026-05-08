@@ -565,23 +565,39 @@ function startDisplayLoop() {
  * Prova i percorsi API ufficiali e quelli scoped (@sailingrotevista).
  * Converte i testi in numeri per garantire la precisione dei calcoli.
  */
+/**
+ * Recupera la configurazione dal server Signal K.
+ * Utilizza un approccio semplificato e converte i dati in numeri reali.
+ */
 async function fetchServerConfig() {
     try {
-        const response = await fetch(
-            '/plugins/rotevista-dash/public-config'
-        );
-
-        if (!response.ok) throw new Error();
+        // Puntiamo al percorso config del plugin
+        const response = await fetch('/plugins/rotevista-dash/config');
+        if (!response.ok) throw new Error(`Status: ${response.status}`);
 
         const actual = await response.json();
 
-        Object.assign(CONFIG.alarms, actual.alarms || {});
-        Object.assign(CONFIG.graphs, actual.graphs || {});
-        Object.assign(CONFIG.averages, actual.averaging || {});
+        // FUNZIONE DI PARSING: Trasforma eventuali "20" (stringhe) in 20 (numeri)
+        const parse = (obj) => {
+            for (let k in obj) {
+                if (typeof obj[k] === 'object') parse(obj[k]);
+                else if (!isNaN(obj[k]) && typeof obj[k] === 'string' && obj[k] !== "")
+                    obj[k] = parseFloat(obj[k]);
+            }
+            return obj;
+        };
 
-        console.log("✅ Config caricata");
-    } catch {
-        console.warn("⚠️ Default locali");
+        const data = parse(actual.configuration || actual);
+
+        // ASSEGNAZIONE DINAMICA: Aggiorna tutti i blocchi del CONFIG
+        if (data.alarms) Object.assign(CONFIG.alarms, data.alarms);
+        if (data.graphs) Object.assign(CONFIG.graphs, data.graphs);
+        if (data.averaging) Object.assign(CONFIG.averages, data.averaging);
+        if (data.scales) Object.assign(CONFIG.scales, data.scales);
+
+        console.log("✅ Configurazione server caricata e sincronizzata.");
+    } catch (err) {
+        console.warn("⚠️ Impossibile caricare config server, uso default locali.");
     }
 }
 
