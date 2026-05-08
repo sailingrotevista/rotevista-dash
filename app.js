@@ -563,28 +563,33 @@ function startDisplayLoop() {
  * Recupera la configurazione tramite le API ufficiali di Signal K.
  * Sovrascrive i default locali con i parametri impostati nel server.
  */
+/**
+ * Recupera la configurazione dal server Signal K provando diversi percorsi.
+ * Gestisce i permessi e converte i dati in formato numerico.
+ */
 async function fetchServerConfig() {
-    // Evita di cercare il server se siamo in locale (file://)
     if (!window.location.protocol.includes("http")) return;
-    
-    // Percorsi API ufficiali di Signal K per i plugin
+
+    // Elenco percorsi dal più probabile (WebApp Data) al più tecnico (Plugin API)
     const urls = [
+        '/signalk/v1/applicationData/user/rotevista-dash/1.0/settings',
         '/signalk/v1/api/plugins/rotevista-dash',
-        '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash'
+        '/plugins/rotevista-dash/config'
     ];
 
     for (let url of urls) {
         try {
+            console.log(`Tentativo di caricamento configurazione da: ${url}`);
             const response = await fetch(url);
+            
             if (response.ok) {
                 const data = await response.json();
                 
-                // Nelle API SK, i dati utente sono spesso in 'data.enabled' o 'data.settings'
-                // Noi cerchiamo l'oggetto che contiene le nostre chiavi (alarms, averaging, ecc.)
-                const actual = data.settings || data.configuration || data.options || data;
-                
+                // Signal K può incapsulare i dati in 'settings', 'configuration' o 'value'
+                const actual = data.settings || data.configuration || data.value || data;
+
                 if (actual && (actual.alarms || actual.averaging || actual.graphs)) {
-                    // FUNZIONE DI PARSING: Trasforma eventuali testi "12.5" in numeri 12.5 reali
+                    // FUNZIONE DI PARSING: Garantisce che i valori siano numeri reali
                     const parseNumbers = (obj) => {
                         for (let k in obj) {
                             if (typeof obj[k] === 'object') parseNumbers(obj[k]);
@@ -595,7 +600,7 @@ async function fetchServerConfig() {
                     };
                     parseNumbers(actual);
 
-                    // MAPPATURA DEI PARAMETRI NEL CONFIG LOCALE
+                    // APPLICAZIONE DEI PARAMETRI (Inclusi i grafici che prima mancavano)
                     if (actual.alarms) CONFIG.alarms = { ...CONFIG.alarms, ...actual.alarms };
                     if (actual.graphs) CONFIG.graphs = { ...CONFIG.graphs, ...actual.graphs };
                     if (actual.averaging) CONFIG.averages = { ...CONFIG.averages, ...actual.averaging };
@@ -604,16 +609,15 @@ async function fetchServerConfig() {
                             CONFIG.scales[k] = { ...CONFIG.scales[k], ...actual.scales[k] };
                         }
                     }
-                    console.log("✅ Configurazione caricata correttamente da:", url);
-                    return; // Successo: usciamo dal ciclo dei tentativi
+                    console.log("✅ Configurazione applicata con successo da:", url);
+                    return; // Uscita al primo successo
                 }
-            } else if (response.status === 401) {
-                console.error("❌ Errore 401: Accesso negato. Abilita 'Anonymous Read' in Signal K Security.");
             }
         } catch (e) {
-            console.warn(`⚠️ Tentativo fallito su ${url}:`, e.message);
+            console.warn(`⚠️ Errore durante il fetch su ${url}:`, e.message);
         }
     }
+    console.warn("⚠️ Nessun percorso di configurazione valido trovato. Uso i default locali.");
 }
 
 function manageHistory(t, v) {
