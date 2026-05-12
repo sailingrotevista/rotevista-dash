@@ -17,7 +17,7 @@ let CONFIG = {
         smoothWindow: 2000,
         longWindow: 30000,
         stabilityTolerance: 2000,
-        stabilityThreshold: 0.85,
+        stabilityThreshold: 0.9,
         minSpeed: 0,
         stabilityBreakout: 15
     },
@@ -35,6 +35,8 @@ const RENDER_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 5000;
 const SIM_SAMPLE_INTERVAL = 1000;
 const DASH_VERSION = "2.4"; // Versione per la gestione della memoria locale
+const sourceLocks = {};
+
 
 // ==========================================================================
 // 2. STATO GLOBALE E RIFERIMENTI UI
@@ -52,6 +54,10 @@ let lastTrendTime = Date.now(), lastGybeAlarmTime = 0, lastTWCompute = 0;
 let twDirty = false, isNavigating = false, reconnectDelay = 1000;
 
 let pressTimer, isFocusActive = false;
+
+let emaTwaSin = 0;
+let emaTwaCos = 0;
+let firstEmaRun = true;
 
 // Stato dei singoli grafici (Standard vs Hercules Zoom)
 const graphModes = {
@@ -110,39 +116,87 @@ function getShortestRotation(curr, target) {
 /**
  * Inserisce un dato nel buffer circolare limitandolo a 2000 campioni (30 min)
  */
-function safePush(buffer, val, time, maxLen = 2000) {
-    buffer.push({ val: val, time: time });
-    if (buffer.length > maxLen) { buffer.shift(); }
+/**
+ * Inserimento sicuro nel buffer con trigonometria precaricata e pruning automatico
+ */
+function safePush(buffer, val, time) {
+    buffer.push({
+        val: val,
+        time: time,
+        sin: Math.sin(val),
+        cos: Math.cos(val)
+    });
+
+    // Teniamo sempre in memoria il DOPPIO della storia impostata (per la modalità ancoraggio)
+    // + 1 minuto di margine
+    const maxHistoryMs = (CONFIG.graphs.historyMinutes * 60000 * 2) + 60000;
+
+    while (buffer.length > 0 && (time - buffer[0].time) > maxHistoryMs) {
+        buffer.shift();
+    }
+
+    // Tetto massimo di campioni per sicurezza (circa 2 ore a 5Hz)
+    if (buffer.length > 36000) buffer.shift();
 }
 
-/**
- * Media Circolare Vettoriale: Calcola angolo medio, stabilità R e deviazione standard (±)
- */
-function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false) {
-    const now = Date.now();
-    const validData = bufferArray.filter(item => (now - item.time) <= windowMs);
-    if (validData.length === 0) return null;
-    
-    let sSin = 0, sCos = 0;
-    validData.forEach(item => {
-        sSin += Math.sin(item.val);
-        sCos += Math.cos(item.val);
-    });
-    
-    let R = Math.sqrt(sSin * sSin + sCos * sCos) / validData.length;
-    let historyDuration = (validData.length > 2) ? (validData[validData.length - 1].time - validData[0].time) : 0;
-    
-    // Un dato è stabile se abbiamo abbastanza storia e la coerenza vettoriale R è alta
-    let isStable = (historyDuration > 10000) && (R > CONFIG.averaging.stabilityThreshold);
-    let avgRad = Math.atan2(sSin, sCos);
+function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now) {
+    now = now || Date.now();
 
-    // Calcolo della Deviazione Standard Circolare (±) in gradi
-    let deviation = (R < 1 && R > 0) ? Math.round(Math.sqrt(-2 * Math.log(R)) * (180 / Math.PI)) : 0;
+    const len = bufferArray.length;
+    if (len === 0) return null;
+
+    let sSin = 0;
+    let sCos = 0;
+    let count = 0;
+
+    let newestTime = 0;
+    let oldestTime = 0;
+
+    for (let i = len - 1; i >= 0; i--) {
+        const item = bufferArray[i];
+
+        if ((now - item.time) > windowMs) break;
+
+        sSin += item.sin;
+        sCos += item.cos;
+
+        if (count === 0) newestTime = item.time;
+        oldestTime = item.time;
+
+        count++;
+    }
+
+    if (count === 0) return null;
+
+    const R = Math.hypot(sSin, sCos) / count;
+
+    const avgRad = Math.atan2(sSin, sCos);
+
+    const finalVal = signed
+        ? avgRad
+        : (avgRad + Math.PI * 2) % (Math.PI * 2);
+
+    const historyDuration =
+        (count > 2)
+            ? (newestTime - oldestTime)
+            : 0;
+
+    const isStable =
+        historyDuration > 10000 &&
+        R > CONFIG.averaging.stabilityThreshold;
+
+    const safeR = Math.max(R, 1e-9);
 
     return {
-        val: signed ? avgRad : (avgRad + 2 * Math.PI) % (2 * Math.PI),
+        val: finalVal,
         stable: isStable,
-        dev: deviation
+        dev: (R < 1)
+            ? Math.round(
+                Math.sqrt(-2 * Math.log(safeR)) *
+                (180 / Math.PI)
+            )
+            : 0,
+        samples: count
     };
 }
 
@@ -291,14 +345,58 @@ function computeTrueWind() {
     }
 }
 
-function processIncomingData(path, val) {
-    const now = Date.now(); store.timestamps[path] = now; store.raw[path] = val;
-    if (path === "environment.wind.angleApparent") { safePush(store.smoothBuf.awa, val, now); safePush(store.longBuf.awa, val, now); }
-    const twPaths = ["environment.wind.speedApparent", "environment.wind.angleApparent", "navigation.speedThroughWater", "navigation.speedOverGround", "navigation.headingTrue", "navigation.courseOverGroundTrue"];
-    if (twPaths.includes(path)) twDirty = true;
-    if (twDirty && (now - lastTWCompute > 100)) { computeTrueWind(); lastTWCompute = now; twDirty = false; }
-    if (path === "navigation.headingTrue") { safePush(store.smoothBuf.hdg, val, now); safePush(store.longBuf.hdg, val, now); }
-    if (path === "navigation.courseOverGroundTrue") { safePush(store.smoothBuf.cog, val, now); safePush(store.longBuf.cog, val, now); }
+function processIncomingData(path, val, source) {
+    const now = Date.now();
+
+    // --- 1. FILTRO SORGENTE STICKY (Elimina conflitti yacht_device vs Unknown) ---
+    if (!sourceLocks[path] || sourceLocks[path].label === source || (now - sourceLocks[path].lastSeen > 2000)) {
+        sourceLocks[path] = { label: source, lastSeen: now };
+    } else {
+        // Se arriva un dato da un'altra sorgente mentre il lock è attivo, lo scartiamo
+        return;
+    }
+
+    // --- 2. AGGIORNAMENTO DATI (Solo per la sorgente eletta) ---
+    store.timestamps[path] = now;
+    store.raw[path] = val;
+
+    // Buffer per AWA (Vento Apparente)
+    if (path === "environment.wind.angleApparent") {
+        safePush(store.smoothBuf.awa, val, now);
+        safePush(store.longBuf.awa, val, now);
+    }
+    
+    // Buffer per HDG (Prua)
+    if (path === "navigation.headingTrue") {
+        safePush(store.smoothBuf.hdg, val, now);
+        safePush(store.longBuf.hdg, val, now);
+    }
+
+    // Buffer per COG (Rotta Fondo)
+    if (path === "navigation.courseOverGroundTrue") {
+        safePush(store.smoothBuf.cog, val, now);
+        safePush(store.longBuf.cog, val, now);
+    }
+
+    // --- 3. TRIGGER CALCOLO VENTO REALE (TWA/TWS/TWD) ---
+    const twPaths = [
+        "environment.wind.speedApparent",
+        "environment.wind.angleApparent",
+        "navigation.speedThroughWater",
+        "navigation.speedOverGround",
+        "navigation.headingTrue",
+        "navigation.courseOverGroundTrue"
+    ];
+
+    if (twPaths.includes(path)) {
+        twDirty = true;
+        // Calcolo limitato a 10Hz per non pesare sulla CPU
+        if (twDirty && (now - lastTWCompute > 100)) {
+            computeTrueWind();
+            lastTWCompute = now;
+            twDirty = false;
+        }
+    }
 }
 
 // ==========================================================================
@@ -312,8 +410,9 @@ function updateWindTrend() {
     
     // STRATEGIA (Bussola TWD): 1 min vs 30 minuti (tendenza meteo profonda)
     const twdNow = getCircularAverageFromBuffer(store.longBuf.twd, 60000, false);
-    const twdRef = getCircularAverageFromBuffer(store.longBuf.twd, 1800000, false); // 1.800.000 ms = 30 min
-    
+    const multiplier = isNavigating ? 1 : 2;
+    const strategicWindowMs = CONFIG.graphs.historyMinutes * 60000 * multiplier;
+    const twdRef = getCircularAverageFromBuffer(store.longBuf.twd, strategicWindowMs, false);
     if (!twaNow || !twaRef || !twdNow || !twdRef) return;
     const compassDots = { cw: document.getElementById('trend-dot-cw'), ccw: document.getElementById('trend-dot-ccw') };
     const gaugeDots = { cw: document.getElementById('trend-gauge-cw'), ccw: document.getElementById('trend-gauge-ccw') };
@@ -357,12 +456,41 @@ function updateWindTrend() {
         }
     } else { [gaugeDots.cw, gaugeDots.ccw].forEach(el => { if(el){ el.classList.remove('is-trending'); el.setAttribute('fill', '#bbb'); }}); }
 
-    // ALLARME STRAMBATA (GYBE)
-    const instTwa = radToDeg(store.raw["environment.wind.angleTrueWater"] || 0);
-    if (Math.abs(instTwa) > 155 && Math.sign(instTwa) !== Math.sign(lastInstantTwa)) {
-        if (isNavigating && (now - lastGybeAlarmTime > 5000)) { lastGybeAlarmTime = now; playGybeAlarm(); }
-    }
-    lastInstantTwa = instTwa;
+    // --- LOGICA ALLARME STRAMBATA (GYBE) FILTRATA ---
+        const instTwaRad = store.raw["environment.wind.angleTrueWater"];
+        
+        if (instTwaRad !== undefined) {
+            // Calcolo Alfa basato sulla Steering Precision (più precisione = filtro più lento e stabile)
+            const dynamicAlpha = Math.max(0.05, 1.1 - CONFIG.averaging.stabilityThreshold);
+
+            const currentSin = Math.sin(instTwaRad);
+            const currentCos = Math.cos(instTwaRad);
+
+            if (firstEmaRun) {
+                emaTwaSin = currentSin;
+                emaTwaCos = currentCos;
+                firstEmaRun = false;
+            } else {
+                // Media Esponenziale Vettoriale
+                emaTwaSin = (currentSin * dynamicAlpha) + (emaTwaSin * (1 - dynamicAlpha));
+                emaTwaCos = (currentCos * dynamicAlpha) + (emaTwaCos * (1 - dynamicAlpha));
+            }
+
+            // Angolo risultante filtrato
+            const smoothedTwaDeg = radToDeg(Math.atan2(emaTwaSin, emaTwaCos));
+
+            // Verifichiamo il cambio di mure (> 155° e inversione di segno confermata dal filtro)
+            if (Math.abs(smoothedTwaDeg) > 155) {
+                if (Math.sign(smoothedTwaDeg) !== Math.sign(lastInstantTwa) && lastInstantTwa !== null) {
+                    if (isNavigating && (now - lastGybeAlarmTime > 60000)) {
+                        lastGybeAlarmTime = now;
+                        playGybeAlarm();
+                        console.log(`⚠️ GYBE ALARM: TWA ${smoothedTwaDeg.toFixed(1)}°`);
+                    }
+                }
+            }
+            lastInstantTwa = smoothedTwaDeg;
+        }
 }
 
 // ==========================================================================
@@ -390,7 +518,7 @@ const upUI = (el, obj, instantRaw, isCompass = false) => {
     } else {
         let valDeg = Math.round(radToDeg(obj.val));
         let mainVal = (isCompass ? ((valDeg + 360) % 360).toString().padStart(3, '0') : valDeg) + "&deg;";
-        let dev = (obj.dev > 1 && obj.dev < 90) ? `<span style="font-size: 0.35em; opacity: 0.5; margin-left: 4px; vertical-align: middle;">&plusmn;${obj.dev}</span>` : "";
+        let dev = (obj.dev > 1 && obj.dev < 90) ? `<span style="font-size: 0.8em; opacity: 0.4; margin-left: 6px;">&plusmn;${obj.dev}</span>` : "";
         el.innerHTML = mainVal + dev;
         
         let diff = Math.abs((radToDeg(instantRaw) - radToDeg(obj.val) + 540) % 360 - 180);
@@ -512,30 +640,39 @@ function startDisplayLoop() {
             upUI(ui.twaAvg, twObj, store.raw["environment.wind.angleTrueWater"], false);
             upUI(ui.twdAvg, twdObj, store.raw["environment.wind.directionTrue"], true);
 
-            // --- LOGICA TACK STRATEGICA (Riflessione geometrica su TWD) ---
+            // --- LOGICA TACK STRATEGICA (VETTORIALE) ---
             if (hObj && twdObj) {
-                const tH = radToDeg((2 * twdObj.val - hObj.val + Math.PI * 2) % (Math.PI * 2));
-                const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout || twdObj.dev > CONFIG.averaging.stabilityBreakout;
+                // Funzione interna per riflettere un angolo rispetto all'asse del vento (TWD)
+                const reflectAngle = (targetRad, axisRad) => {
+                    const diffSin = Math.sin(axisRad - targetRad);
+                    const diffCos = Math.cos(axisRad - targetRad);
+                    return Math.atan2(Math.sin(axisRad) * diffCos + Math.cos(axisRad) * diffSin,
+                                      Math.cos(axisRad) * diffCos - Math.sin(axisRad) * diffSin);
+                };
+
+                const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout;
 
                 if (!isNavigating) {
-                    ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.remove('unstable-data');
+                    ui.tackHdg.innerHTML = "---&deg;";
                 } else if (unstableH) {
                     ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.add('unstable-data');
                 } else {
-                    ui.tackHdg.innerHTML = `${Math.round((tH + 360) % 360).toString().padStart(3, '0')}&deg;`;
+                    const reflectedH = reflectAngle(hObj.val, twdObj.val);
+                    const outH = (radToDeg(reflectedH) + 360) % 360;
+                    ui.tackHdg.innerHTML = `${Math.round(outH).toString().padStart(3, '0')}&deg;`;
                     ui.tackHdg.classList.remove('unstable-data');
                 }
 
                 if (cObj) {
-                    const tC = radToDeg((2 * twdObj.val - cObj.val + Math.PI * 2) % (Math.PI * 2));
-                    const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout || twdObj.dev > CONFIG.averaging.stabilityBreakout;
-                    
+                    const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout;
                     if (!isNavigating) {
-                        ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.remove('unstable-data');
+                        ui.tackCog.innerHTML = "---&deg;";
                     } else if (unstableC) {
                         ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.add('unstable-data');
                     } else {
-                        ui.tackCog.innerHTML = `${Math.round((tC + 360) % 360).toString().padStart(3, '0')}&deg;`;
+                        const reflectedC = reflectAngle(cObj.val, twdObj.val);
+                        const outC = (radToDeg(reflectedC) + 360) % 360;
+                        ui.tackCog.innerHTML = `${Math.round(outC).toString().padStart(3, '0')}&deg;`;
                         ui.tackCog.classList.remove('unstable-data');
                     }
                 }
@@ -691,10 +828,13 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
                  style="stroke: ${color}; stroke-width: ${strokeWidth}; stroke-linecap: round; shape-rendering: geometricPrecision;" />`;
                  
         if (i === 1) areaPath += `L ${x1} ${y1} `;
-        areaPath += `L ${x2} ${y2} `;
-    }
-    
-    areaPath += `L ${w} ${h} Z`;
+            areaPath += `L ${x2} ${y2} `;
+            
+            // Salviamo l'ultima coordinata X calcolata per chiudere correttamente il path
+            if (i === d.length - 1) {
+                areaPath += `L ${x2} ${h} Z`;
+            }
+        }
 
     // 4. Iniezione del Gradiente
     const gradId = `grad-${id}`;
@@ -775,7 +915,22 @@ function connect() {
     try {
         socket = new WebSocket(`ws://${addr}/signalk/v1/stream?subscribe=self`);
         socket.onopen = () => { ui.status.className = "online"; ui.status.innerText = "ONLINE"; reconnectDelay = 1000; };
-        socket.onmessage = (e) => { const d = JSON.parse(e.data); if (d.updates) d.updates.forEach(u => u.values && u.values.forEach(v => processIncomingData(v.path, v.value))); };
+        
+        socket.onmessage = (e) => {
+            const d = JSON.parse(e.data);
+            if (d.updates) {
+                d.updates.forEach(u => {
+                    // 1. Estraiamo il nome del sensore/sorgente (es. "yacht_device" o "Unknown")
+                    const sourceLabel = u.source ? (u.source.label || u.source.talker || "Unknown") : "Unknown";
+                    
+                    // 2. Passiamo il nome della sorgente come TERZO parametro
+                    if (u.values) {
+                        u.values.forEach(v => processIncomingData(v.path, v.value, sourceLabel));
+                    }
+                });
+            }
+        };
+
         socket.onclose = () => { if (!simulationMode) { ui.status.className = "offline"; ui.status.innerText = "RECONNECTING..."; setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); } };
     } catch (e) { setTimeout(connect, reconnectDelay); }
 }

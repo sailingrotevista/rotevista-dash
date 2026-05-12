@@ -122,6 +122,12 @@ body {
     .box-twd #twd-avg { font-size: clamp(1.4rem, 45cqh, 20cqw) !important; }
 }
 
+/* --- OTTIMIZZAZIONE SPECIFICA TWD PER EVITARE ANDATA A CAPO in landscape--- */
+.box-twd .value-large {
+    /* Riduciamo il limite di larghezza (18cqw) per far spazio al simbolo ± rimpicciolendo il testo se serve */
+    font-size: clamp(1.2rem, 55cqh, 18cqw) !important;
+}
+
 /* --- BOX TACK (Mure Opposte) --- */
 .box-tack .dual-value-container { display: flex; flex-direction: row; justify-content: space-between; align-items: center; width: 100%; height: 100%; }
 .box-tack .dual-value-col { display: flex; flex-direction: column; justify-content: center; }
