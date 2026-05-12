@@ -175,7 +175,7 @@ body.night-mode .alarm-danger {
 
 .focus-active .is-focused .sparkline path,
 .focus-active .is-focused .sparkline line {
-    stroke-width: 1.5px !important;
+    stroke-width: 1.5px !important; /* Un briciolo più spessa per la stabilità visiva su schermi grandi */
 }
 
 .focus-active.focus-side-left {
@@ -441,10 +441,11 @@ body.night-mode {
 
 /* --- 10.3 GRAFICI (STILE DINAMICO NIGHT MODE) --- */
 .night-mode .graph-wrapper {
-    background: rgba(10, 0, 0, 0.8) !important;
+    background: rgba(10, 0, 0, 0.8) !important; /* Sfondo scurissimo per alto contrasto */
     border: 1px solid #330000;
 }
 
+/* Griglia temporale (minuti e livelli): quasi impercettibile */
 .night-mode .sparkline line[stroke="rgba(0,0,0,0.12)"],
 .night-mode .sparkline line[stroke="rgba(0,0,0,0.08)"] {
     stroke: rgba(255, 0, 0, 0.1) !important; /* Griglia temporale rossa soffusa */

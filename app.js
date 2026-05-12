@@ -17,7 +17,7 @@ let CONFIG = {
         smoothWindow: 2000,
         longWindow: 30000,
         stabilityTolerance: 2000,
-        stabilityThreshold: 0.9,
+        stabilityThreshold: 0.95,
         minSpeed: 0,
         stabilityBreakout: 15
     },
@@ -120,6 +120,10 @@ function getShortestRotation(curr, target) {
  * Inserimento sicuro nel buffer con trigonometria precaricata e pruning automatico
  */
 function safePush(buffer, val, time) {
+    // --- PROTEZIONE ANTI-NaN (FONDAMENTALE ALL'AVVIO) ---
+    // Se il valore è nullo, non definito o non è un numero, ignoriamo l'inserimento
+    if (val === null || val === undefined || isNaN(val)) return;
+
     buffer.push({
         val: val,
         time: time,
@@ -139,63 +143,78 @@ function safePush(buffer, val, time) {
     if (buffer.length > 36000) buffer.shift();
 }
 
+/**
+ * Media Circolare Vettoriale - Versione "Soft Outlier Rejection"
+ * Riduce l'impatto degli sbalzi limitando il loro angolo massimo di discostamento.
+ */
 function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now) {
     now = now || Date.now();
-
     const len = bufferArray.length;
     if (len === 0) return null;
 
-    let sSin = 0;
-    let sCos = 0;
-    let count = 0;
+    let sSin = 0, sCos = 0, count = 0;
+    let newestTime = 0, oldestTime = 0;
 
-    let newestTime = 0;
-    let oldestTime = 0;
+    // 1. MEDIA PILOTA: Guardiamo l'ultima frazione di dati (es. max 15 campioni) per sapere dove punta "ora"
+    let pilotSin = 0, pilotCos = 0;
+    const pilotSamples = Math.min(len, 15);
+    for (let i = len - 1; i >= len - pilotSamples; i--) {
+        pilotSin += bufferArray[i].sin;
+        pilotCos += bufferArray[i].cos;
+    }
+    const pilotRad = Math.atan2(pilotSin, pilotCos);
 
+    // Il limite elastico in radianti (basato sul tuo stabilityBreakout in gradi)
+    const limitRad = (CONFIG.averaging.stabilityBreakout || 15) * (Math.PI / 180);
+
+    // 2. CALCOLO AMMORTIZZATO
     for (let i = len - 1; i >= 0; i--) {
         const item = bufferArray[i];
-
         if ((now - item.time) > windowMs) break;
 
-        sSin += item.sin;
-        sCos += item.cos;
+        // Troviamo la differenza angolare (da -Pi a +Pi) tra il dato e la Media Pilota
+        let diffRad = Math.atan2(
+            Math.sin(item.val - pilotRad),
+            Math.cos(item.val - pilotRad)
+        );
+
+        let finalSin, finalCos;
+
+        // Se lo scarto è maggiore del limite, "Pattiniamo" (Ammortizzazione)
+        if (Math.abs(diffRad) > limitRad) {
+            // Tronchiamo la differenza al limite massimo consentito (mantenendo il segno)
+            const clampedDiff = Math.sign(diffRad) * limitRad;
+            // Ricalcoliamo l'angolo ammortizzato
+            const clampedRad = pilotRad + clampedDiff;
+            
+            finalSin = Math.sin(clampedRad);
+            finalCos = Math.cos(clampedRad);
+        } else {
+            // Il dato è buono, usiamo i valori precalcolati
+            finalSin = item.sin;
+            finalCos = item.cos;
+        }
+
+        sSin += finalSin;
+        sCos += finalCos;
 
         if (count === 0) newestTime = item.time;
         oldestTime = item.time;
-
         count++;
     }
 
     if (count === 0) return null;
 
     const R = Math.hypot(sSin, sCos) / count;
-
     const avgRad = Math.atan2(sSin, sCos);
-
-    const finalVal = signed
-        ? avgRad
-        : (avgRad + Math.PI * 2) % (Math.PI * 2);
-
-    const historyDuration =
-        (count > 2)
-            ? (newestTime - oldestTime)
-            : 0;
-
-    const isStable =
-        historyDuration > 10000 &&
-        R > CONFIG.averaging.stabilityThreshold;
-
+    const finalVal = signed ? avgRad : (avgRad + Math.PI * 2) % (Math.PI * 2);
+    const historyDuration = (count > 2) ? (newestTime - oldestTime) : 0;
     const safeR = Math.max(R, 1e-9);
 
     return {
         val: finalVal,
-        stable: isStable,
-        dev: (R < 1)
-            ? Math.round(
-                Math.sqrt(-2 * Math.log(safeR)) *
-                (180 / Math.PI)
-            )
-            : 0,
+        stable: historyDuration > 10000 && R > CONFIG.averaging.stabilityThreshold,
+        dev: (R < 1) ? Math.round(Math.sqrt(-2 * Math.log(safeR)) * (180 / Math.PI)) : 0,
         samples: count
     };
 }
@@ -513,8 +532,9 @@ function refreshGraph(t) {
  * upUI: Aggiornamento valori digitali con logica anti-ritardo (Istantaneo vs Media)
  */
 const upUI = (el, obj, instantRaw, isCompass = false) => {
-    if (!obj || obj.val === null || instantRaw === undefined) {
-        el.innerHTML = "---&deg;"; el.classList.remove('unstable-data');
+    if (!obj || obj.val === null || isNaN(obj.val) || instantRaw === undefined) {
+            el.innerHTML = "---&deg;"; 
+            el.classList.remove('unstable-data');
     } else {
         let valDeg = Math.round(radToDeg(obj.val));
         let mainVal = (isCompass ? ((valDeg + 360) % 360).toString().padStart(3, '0') : valDeg) + "&deg;";
@@ -693,7 +713,7 @@ function startDisplayLoop() {
 // 8. CONFIGURAZIONE E GRAFICI UTILS
 // ==========================================================================
 /**
- * Recupera la configurazione e forza la sovrascrittura di ogni parametro.
+ * Recupera la configurazione dal server e applica migrazioni automatiche per le vecchie versioni
  */
 async function fetchServerConfig() {
     try {
@@ -704,19 +724,27 @@ async function fetchServerConfig() {
         // Stampa di debug per verificare cosa riceve il client
         console.log("🔍 Configurazione ricevuta dal Server:", data);
 
-        // Merge intelligente dei dati ricevuti nel CONFIG esistente
+        // Merge intelligente dei dati ricevuti
         Object.assign(CONFIG.alarms, data.alarms || {});
         Object.assign(CONFIG.graphs, data.graphs || {});
         Object.assign(CONFIG.averaging, data.averaging || {});
         
-        // Per le scale, siccome sono nidificate, facciamo un loop
+        // --- LOGICA DI MIGRAZIONE SILENZIOSA ---
+        // Se il valore ricevuto è il vecchio default (0.85) o inferiore, lo portiamo al nuovo standard 0.95.
+        // Questo è necessario perché con i nuovi filtri "Soft" lo 0.85 non farebbe quasi mai lampeggiare gli allarmi.
+        if (CONFIG.averaging.stabilityThreshold <= 0.85) {
+            CONFIG.averaging.stabilityThreshold = 0.95;
+            console.log("♻️ Migrazione Silenziosa: Rilevato vecchio parametro stabilità (<= 0.85). Aggiornato a 0.95 per ottimizzazione filtri.");
+        }
+
+        // Per le scale, siccome sono nidificate, facciamo un loop di merge profondo
         if (data.scales) {
             for (let key in data.scales) {
                 if (CONFIG.scales[key]) Object.assign(CONFIG.scales[key], data.scales[key]);
             }
         }
 
-        console.log("✅ Configurazione applicata. Alarmi attivi:", CONFIG.alarms);
+        console.log("✅ Configurazione applicata. Stabilità attiva:", CONFIG.averaging.stabilityThreshold);
     } catch (err) {
         console.warn("⚠️ Utilizzo default locali. Motivo:", err.message);
     }

@@ -127,10 +127,10 @@ module.exports = function (app) {
             default: 0.5
           },
           stabilityThreshold: {
-            type: 'number',
-            title: 'Steering Precision (Sensitivity)',
-            description: "Controls how strictly the system judges your course coherence. 0.95 requires pro precision; 0.85 is more realistic for cruising in waves.",
-            default: 0.85
+              type: 'number',
+              title: 'Steering Precision (Sensitivity)',
+              description: "How strictly the system judges data coherence (0.0 to 1.0). Due to internal smoothing, 0.97-0.98 requires racing precision; 0.93-0.95 is ideal for cruising in waves. Below this, the display rarely alerts for instability.",
+                default: 0.95 
           },
           stabilityBreakout: {
             type: 'number',

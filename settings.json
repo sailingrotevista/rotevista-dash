@@ -1,18 +1,18 @@
 {
   "alarms": {
     "depthDanger": 2.5,
-    "depthWarning": 5.0
+    "depthWarning": 3.5
   },
   "graphs": {
     "reef1": 15.0,
     "reef2": 20.0,
-    "historyMinutes": 5
+    "historyMinutes": 30
   },
   "averaging": {
     "longWindow": 30000,
     "smoothWindow": 2000,
     "minSpeed": 0.5,
-    "stabilityThreshold": 0.85,
+    "stabilityThreshold": 0.95,
     "stabilityBreakout": 15
   },
   "scales": {
