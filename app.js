@@ -17,11 +17,11 @@ let CONFIG = {
         smoothWindow: 2000,
         longWindow: 30000,
         stabilityTolerance: 2000,
-        stabilityThreshold: 0.95,
+        stabilityThreshold: 0.99,
         minSpeed: 0,
         stabilityBreakout: 15
     },
-    graphs: { reef1: 8, reef2: 10.0, historyMinutes: 30, samples: 60 },
+    graphs: { reef1: 10, reef2: 15, historyMinutes: 10, samples: 60 },
     scales: {
         stw: { stdMax: 8, hercSpan: 4, step: 2 },
         sog: { stdMax: 8, hercSpan: 4, step: 2 },
@@ -34,7 +34,7 @@ let CONFIG = {
 const RENDER_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 5000;
 const SIM_SAMPLE_INTERVAL = 1000;
-const DASH_VERSION = "2.4"; // Versione per la gestione della memoria locale
+const DASH_VERSION = "3.0"; // Versione della memoria locale
 const sourceLocks = {};
 
 
@@ -42,7 +42,8 @@ const sourceLocks = {};
 // 2. STATO GLOBALE E RIFERIMENTI UI
 // ==========================================================================
 let simulationMode = false;
-let displayModeSog = 'SOG'; // Può essere 'SOG' o 'VMG'
+let displayModeSog = 'SOG';
+let displayModeTws = 'TWS';
 let socket, renderInterval, simInterval;
 let lastAvgUIUpdate = 0, audioCtx = null, lastAlarmTime = 0;
 let curAwaRot = 0, curTwaRot = 0, curTrackRot = 0, curTwdRoseRot = 0;
@@ -73,10 +74,10 @@ const store = {
     timestamps: {},
     smoothBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
     longBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
-    histories: { stw: [], sog: [], depth: [], tws: [], vmg: [] },
+    histories: { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] },
     // Buffer temporaneo per il calcolo della media dell'intervallo del grafico
-    graphTempBuf: { stw: [], sog: [], depth: [], tws: [], vmg: [] },
-    lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0 }
+    graphTempBuf: { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] },
+    lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0 }
 };
 
 // Riferimenti agli elementi DOM mappati all'avvio
@@ -236,6 +237,7 @@ function saveDashboardState() {
             histories: store.histories,
             longBuf: store.longBuf,
             displayModeSog: displayModeSog,
+            displayModeTws: displayModeTws,
             graphModes: graphModes,
             isNightMode: document.body.classList.contains('night-mode'),
             isFocusActive: isFocusActive,
@@ -266,6 +268,13 @@ function loadDashboardState() {
                 displayModeSog = state.displayModeSog;
                 const labelEl = document.getElementById('sog-vmg-label');
                 if (labelEl) labelEl.textContent = displayModeSog;
+            }
+            
+            // Ripristino TWS/AWS ---
+            if (state.displayModeTws) {
+                displayModeTws = state.displayModeTws;
+                const labelEl = document.getElementById('tws-aws-label');
+                if (labelEl) labelEl.textContent = displayModeTws;
             }
 
             // Ripristino Tema Notte
@@ -515,17 +524,52 @@ function updateWindTrend() {
 // ==========================================================================
 // 7. RENDERING ENGINE E AGGIORNAMENTO UI
 // ==========================================================================
+/**
+ * refreshGraph: Recupera i dati corretti dallo store e coordina il disegno del grafico.
+ * Gestisce lo switch tra TWS/AWS e la mappatura VMG -> SOG.
+ *
+ * @param {string} t - Il tipo di dato da aggiornare ('stw', 'sog', 'depth', 'tws', 'vmg')
+ */
 function refreshGraph(t) {
-    const type = (t === 'vmg') ? 'sog' : t;
-    const data = store.histories[t]; if (!data || data.length < 2) return;
-    const mode = graphModes[type], cfg = calculateScale(type, data, mode);
+    // 1. Mappatura del box UI: il VMG condivide il riquadro fisico del SOG
+    const boxType = (t === 'vmg') ? 'sog' : t;
+
+    // 2. Selezione della sorgente dati corretta
+    let data;
+    if (t === 'tws' && displayModeTws === 'AWS') {
+        // Se siamo nel box vento e la modalità è AWS, carichiamo la storia dell'apparente
+        data = store.histories['aws'];
+    } else {
+        // Altrimenti carichiamo la storia standard (TWS, STW, SOG, Depth, VMG)
+        data = store.histories[t];
+    }
+
+    // 3. Controllo integrità: se non ci sono dati sufficienti, non disegniamo nulla
+    if (!data || data.length < 2) return;
+
+    // 4. Configurazione Scala: recupera la modalità (standard/hercules) e calcola min/max
+    const mode = graphModes[boxType];
+    const cfg = calculateScale(boxType, data, mode);
     
-    // Gestione visualizzazione Hercules Zoom (sfondo rosso)
-    const box = document.querySelector(`.box-${type}`);
-    if (box) box.classList.toggle('box-hercules', mode === 'hercules');
+    // 5. Aggiornamento estetico del Box: aggiunge lo sfondo speciale se in modalità Hercules
+    const box = document.querySelector(`.box-${boxType}`);
+    if (box) {
+        box.classList.toggle('box-hercules', mode === 'hercules');
+    }
     
-    updateScaleLabels(type, cfg.min, cfg.max);
-    drawGraph(data, type + '-graph', cfg.min, cfg.max, t === 'tws', mode === 'hercules');
+    // 6. Aggiornamento etichette numeriche della scala (Y-axis)
+    updateScaleLabels(boxType, cfg.min, cfg.max);
+
+    // 7. Render finale del grafico SVG
+    // Il parametro 't === tws' indica a drawGraph di attivare la logica dei colori Reef (Rosso/Arancio)
+    drawGraph(
+        data,
+        boxType + '-graph',
+        cfg.min,
+        cfg.max,
+        t === 'tws',
+        mode === 'hercules'
+    );
 }
 
 /**
@@ -550,103 +594,169 @@ const upUI = (el, obj, instantRaw, isCompass = false) => {
 
 /**
  * Loop principale di aggiornamento interfaccia (1Hz)
- */
-/**
- * Loop principale di aggiornamento interfaccia (1Hz)
  * Gestisce la gerarchia di aggiornamento Live (1s), Heavy (2s) e Slow (3s).
  */
 function startDisplayLoop() {
     renderInterval = setInterval(() => {
         const now = Date.now();
+        const isNight = document.body.classList.contains('night-mode');
+        
+        // Conversione velocità da m/s a Nodi
         const stwKts = msToKts(store.raw["navigation.speedThroughWater"] || 0);
         const sogKts = msToKts(store.raw["navigation.speedOverGround"] || 0);
         
-        // Verifica stato navigazione basato su soglia impostata
+        // Verifica stato navigazione basato su soglia impostata (minSpeed)
         isNavigating = stwKts > CONFIG.averaging.minSpeed || sogKts > CONFIG.averaging.minSpeed;
 
         // --- TIER LIVE (1s): CONTROLLO TIMEOUT DATI ---
-        const watch = { "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog, "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog, "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth, "environment.wind.speedTrue": ui.tws };
+        // Se un dato non arriva da più di 5 secondi, mostra i trattini
+        const watch = {
+            "navigation.speedThroughWater": ui.stw,
+            "navigation.speedOverGround": ui.sog,
+            "navigation.headingTrue": ui.hdg,
+            "navigation.courseOverGroundTrue": ui.cog,
+            "environment.wind.speedApparent": ui.awsSvg,
+            "environment.depth.belowTransducer": ui.depth,
+            "environment.wind.speedTrue": ui.tws
+        };
         for (let p in watch) {
             if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) {
                 watch[p].innerText = "---"; delete store.raw[p];
             }
         }
 
-        // --- AGGIORNAMENTO DATI ISTANTANEI ---
+        // --- AGGIORNAMENTO VELOCITÀ SULL'ACQUA (STW) ---
         if (store.raw["navigation.speedThroughWater"] !== undefined) {
-            ui.stw.innerText = stwKts.toFixed(1); manageHistory('stw', stwKts);
+            ui.stw.innerText = stwKts.toFixed(1);
+            // Colore neutro (ereditato dal tema) perché non ha switch di modalità
+            ui.stw.style.color = "";
+            manageHistory('stw', stwKts);
         }
         
-        // --- LOGICA SOG / VMG E COLORI DINAMICI ---
+        // --- LOGICA SOG / VMG (COLORI DINAMICI E FILTRO NAVIGAZIONE) ---
         if (store.raw["navigation.speedOverGround"] !== undefined) {
+            // Calcolo VMG istantanea per il display numerico
             const vmg = Math.abs(stwKts * Math.cos(store.raw["environment.wind.angleTrueWater"] || 0));
-            manageHistory('vmg', vmg); manageHistory('sog', sogKts);
+            
+            // Registriamo i dati nelle storie (per i grafici)
+            manageHistory('vmg', vmg);
+            manageHistory('sog', sogKts);
             
             const labelEl = document.getElementById('sog-vmg-label');
+            
             if (displayModeSog === 'VMG') {
+                // MODALITÀ VMG: Mostra valore istantaneo, colore Cyan fisso per identificare la modalità
                 ui.sog.innerText = vmg.toFixed(1);
-                // AGGIORNATO AL NUOVO COLORE CYAN VIBRANTE (#00b8d4)
                 ui.sog.style.setProperty('color', '#00b8d4', 'important');
                 if (labelEl) labelEl.textContent = 'VMG';
             } else {
+                // MODALITÀ SOG: Mostra valore istantaneo
                 ui.sog.innerText = sogKts.toFixed(1);
                 if (labelEl) labelEl.textContent = 'SOG';
                 
-                // Colore Corrente: Giallo Caldo per corrente a favore, Rosso per corrente contraria
-                // (Allineiamo il colore della corrente a favore con il #ffbb33 usato nei grafici)
-                if (sogKts - stwKts > 0.3) ui.sog.style.setProperty('color', '#ffbb33', 'important');
-                else if (sogKts - stwKts < -0.3) ui.sog.style.setProperty('color', '#ff3b30', 'important'); // Rosso vivido
-                else ui.sog.style.color = ""; // Torna normale
+                // --- LOGICA COLORE DINAMICO (Solo se in navigazione reale) ---
+                if (isNavigating) {
+                    // Usiamo la media dell'ultimo punto del grafico per stabilizzare il colore (anti-onda)
+                    const lastAvgSog = store.histories.sog.length > 0 ? store.histories.sog[store.histories.sog.length - 1] : sogKts;
+                    const lastAvgStw = store.histories.stw.length > 0 ? store.histories.stw[store.histories.stw.length - 1] : stwKts;
+                    const deltaCurrent = lastAvgSog - lastAvgStw;
+
+                    if (deltaCurrent < -0.3) {
+                        // CORRENTE CONTRO: Rosso Vivido
+                        ui.sog.style.setProperty('color', '#ff3b30', 'important');
+                    } else if (deltaCurrent > 0.3) {
+                        // CORRENTE A FAVORE: Verde Neon (Feedback Positivo)
+                        ui.sog.style.setProperty('color', '#00C851', 'important');
+                    } else {
+                        // NEUTRO: Amber (Colore base della linea SOG)
+                        ui.sog.style.setProperty('color', '#ffbb33', 'important');
+                    }
+                } else {
+                    // NON IN NAVIGAZIONE: Riportiamo il colore al default neutro
+                    ui.sog.style.color = "";
+                }
             }
         }
 
+        // --- AGGIORNAMENTO PROFONDITÀ (DEPTH) ---
         if (store.raw["environment.depth.belowTransducer"] !== undefined) {
             ui.depth.innerText = store.raw["environment.depth.belowTransducer"].toFixed(1);
+            // Il colore neutro/allarme è gestito internamente dalla funzione checkDepthAlarm
             checkDepthAlarm(store.raw["environment.depth.belowTransducer"]);
             manageHistory('depth', store.raw["environment.depth.belowTransducer"]);
         }
 
-        if (store.raw["environment.wind.speedTrue"] !== undefined) {
-            const twsKts = msToKts(store.raw["environment.wind.speedTrue"]);
-            ui.tws.innerText = twsKts.toFixed(1);
-            
-            // Colore Reef: se normale usiamo "", il CSS metterà Nero (giorno) o Rosso (notte)
-            if (twsKts >= CONFIG.graphs.reef2) ui.tws.style.setProperty('color', '#e74c3c', 'important');
-            else if (twsKts >= CONFIG.graphs.reef1) ui.tws.style.setProperty('color', '#e67e22', 'important');
-            else ui.tws.style.color = "";
+        // --- GESTIONE VENTO (TWS / AWS SWITCH CON COLORI COORDINATI) ---
+        const twsKts = store.raw["environment.wind.speedTrue"] ? msToKts(store.raw["environment.wind.speedTrue"]) : 0;
+        const awsKts = store.raw["environment.wind.speedApparent"] ? msToKts(store.raw["environment.wind.speedApparent"]) : 0;
+        
+        // Registriamo sempre entrambe le storie per permettere lo switch fluido dei grafici
+        if (store.raw["environment.wind.speedTrue"] !== undefined) manageHistory('tws', twsKts);
+        if (store.raw["environment.wind.speedApparent"] !== undefined) manageHistory('aws', awsKts);
 
-            manageHistory('tws', twsKts);
+        if (store.raw["environment.wind.speedTrue"] !== undefined || store.raw["environment.wind.speedApparent"] !== undefined) {
+            const labelEl = document.getElementById('tws-aws-label');
+            const currentWindValue = (displayModeTws === 'AWS') ? awsKts : twsKts;
+            
+            ui.tws.innerText = currentWindValue.toFixed(1);
+            if (labelEl) labelEl.textContent = displayModeTws;
+
+            // Logica Colore Testo Vento (Priorità ai Reef, poi colore di base modalità)
+            if (currentWindValue >= CONFIG.graphs.reef2) {
+                ui.tws.style.setProperty('color', '#ff3b30', 'important'); // Rosso Reef 2
+            } else if (currentWindValue >= CONFIG.graphs.reef1) {
+                ui.tws.style.setProperty('color', '#ff9800', 'important'); // Arancio Reef 1
+            } else {
+                // Colore di base differenziato per modalità (Indaco per AWS, Navy per TWS)
+                if (displayModeTws === 'AWS') {
+                    ui.tws.style.setProperty('color', '#5c6bc0', 'important'); // Indigo
+                } else {
+                    // Per il TWS, schiariamo il Navy in modalità notte per renderlo leggibile
+                    const twsColor = isNight ? '#6c8ea0' : '#2c3e50';
+                    ui.tws.style.setProperty('color', twsColor, 'important');
+                }
+            }
         }
 
+        // --- AGGIORNAMENTO NUMERO AWS CENTRALE (Bussola) ---
         if (store.raw["environment.wind.speedApparent"] !== undefined) {
-            ui.awsSvg.textContent = msToKts(store.raw["environment.wind.speedApparent"]).toFixed(1);
+            const awsVal = msToKts(store.raw["environment.wind.speedApparent"]);
+            ui.awsSvg.textContent = awsVal.toFixed(1);
         }
 
         // --- PUNTATORI ANALOGICI (Smoothing 2s) ---
         const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, 2000, true);
         const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, 2000, true);
-        if (smAwa) { curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val)); ui.awa.setAttribute('transform', `rotate(${curAwaRot}, 200, 200)`); }
-        if (smTwa) { curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val)); ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`); }
+        if (smAwa) {
+            curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val));
+            ui.awa.setAttribute('transform', `rotate(${curAwaRot}, 200, 200)`);
+        }
+        if (smTwa) {
+            curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val));
+            ui.twa.setAttribute('transform', `rotate(${curTwaRot}, 200, 200)`);
+        }
         
         // --- CALCOLO LEEWAY E TRACK POINTER ---
         if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
             let driftDeg = radToDeg((store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (Math.PI * 2) - Math.PI);
-            // Azzeramento sotto soglia minima impostata
+            // Filtraggio scarroccio: azzeramento se barca ferma, altrimenti smoothing
             smoothedLeeway = (sogKts < CONFIG.averaging.minSpeed) ? 0 : (smoothedLeeway * 0.9) + (driftDeg * 0.1);
-            curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway); ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
-            ui.leewayVal.style.color = (Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7) ? "#e67e22" : "";
+            curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway);
+            ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
+            ui.leewayVal.style.color = (Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7) ? "#ff9800" : "";
             updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
         }
         
+        // Aggiorna i trend meteo/tattici (pallini) e l'allarme strambata
         updateWindTrend();
 
-        // TIER HEAVY (2s) - Grafici e Persistenza Browser
+        // TIER HEAVY (2s) - Aggiornamento Grafici e Salvataggio Stato
         if (lastAvgUIUpdate++ % 2 === 0) {
             ['stw', 'sog', 'depth', 'tws'].forEach(refreshGraph);
             saveDashboardState();
         }
 
-        // TIER SLOW (3s) - Medie Lunghe e Calcolo TACK
+        // TIER SLOW (3s) - Calcolo Medie Lunghe e Tack Strategico
         if (lastAvgUIUpdate % 3 === 0) {
             let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false);
             let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false);
@@ -654,6 +764,7 @@ function startDisplayLoop() {
             let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true);
             let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false);
 
+            // Aggiornamento interfaccia per i valori mediati (Heading, Cog, Awa, Twa, Twd)
             upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
             upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
             upUI(ui.awaAvg, awObj, store.raw["environment.wind.angleApparent"], false);
@@ -662,27 +773,25 @@ function startDisplayLoop() {
 
             // --- LOGICA TACK STRATEGICA (VETTORIALE) ---
             if (hObj && twdObj) {
-                // Funzione interna per riflettere un angolo rispetto all'asse del vento (TWD)
                 const reflectAngle = (targetRad, axisRad) => {
-                    const diffSin = Math.sin(axisRad - targetRad);
-                    const diffCos = Math.cos(axisRad - targetRad);
-                    return Math.atan2(Math.sin(axisRad) * diffCos + Math.cos(axisRad) * diffSin,
-                                      Math.cos(axisRad) * diffCos - Math.sin(axisRad) * diffSin);
+                    const dS = Math.sin(axisRad - targetRad);
+                    const dC = Math.cos(axisRad - targetRad);
+                    return Math.atan2(Math.sin(axisRad) * dC + Math.cos(axisRad) * dS,
+                                      Math.cos(axisRad) * dC - Math.sin(axisRad) * dS);
                 };
-
+                
                 const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout;
-
+                
                 if (!isNavigating) {
                     ui.tackHdg.innerHTML = "---&deg;";
                 } else if (unstableH) {
                     ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.add('unstable-data');
                 } else {
-                    const reflectedH = reflectAngle(hObj.val, twdObj.val);
-                    const outH = (radToDeg(reflectedH) + 360) % 360;
-                    ui.tackHdg.innerHTML = `${Math.round(outH).toString().padStart(3, '0')}&deg;`;
+                    const rH = (radToDeg(reflectAngle(hObj.val, twdObj.val)) + 360) % 360;
+                    ui.tackHdg.innerHTML = `${Math.round(rH).toString().padStart(3, '0')}&deg;`;
                     ui.tackHdg.classList.remove('unstable-data');
                 }
-
+                
                 if (cObj) {
                     const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout;
                     if (!isNavigating) {
@@ -690,20 +799,21 @@ function startDisplayLoop() {
                     } else if (unstableC) {
                         ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.add('unstable-data');
                     } else {
-                        const reflectedC = reflectAngle(cObj.val, twdObj.val);
-                        const outC = (radToDeg(reflectedC) + 360) % 360;
-                        ui.tackCog.innerHTML = `${Math.round(outC).toString().padStart(3, '0')}&deg;`;
+                        const rC = (radToDeg(reflectAngle(cObj.val, twdObj.val)) + 360) % 360;
+                        ui.tackCog.innerHTML = `${Math.round(rC).toString().padStart(3, '0')}&deg;`;
                         ui.tackCog.classList.remove('unstable-data');
                     }
                 }
             }
             
-            // Rotazione Mini-Bussole
+            // Rotazione Mini-Icone nella bussola TWD (Mini-Bussole)
             const smHdgIcons = getCircularAverageFromBuffer(store.smoothBuf.hdg, 2000, false);
             const smTwdIcons = getCircularAverageFromBuffer(store.smoothBuf.twd, 2000, false);
             if (smHdgIcons && smTwdIcons) {
-                curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(smTwdIcons.val)); ui.twdArrow.setAttribute('transform', `rotate(${curWindCompassRot}, 20, 20)`);
-                curBoatCompassRot = getShortestRotation(curBoatCompassRot, radToDeg(smHdgIcons.val)); ui.twdBoat.setAttribute('transform', `rotate(${curBoatCompassRot}, 20, 20)`);
+                curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(smTwdIcons.val));
+                ui.twdArrow.setAttribute('transform', `rotate(${curWindCompassRot}, 20, 20)`);
+                curBoatCompassRot = getShortestRotation(curBoatCompassRot, radToDeg(smHdgIcons.val));
+                ui.twdBoat.setAttribute('transform', `rotate(${curBoatCompassRot}, 20, 20)`);
             }
         }
     }, RENDER_INTERVAL_MS);
@@ -778,133 +888,269 @@ function updateScaleLabels(t, min, max) {
 }
 
 /**
- * drawGraph: Disegna i grafici con griglia temporale intelligente
- * Usa un Gradiente Lineare SVG dinamico per eliminare le giunzioni dei poligoni.
+ * ==========================================================================
+ * drawGraph: Motore di Rendering SVG "Tactical Precision" (Integrale)
+ * ==========================================================================
+ * Caratteristiche:
+ * - Linea dinamica: 1.0px (base) / 1.5px (allerta).
+ * - Area segmentata: colore preciso sotto i picchi (0.15 / 0.45 / 0.85).
+ * - Fix Colore Bleeding: Usa 'userSpaceOnUse' per mantenere i colori al loro posto.
+ * - Fix Diagonale: Chiusura verticale sull'ultimo punto reale.
+ * - Palette Vivid Glass: Colori distinti per ogni modalità.
  */
 /**
- * drawGraph: Disegna i grafici con griglia temporale intelligente
- * Versione bilanciata: 1.5px per allarmi critici, 1px per il resto.
+ * ==========================================================================
+ * drawGraph: Motore di Rendering Grafico SVG "Tactical Glass" (Versione Pro)
+ * ==========================================================================
+ * Questa funzione trasforma un array di dati in una sparkline SVG dinamica.
+ *
+ * Caratteristiche principali:
+ * 1. LINEA CHIRURGICA: Mantiene uno spessore di 1px costante per un look tecnico.
+ * 2. AREA DINAMICA: L'area sottesa cambia colore solo sotto i picchi di allerta.
+ * 3. ZERO ARTEFATTI:
+ *    - Usa LinearGradients con 'userSpaceOnUse' per evitare trascinamenti di colore.
+ *    - Elimina le righe verticali di giunzione tra i segmenti.
+ *    - Chiude il tracciato verticalmente eliminando la "coda" diagonale finale.
+ * 4. MULTI-MODALITÀ: Gestisce switch AWS/TWS, SOG/VMG e allarmi Profondità.
  */
 function drawGraph(d, id, min, max, isTws, isHercules) {
     const svg = document.getElementById(id);
+    
+    // Uscita di sicurezza se l'elemento non esiste o non ci sono abbastanza dati
     if (!svg || d.length < 2) return;
 
-    const w = 200, h = 40;
-    const range = max - min || 1;
-    const isDepth = (id === 'depth-graph');
-    const samples = CONFIG.graphs.samples;
+    // --- 1. CONFIGURAZIONE GEOMETRICA E SCALA ---
+    const w = 200; // Larghezza fissa del box grafico
+    const h = 40;  // Altezza fissa del box grafico
+    const range = max - min || 1; // Range dei valori per il calcolo dell'altezza Y
+    const isDepth = (id === 'depth-graph'); // Flag specifico per il box profondità
+    const samples = CONFIG.graphs.samples;  // Numero di campioni previsti (asse X)
 
-    // 1. Griglia (Sottile 0.5px)
+    // --- 2. DEFINIZIONE TAVOLOZZA COLORI "VIVID GLASS" ---
+    // Colori di Allerta
+    const colDanger  = "#ff3b30"; // Rosso Vivido (Apple/Alert style)
+    const colWarning = "#ff9800"; // Arancio Fluo (High visibility)
+    
+    // Colori Base (Sotto le soglie di allarme)
+    const colTws     = "#2c3e50"; // Navy Slate (Vento Reale)
+    const colAws     = "#5c6bc0"; // Electric Indigo (Vento Apparente)
+    const colDepth   = "#0088cc"; // Ocean Blue (Profondità)
+    const colStw     = "#00C851"; // Emerald Neon (Velocità Acqua)
+    const colSog     = "#ffbb33"; // Amber (Velocità Fondo)
+    const colVmg     = "#00b8d4"; // Cyan Vibrant (VMG)
+
+    /**
+     * getColorProps: Funzione interna per determinare lo stile di ogni punto.
+     * Restituisce un oggetto con {colore, opacità area, spessore linea}.
+     */
+    const getColorProps = (val) => {
+        // Inizializziamo con i valori di default (Dati Normali)
+        let color = colTws;
+        let opacity = "0.15";
+        let stroke = "1"; // Spessore fisso a 1px richiesto
+
+        // A. LOGICA PER IL VENTO (TWS o AWS)
+        if (isTws) {
+            // Scegliamo il colore di base a seconda se stiamo guardando Reale o Apparente
+            const baseWind = (displayModeTws === 'AWS') ? colAws : colTws;
+            
+            if (val >= CONFIG.graphs.reef2) {
+                color = colDanger; opacity = "0.55"; // Zona Pericolo
+            } else if (val >= CONFIG.graphs.reef1) {
+                color = colWarning; opacity = "0.45"; // Zona Attenzione
+            } else {
+                color = baseWind; // Zona Sicura
+            }
+        }
+        // B. LOGICA PER LA PROFONDITÀ (Inversa: allerta se il valore scende)
+        else if (isDepth) {
+            if (val < CONFIG.alarms.depthDanger) {
+                color = colDanger; opacity = "0.55";
+            } else if (val < CONFIG.alarms.depthWarning) {
+                color = colWarning; opacity = "0.45";
+            } else {
+                color = colDepth;
+            }
+        }
+        // C. LOGICA PER LE VELOCITÀ (STW, SOG, VMG)
+        else {
+            if (id === 'stw-graph') {
+                color = colStw;
+            } else if (id === 'sog-graph') {
+                // Il box SOG cambia colore se l'utente switcha in modalità VMG
+                color = (displayModeSog === 'VMG') ? colVmg : colSog;
+            }
+        }
+        return { color, opacity, stroke };
+    };
+
+    // --- 3. COSTRUZIONE DELLE GRIGLIE DI RIFERIMENTO ---
     let grids = "";
+    // Linee orizzontali di livello (25%, 50%, 75%)
     [0.25, 0.5, 0.75].forEach(p => {
         grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`;
     });
+    // Linee verticali temporali (dinamiche in base alla storia impostata)
     const gridInterval = (CONFIG.graphs.historyMinutes <= 15) ? 1 : 5;
     for (let m = gridInterval; m < CONFIG.graphs.historyMinutes; m += gridInterval) {
         const x = w - (m / CONFIG.graphs.historyMinutes) * w;
         grids += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="rgba(0,0,0,0.08)" stroke-width="0.5" />`;
     }
 
-    // 2. Tavolozza Colori Vividi
-    const baseColorTws = "#2c3e50";
-    const baseColorDepth = "#0088cc";
-
-    const getColor = (val) => {
-        if (isTws) return (val >= CONFIG.graphs.reef2) ? "#ff3b30" : (val >= CONFIG.graphs.reef1 ? "#ff9800" : baseColorTws);
-        if (isDepth) return (val < CONFIG.alarms.depthDanger) ? "#ff3b30" : (val < CONFIG.alarms.depthWarning ? "#ff9800" : baseColorDepth);
-        switch(id) {
-            case 'stw-graph': return "#00C851";
-            case 'sog-graph': return (displayModeSog === 'VMG') ? "#00b8d4" : "#ffbb33";
-            default: return baseColorTws;
-        }
-    };
-
-    // 3. Creazione Gradiente e Linee
-    let gradientStops = "";
-    let lines = "";
-    let areaPath = `M 0 ${h} `;
+    // --- 4. CICLO DI ELABORAZIONE DEI DATI ---
+    let gradientStops = ""; // Contiene i cambi di colore per l'area
+    let lines = "";         // Contiene i segmenti della linea superiore
+    let areaPath = `M 0 ${h} `; // Inizio del path del riempimento dal fondo sinistro
 
     for (let i = 1; i < d.length; i++) {
-        const percentPrev = ((i - 1) / (samples - 1)) * 100;
-        const percentCurr = (i / (samples - 1)) * 100;
-
+        // Calcolo delle posizioni percentuali (per il gradiente) e pixel (per il disegno)
+        const p1 = ((i - 1) / (samples - 1)) * 100;
+        const p2 = (i / (samples - 1)) * 100;
         const x1 = ((i - 1) / (samples - 1)) * w;
         const y1 = h - (Math.max(0, Math.min(1, (d[i - 1] - min) / range)) * h);
         const x2 = (i / (samples - 1)) * w;
         const y2 = h - (Math.max(0, Math.min(1, (d[i] - min) / range)) * h);
         
-        const color = getColor(d[i]);
-        
-        // Logica Opacità e Spessore (Tua configurazione)
-        let fillOpacity = "0.15";
-        let strokeWidth = "1";
+        // Otteniamo lo stile per questo specifico segmento
+        const props = getColorProps(d[i]);
 
-        if (color === "#ff3b30") {
-            fillOpacity = "0.85"; // Rosso: Molto visibile
-            strokeWidth = "1.5";  // Rosso: Più marcato
-        } else if (color === "#ff9800") {
-            fillOpacity = "0.45"; // Arancio: Velo medio
-            strokeWidth = "1";    // Arancio: Sottile
-        }
+        // AGGIUNTA STOP AL GRADIENTE:
+        // Usiamo due stop identici alla stessa percentuale per creare stacchi di colore netti,
+        // evitando sfumature tra una zona sicura e una di allarme.
+        gradientStops += `<stop offset="${p1}%" stop-color="${props.color}" stop-opacity="${props.opacity}" />`;
+        gradientStops += `<stop offset="${p2}%" stop-color="${props.color}" stop-opacity="${props.opacity}" />`;
 
-        // Costruzione Gradiente (stacchi netti tra i colori)
-        gradientStops += `<stop offset="${percentPrev}%" stop-color="${color}" stop-opacity="${fillOpacity}" />`;
-        gradientStops += `<stop offset="${percentCurr}%" stop-color="${color}" stop-opacity="${fillOpacity}" />`;
-
-        // Disegno Linea con precisione geometrica
+        // DISEGNO DELLA LINEA SUPERIORE:
+        // Usiamo linee individuali per poter gestire spessori e colori diversi (se necessario in futuro)
         lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" 
-                 style="stroke: ${color}; stroke-width: ${strokeWidth}; stroke-linecap: round; shape-rendering: geometricPrecision;" />`;
+                 style="stroke: ${props.color}; stroke-width: ${props.stroke}; stroke-linecap: round; shape-rendering: geometricPrecision;" />`;
                  
-        if (i === 1) areaPath += `L ${x1} ${y1} `;
-            areaPath += `L ${x2} ${y2} `;
-            
-            // Salviamo l'ultima coordinata X calcolata per chiudere correttamente il path
-            if (i === d.length - 1) {
-                areaPath += `L ${x2} ${h} Z`;
-            }
+        // AGGIORNAMENTO DEL PATH DELL'AREA:
+        if (i === 1) areaPath += `L ${x1} ${y1} `; // Primo collegamento con la base
+        areaPath += `L ${x2} ${y2} `; // Tracciato dei picchi
+        
+        // --- FIX ARTEFATTO DIAGONALE FINALE ---
+        // Se siamo arrivati all'ultimo dato disponibile nel buffer, chiudiamo il path
+        // scendendo verticalmente verso l'asse zero (h), poi chiudiamo con 'Z'.
+        if (i === d.length - 1) {
+            areaPath += `L ${x2} ${h} Z`;
         }
+    }
 
-    // 4. Iniezione del Gradiente
-    const gradId = `grad-${id}`;
+    // --- 5. CREAZIONE DEL GRADIENTE LINEARE DINAMICO ---
+    const gradId = `grad-${id}`; // ID unico basato sul box (es: grad-tws-graph)
+    
+    /**
+     * IMPORTANTE: gradientUnits="userSpaceOnUse" fissa il gradiente alle coordinate
+     * assolute (0-200px). Questo impedisce al colore di allarme di "allungarsi"
+     * erroneamente se il grafico è solo a metà schermo.
+     */
     const defs = `
         <defs>
-            <linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="0%">
+            <linearGradient id="${gradId}" x1="0" y1="0" x2="${w}" y2="0" gradientUnits="userSpaceOnUse">
                 ${gradientStops}
             </linearGradient>
         </defs>
     `;
 
-    // 5. Render Finale
-    if (isTws || isDepth) {
-        svg.innerHTML = `${defs}${grids}<path d="${areaPath}" fill="url(#${gradId})" stroke="none" />${lines}`;
-    } else {
-        // Per STW/SOG usiamo il colore dell'ultimo punto con area fissa 0.15
-        const currentPathColor = getColor(d[d.length - 1]);
-        svg.innerHTML = `${grids}<path d="${areaPath}" fill="${currentPathColor}" fill-opacity="0.15" stroke="none" />${lines}`;
-    }
+    // --- 6. AGGIORNAMENTO FINALE DEL DOM ---
+    // Inseriamo tutto nell'elemento SVG: Defs (Gradienti) -> Griglie -> Area (Fill) -> Linee (Stroke)
+    svg.innerHTML = `${defs}${grids}<path d="${areaPath}" fill="url(#${gradId})" stroke="none" />${lines}`;
 }
 
 // ==========================================================================
 // 9. INTERAZIONI E GESTI
 // ==========================================================================
+/**
+ * toggleFocusMode: Gestisce l'attivazione della modalità Split-Screen (Focus).
+ * Ingrandisce un box specifico e mantiene visibile la bussola centrale.
+ */
 function toggleFocusMode(type, element) {
     const container = document.querySelector('.main-container');
+    
+    // Identifica se il box appartiene alla colonna sinistra (per il layout CSS)
     const isLeft = ['stw', 'sog', 'hdg', 'cog', 'tack'].includes(type);
+    
+    // Inverte lo stato del Focus
     isFocusActive = !isFocusActive;
-    if (isFocusActive) { container.classList.add('focus-active', isLeft ? 'focus-side-left' : 'focus-side-right'); element.classList.add('is-focused'); }
-    else { container.classList.remove('focus-active', 'focus-side-left', 'focus-side-right'); document.querySelectorAll('.data-box').forEach(b => b.classList.remove('is-focused')); }
+
+    if (isFocusActive) {
+        // Applica le classi per dividere lo schermo e mettere in risalto il box
+        container.classList.add('focus-active', isLeft ? 'focus-side-left' : 'focus-side-right');
+        element.classList.add('is-focused');
+    } else {
+        // Rimuove tutte le classi di focus e torna alla griglia standard
+        container.classList.remove('focus-active', 'focus-side-left', 'focus-side-right');
+        document.querySelectorAll('.data-box').forEach(b => b.classList.remove('is-focused'));
+    }
 }
 
+/**
+ * Inizializzazione Gesti e Interazioni sui box con grafico.
+ * Gestisce: Singolo Tap (Switch), Doppio Tap (Zoom), Long Press (Focus).
+ */
 ['stw', 'sog', 'tws', 'depth'].forEach(type => {
     const el = document.getElementById(type + '-graph').closest('.data-box');
     let lastTapTime = 0, tapTimeout, isLongPressActive = false;
-    el.addEventListener('pointerdown', (e) => { isLongPressActive = false; pressTimer = setTimeout(() => { if (!isFocusActive) { isLongPressActive = true; toggleFocusMode(type, el); lastTapTime = 0; } }, 1000); });
-    el.addEventListener('pointerup', (e) => {
-        clearTimeout(pressTimer); if (isLongPressActive) return;
-        const currentTime = new Date().getTime(), tapDelay = currentTime - lastTapTime;
-        if (tapDelay < 300 && tapDelay > 0) { clearTimeout(tapTimeout); graphModes[type] = (graphModes[type] === 'standard') ? 'hercules' : 'standard'; localStorage.setItem('mode_' + type, graphModes[type]); refreshGraph(type); lastTapTime = 0; }
-        else { lastTapTime = currentTime; tapTimeout = setTimeout(() => { if (isFocusActive && el.classList.contains('is-focused')) toggleFocusMode(type, el); else if (!isFocusActive && type === 'sog') { displayModeSog = (displayModeSog === 'SOG') ? 'VMG' : 'SOG'; el.style.backgroundColor = "rgba(0, 0, 0, 0.05)"; setTimeout(() => el.style.backgroundColor = "", 150); } }, 250); }
+
+    // --- GESTIONE PRESSIONE (Inizio) ---
+    el.addEventListener('pointerdown', (e) => {
+        isLongPressActive = false;
+        // Timer per attivare il Focus Mode dopo 1 secondo di pressione continua
+        pressTimer = setTimeout(() => {
+            if (!isFocusActive) {
+                isLongPressActive = true;
+                toggleFocusMode(type, el);
+                lastTapTime = 0; // Evita che al rilascio scatti un click
+            }
+        }, 1000);
     });
+
+    // --- GESTIONE RILASCIO (Fine Gesto) ---
+    el.addEventListener('pointerup', (e) => {
+        clearTimeout(pressTimer); // Cancella il timer del long press
+        if (isLongPressActive) return; // Se è scattato il focus, non fare altro
+
+        const currentTime = new Date().getTime();
+        const tapDelay = currentTime - lastTapTime;
+
+        // 1. GESTIONE DOPPIO CLICK (Zoom Hercules)
+        if (tapDelay < 300 && tapDelay > 0) {
+            clearTimeout(tapTimeout);
+            // Switch tra modalità scala Standard e Zoom Hercules
+            graphModes[type] = (graphModes[type] === 'standard') ? 'hercules' : 'standard';
+            localStorage.setItem('mode_' + type, graphModes[type]);
+            refreshGraph(type);
+            lastTapTime = 0;
+        }
+        // 2. GESTIONE SINGOLO CLICK (Switch Dati o Esci dal Focus)
+        else {
+            lastTapTime = currentTime;
+            tapTimeout = setTimeout(() => {
+                // Se il box è in focus, il singolo click lo chiude
+                if (isFocusActive && el.classList.contains('is-focused')) {
+                    toggleFocusMode(type, el);
+                }
+                // Se siamo in visualizzazione standard, gestiamo gli switch dati
+                else if (!isFocusActive) {
+                    // Switch SOG <-> VMG
+                    if (type === 'sog') {
+                        displayModeSog = (displayModeSog === 'SOG') ? 'VMG' : 'SOG';
+                    }
+                    // Switch TWS <-> AWS (Nuova Logica)
+                    else if (type === 'tws') {
+                        displayModeTws = (displayModeTws === 'TWS') ? 'AWS' : 'TWS';
+                    }
+                    
+                    // Feedback visivo (lampeggio leggero) dell'avvenuto switch
+                    el.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+                    setTimeout(() => el.style.backgroundColor = "", 150);
+                }
+            }, 250);
+        }
+    });
+
+    // --- GESTIONE USCITA (Se l'utente trascina il dito fuori) ---
     el.addEventListener('pointerleave', () => clearTimeout(pressTimer));
 });
 

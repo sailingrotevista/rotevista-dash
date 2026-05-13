@@ -84,19 +84,19 @@ module.exports = function (app) {
           reef1: {
             type: 'number',
             title: '1st Reef Alert (Orange)',
-            description: "Wind speed (TWS) at which the graph turns orange, suggesting it's time to prepare for the first sail reduction.",
+            description: "Wind speed at which the graph turns orange. This threshold applies to the active mode: in TWS it indicates weather intensity, in AWS it indicates pressure on sails/rigging.",
             default: 15.0
           },
           reef2: {
             type: 'number',
             title: '2nd Reef Alert (Red)',
-            description: "Wind speed (TWS) at which the graph turns red, indicating urgent need for sail reduction.",
+            description: "Critical wind speed at which the graph turns red. This threshold applies to the active mode: in TWS it warns of high sea state, in AWS it warns of excessive load on the mast/sails.",
             default: 20.0
           },
           historyMinutes: {
             type: 'number',
             title: 'Strategic Timeline (Minutes)',
-            description: "Total duration shown in the charts. Vertical grid lines mark 1-minute intervals for short durations and 5-minute intervals for long ones.",
+            description: "Sets the time duration for all charts. It also defines the comparison window for the Strategic Weather Trend (the dot in the TWD compass) to detect long-term wind shifts.",
             default: 5,
             enum: [5, 10, 15, 30, 60]
           }
