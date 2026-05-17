@@ -1,6 +1,6 @@
 {
   "name": "@sailingrotevista/rotevista-dash",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "description": "Wind Dashboard with navigation and course aids",
   "main": "index.js",
   "publishConfig": {
