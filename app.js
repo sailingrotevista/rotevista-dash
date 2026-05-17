@@ -35,7 +35,7 @@ let CONFIG = {
 const RENDER_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 5000;
 const SIM_SAMPLE_INTERVAL = 1000;
-const DASH_VERSION = "3.5"; // Major Update: Time-Based storage and GAP handling
+const DASH_VERSION = "3.7"; // Major Update: Time-Based storage and GAP handling
 const sourceLocks = {};
 
 // ==========================================================================
@@ -742,37 +742,97 @@ async function watchConfigChanges() {
     }
 }
 
-// --------------------------------------------------------------------------
-
 /**
- * Rielaborazione Storica Time-Based (Rimuove accumulo e gestisce il Pruning dinamicamente)
+ * manageHistory v3.7 - Aggregazione semantica "Pro-Grade"
+ * Integrazioni:
+ * 1. Strict undefined check per lastUpdates.
+ * 2. Anti-dropout dinamico tarato sul 50% del Reef 1.
+ * 3. Clamping di sicurezza (no negativi, no Infinity).
  */
-function manageHistory(t, v) {
-    const n = Date.now();
-    const interval = (CONFIG.graphs.historyMinutes * 60000) / CONFIG.graphs.samples;
+function manageHistory(type, value) {
+    // --- 1. VALIDAZIONE INPUT RIGOROSA ---
+    if (value === undefined || value === null || !isFinite(value)) return;
 
-    if (!store.graphTempBuf[t]) store.graphTempBuf[t] = [];
-    store.graphTempBuf[t].push(v);
+    const now = Date.now();
+    const historyMinutes = Math.max(1, CONFIG.graphs.historyMinutes || 10);
+    const samples = Math.max(2, CONFIG.graphs.samples || 60);
+    const bucketIntervalMs = (historyMinutes * 60000) / samples;
 
-    if (n - store.lastUpdates[t] > interval || store.histories[t].length === 0) {
-        const avg = store.graphTempBuf[t].reduce((a, b) => a + b, 0) / store.graphTempBuf[t].length;
+    // --- 2. INIT SICURO (Strict Check) ---
+    if (!store.graphTempBuf[type]) store.graphTempBuf[type] = [];
+    if (!store.histories[type]) store.histories[type] = [];
+    if (store.lastUpdates[type] === undefined) store.lastUpdates[type] = 0;
 
-        // NUOVO STORAGE TIME-BASED
-        store.histories[t].push({ time: n, val: avg });
+    const tempBuf = store.graphTempBuf[type];
 
-        // PRUNING DINAMICO
-        const maxViewportMinutes = CONFIG.graphs.historyMinutes * 2;
-        const maxHistoryMs = (maxViewportMinutes * 60000) + 30000;
-
-        while (store.histories[t].length > 0 && (n - store.histories[t][0].time) > maxHistoryMs) {
-            store.histories[t].shift();
-        }
-
-        store.graphTempBuf[t] = [];
-        store.lastUpdates[t] = n;
+    // --- 3. ANTI-DROPOUT DINAMICO (Auto-scaling) ---
+    // Ignora cadute a zero se il valore precedente era superiore al 50% del primo Reef
+    if ((type === 'tws' || type === 'aws') && value < 0.05 && tempBuf.length > 0) {
+        const lastPoint = tempBuf[tempBuf.length - 1];
+        const glitchThreshold = (CONFIG.graphs.reef1 || 15) * 0.5;
+        if (lastPoint && lastPoint.val > glitchThreshold) return;
     }
-}
 
+    // --- 4. STORAGE TEMPORANEO ---
+    tempBuf.push({ val: value, time: now });
+
+    // Controllo finestra temporale
+    const bucketReady = (now - store.lastUpdates[type] > bucketIntervalMs) || store.histories[type].length === 0;
+    if (!bucketReady) return;
+
+    // --- 5. AGGREGAZIONE SEMANTICA ---
+    let finalValue = value;
+
+    if (tempBuf.length > 0) {
+        // A. VENTO -> SUSTAINED PEAK (EMA Time-Aware)
+        if (type === 'tws' || type === 'aws') {
+            const tauMs = 2500;
+            let ema = tempBuf[0].val;
+            let maxSustained = ema;
+
+            for (let i = 1; i < tempBuf.length; i++) {
+                const dt = Math.max(1, tempBuf[i].time - tempBuf[i - 1].time);
+                const alpha = 1 - Math.exp(-dt / tauMs);
+                ema = (tempBuf[i].val * alpha) + (ema * (1 - alpha));
+                if (isFinite(ema) && ema > maxSustained) maxSustained = ema;
+            }
+            finalValue = maxSustained;
+        }
+        // B. PROFONDITÀ -> MINIMO
+        else if (type === 'depth') {
+            const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
+            if (vals.length > 0) finalValue = Math.min(...vals);
+        }
+        // C. VELOCITÀ -> MEDIA
+        else {
+            const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
+            if (vals.length > 0) {
+                const sum = vals.reduce((a, b) => a + b, 0);
+                finalValue = sum / tempBuf.length;
+            }
+        }
+    }
+
+    // --- 6. CLAMPING E VALIDAZIONE FINALE ---
+    // Protezione contro valori negativi (fisicamente impossibili per questi dati) e non finiti
+    if (!isFinite(finalValue)) return;
+    finalValue = Math.max(0, finalValue);
+
+    // --- 7. STORAGE STORICO (Keys: val, time) ---
+    store.histories[type].push({ val: finalValue, time: now });
+
+    // --- 8. PRUNING DINAMICO ---
+    const maxViewportMinutes = historyMinutes * 2;
+    const maxHistoryMs = (maxViewportMinutes * 60000) + 60000;
+
+    while (store.histories[type].length > 0 && (now - store.histories[type][0].time) > maxHistoryMs) {
+        store.histories[type].shift();
+    }
+
+    // Reset per il prossimo bucket
+    store.graphTempBuf[type] = [];
+    store.lastUpdates[type] = now;
+}
 function calculateScale(type, data, mode) {
     const s = CONFIG.scales[type]; let aMin = Math.min(...data), aMax = Math.max(...data);
     if (mode === 'hercules') {
@@ -1069,7 +1129,7 @@ async function init() {
     await fetchServerConfig();
     startDisplayLoop();
     connect();
-    setInterval(watchConfigChanges, 10000); 
+    setInterval(watchConfigChanges, 10000);
 }
 
 window.addEventListener('load', init);
