@@ -666,32 +666,83 @@ function startDisplayLoop() {
 }
 
 // ==========================================================================
-// 8. CONFIGURAZIONE E GRAFICI UTILS
+// 8. CONFIGURAZIONE, AGGIORNAMENTO LIVE E GRAFICI UTILS
 // ==========================================================================
+
+let currentConfigString = ""; // Memoria per rilevare cambiamenti nei settings
+
+/**
+ * Funzione Helper: Applica fisicamente i dati JSON all'oggetto CONFIG globale
+ */
+function applyConfigData(data) {
+    Object.assign(CONFIG.alarms, data.alarms || {});
+    Object.assign(CONFIG.graphs, data.graphs || {});
+    Object.assign(CONFIG.averaging, data.averaging || {});
+    
+    // Migrazione Silenziosa: Rilevato vecchio parametro stabilità (<= 0.85).
+    // Aggiornato a 0.95 per ottimizzazione filtri.
+    if (CONFIG.averaging.stabilityThreshold <= 0.85) {
+        CONFIG.averaging.stabilityThreshold = 0.95;
+    }
+
+    if (data.scales) {
+        for (let key in data.scales) {
+            if (CONFIG.scales[key]) Object.assign(CONFIG.scales[key], data.scales[key]);
+        }
+    }
+}
+
+/**
+ * Recupera la configurazione iniziale al caricamento della pagina
+ */
 async function fetchServerConfig() {
     try {
         const response = await fetch('/rotevista-config');
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
 
-        Object.assign(CONFIG.alarms, data.alarms || {});
-        Object.assign(CONFIG.graphs, data.graphs || {});
-        Object.assign(CONFIG.averaging, data.averaging || {});
-        
-        if (CONFIG.averaging.stabilityThreshold <= 0.85) {
-            CONFIG.averaging.stabilityThreshold = 0.95;
-            console.log("♻️ Migrazione Silenziosa: Rilevato vecchio parametro stabilità (<= 0.85). Aggiornato a 0.95 per ottimizzazione filtri.");
-        }
+        // Salviamo l'impronta digitale della configurazione per i confronti futuri
+        currentConfigString = JSON.stringify(data);
 
-        if (data.scales) {
-            for (let key in data.scales) {
-                if (CONFIG.scales[key]) Object.assign(CONFIG.scales[key], data.scales[key]);
-            }
-        }
+        applyConfigData(data);
+        console.log("✅ Configurazione iniziale applicata con successo.");
     } catch (err) {
-        console.warn("⚠️ Utilizzo default locali. Motivo:", err.message);
+        console.warn("⚠️ Impossibile raggiungere il server per le configurazioni. Utilizzo default locali. Motivo:", err.message);
     }
 }
+
+/**
+ * Watchdog: Controlla in background se le impostazioni sul server sono cambiate
+ */
+async function watchConfigChanges() {
+    try {
+        const response = await fetch('/rotevista-config');
+        if (!response.ok) return;
+        const data = await response.json();
+        
+        const newConfigString = JSON.stringify(data);
+
+        // Se l'impronta digitale è diversa, l'utente ha salvato nuovi settings!
+        if (newConfigString !== currentConfigString) {
+            console.log("🔄 Rilevato cambio impostazioni su Signal K! Aggiornamento in tempo reale...");
+            
+            // Applichiamo i nuovi settings al volo
+            applyConfigData(data);
+            
+            // Aggiorniamo l'impronta
+            currentConfigString = newConfigString;
+            
+            // FEEDBACK VISIVO: Avvisiamo l'utente dell'aggiornamento
+            ui.status.innerText = "CONFIG UPDATED!";
+            ui.status.style.color = "#00C851"; // Verde Neon
+            setTimeout(() => { ui.status.style.color = ""; }, 4000);
+        }
+    } catch (err) {
+        // Ignoriamo gli errori di rete nel watchdog per non intasare la console in caso di disconnessione
+    }
+}
+
+// --------------------------------------------------------------------------
 
 /**
  * Rielaborazione Storica Time-Based (Rimuove accumulo e gestisce il Pruning dinamicamente)
@@ -1018,6 +1069,7 @@ async function init() {
     await fetchServerConfig();
     startDisplayLoop();
     connect();
+    setInterval(watchConfigChanges, 10000); 
 }
 
 window.addEventListener('load', init);
