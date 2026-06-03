@@ -1,6 +1,6 @@
 /**
  * ==========================================================================
- * Signal K Wind Dashboard - Pro Version 3.5 (Time-Based Architecture)
+ * Signal K Wind Dashboard - Pro Version 3.8 (Dynamic Envelope Architecture)
  * ==========================================================================
  * Autore: Sailing Rotevista
  * Motore di calcolo tattico per navigazione e crociera.
@@ -24,10 +24,10 @@ let CONFIG = {
     },
     graphs: { reef1: 10, reef2: 15, historyMinutes: 10, samples: 60 },
     scales: {
-        stw: { stdMax: 4, hercSpan: 4, step: 2 },
-        sog: { stdMax: 4, hercSpan: 4, step: 2 },
-        tws: { stdMax: 15, hercSpan: 10, step: 5 },
-        depth: { stdMax: 8, hercSpan: 5, step: 5 }
+        stw: { stdMax: 4, hercSpan: 2, step: 1 },
+        sog: { stdMax: 4, hercSpan: 2, step: 1 },
+        tws: { stdMax: 15, hercSpan: 2, step: 1 },
+        depth: { stdMax: 8, hercSpan: 1, step: 1 }
     },
     server: { fallbackIp: "192.168.111.240:3000" }
 };
@@ -35,8 +35,7 @@ let CONFIG = {
 const RENDER_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 5000;
 const SIM_SAMPLE_INTERVAL = 1000;
-const DASH_VERSION = "3.7"; // Major Update: Time-Based storage and GAP handling
-const sourceLocks = {};
+const DASH_VERSION = "3.8"; // Major Update: Smart Source Locking & Breathing Hercules Scale
 
 // ==========================================================================
 // 2. STATO GLOBALE E RIFERIMENTI UI
@@ -59,6 +58,8 @@ let pressTimer, isFocusActive = false;
 let emaTwaSin = 0;
 let emaTwaCos = 0;
 let firstEmaRun = true;
+// MACCHINA A STATI ALLARME STRAMBATA (Filtro Isteresi Anti-Brandeggio)
+let lastGybeSide = null;
 
 const graphModes = {
     stw: 'standard',
@@ -67,13 +68,15 @@ const graphModes = {
     depth: 'standard'
 };
 
+// GESTIONE SMART LOCK DELLE SORGENTI (Zero-Config)
+const sourceLocks = {};
+
 // Database centrale dello store dati
 const store = {
     raw: {},
     timestamps: {},
     smoothBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
     longBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
-    // histories ora conterrà array di oggetti: { time: Date.now(), val: numero }
     histories: { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] },
     graphTempBuf: { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] },
     lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0 }
@@ -326,14 +329,62 @@ function computeTrueWind() {
     }
 }
 
+// ==========================================================================
+// GESTIONE SMART LOCK DELLE SORGENTI (Zero-Config)
+// ==========================================================================
+
+/**
+ * Assegna un punteggio di qualità statico alla sorgente basato sull'hardware.
+ * Più alto è il punteggio, maggiore è la priorità del sensore.
+ */
+function getSourcePriorityScore(sourceName) {
+    if (!sourceName) return 0;
+    const name = sourceName.toLowerCase();
+
+    // TIER 3: AIS / Trasmissioni lente (es. yacht_device.AI, VDO)
+    if (name.includes('.ai') || name.includes('ais') || name.includes('vdo')) {
+        return 10;
+    }
+
+    // TIER 2: GPS USB del Cerbo GX / Victron / Sistemi locali di servizio
+    if (name.includes('venus') || name.includes('victron') || name.includes('ttyacm') || name.includes('ttyusb') || name.includes('system')) {
+        return 50;
+    }
+
+    // TIER 1: Strumentazione ufficiale di navigazione (NMEA 2000, Yacht Devices GP/YD/AP, Gateway, ecc.)
+    if (name.includes('yacht_device') || name.includes('n2k') || name.includes('actisense') || name.includes('can') || name.includes('nmea') || name.includes('raymarine') || name.includes('garmin') || name.includes('simrad') || name.includes('b&g')) {
+        return 100;
+    }
+
+    return 30; // Punteggio standard per sorgenti sconosciute
+}
+
 function processIncomingData(path, val, source) {
     const now = Date.now();
+    const score = getSourcePriorityScore(source);
 
-    // FILTRO SORGENTE STICKY
-    if (!sourceLocks[path] || sourceLocks[path].label === source || (now - sourceLocks[path].lastSeen > 2000)) {
-        sourceLocks[path] = { label: source, lastSeen: now };
+    // Gestione dello Smart Lock
+    if (!sourceLocks[path]) {
+        // Nessun blocco attivo: aggancia la sorgente corrente
+        sourceLocks[path] = { label: source, score: score, lastSeen: now };
     } else {
-        return;
+        const currentLock = sourceLocks[path];
+        const isSameSource = (currentLock.label === source);
+        const isLockExpired = (now - currentLock.lastSeen > 12000); // Scadenza a 12 secondi per tollerare il GPS dello Yacht Devices
+        const hasHigherPriority = (score > currentLock.score);
+
+        if (isSameSource) {
+            // Stessa sorgente: aggiorna il timestamp e mantiene il blocco
+            currentLock.lastSeen = now;
+            currentLock.score = score;
+        } else if (isLockExpired || hasHigherPriority) {
+            // Ruba il blocco se la sorgente precedente è scaduta o se questa ha priorità superiore
+            sourceLocks[path] = { label: source, score: score, lastSeen: now };
+            console.log(`🔌 [Smart Lock] Path "${path}" switched to: ${source} (Score: ${score})`);
+        } else {
+            // Rifiuta i dati da sorgenti a priorità inferiore se quella principale è attiva
+            return;
+        }
     }
 
     store.timestamps[path] = now;
@@ -373,57 +424,16 @@ function processIncomingData(path, val, source) {
 // ==========================================================================
 function updateWindTrend() {
     const now = Date.now();
+
+    // --- 6.1 TREND TATTICO (AWA/TWA) ---
     const twaNow = getCircularAverageFromBuffer(store.longBuf.twa, 2000, true);
     const twaRef = getCircularAverageFromBuffer(store.longBuf.twa, 10000, true);
-    
-    const twdNow = getCircularAverageFromBuffer(store.longBuf.twd, 60000, false);
-    const multiplier = isNavigating ? 1 : 2;
-    const strategicWindowMs = CONFIG.graphs.historyMinutes * 60000 * multiplier;
-    const twdRef = getCircularAverageFromBuffer(store.longBuf.twd, strategicWindowMs, false);
-    
-    if (!twaNow || !twaRef || !twdNow || !twdRef) return;
-    
-    const compassDots = { cw: document.getElementById('trend-dot-cw'), ccw: document.getElementById('trend-dot-ccw') };
     const gaugeDots = { cw: document.getElementById('trend-gauge-cw'), ccw: document.getElementById('trend-gauge-ccw') };
 
-    // TREND METEO
-    let deltaMeteo = radToDeg((twdNow.val - twdRef.val + Math.PI * 3) % (Math.PI * 2) - Math.PI);
-    if (Math.abs(deltaMeteo) > 6.0) {
-        const isSouth = store.raw["navigation.position"]?.latitude < 0;
-        let meteoColor = (!isSouth) ? (deltaMeteo < 0 ? "#27ae60" : "#c0392b") : (deltaMeteo > 0 ? "#27ae60" : "#c0392b");
-        if (deltaMeteo > 0) {
-            compassDots.cw.classList.add('is-trending'); compassDots.cw.setAttribute('fill', meteoColor);
-            compassDots.ccw.classList.remove('is-trending');
-        } else {
-            compassDots.ccw.classList.add('is-trending'); compassDots.ccw.setAttribute('fill', meteoColor);
-            compassDots.cw.classList.remove('is-trending');
-        }
-    } else { [compassDots.cw, compassDots.ccw].forEach(el => { if(el){ el.classList.remove('is-trending'); el.setAttribute('fill', '#bbb'); }}); }
-
-    // TREND TATTICO
-    let deltaTac = radToDeg((twaNow.val - twaRef.val + Math.PI * 3) % (2 * Math.PI) - Math.PI);
-    const curTwaDeg = radToDeg(twaNow.val);
-    if (Math.abs(deltaTac) > 3.0) {
-        let absTwa = Math.abs(curTwaDeg);
-        let tacticColor;
-        if (absTwa > 75 && absTwa < 105) {
-            tacticColor = "#bbb";
-        } else {
-            let isLift = (curTwaDeg > 0) ? (deltaTac > 0) : (deltaTac < 0);
-            if (absTwa >= 90) isLift = !isLift;
-            tacticColor = isLift ? "#27ae60" : "#c0392b";
-        }
-        if (deltaTac > 0) {
-            gaugeDots.cw.classList.add('is-trending'); gaugeDots.cw.setAttribute('fill', tacticColor);
-            gaugeDots.ccw.classList.remove('is-trending');
-        } else {
-            gaugeDots.ccw.classList.add('is-trending'); gaugeDots.ccw.setAttribute('fill', tacticColor);
-            gaugeDots.cw.classList.remove('is-trending');
-        }
-    } else { [gaugeDots.cw, gaugeDots.ccw].forEach(el => { if(el){ el.classList.remove('is-trending'); el.setAttribute('fill', '#bbb'); }}); }
-
-    // ALLARME STRAMBATA (EMA FILTERED)
+    // --- 6.2 ALLARME STRAMBATA CON ISTERESI (MACCHINA A STATI ANTI-BRANDEGGIO) ---
     const instTwaRad = store.raw["environment.wind.angleTrueWater"];
+    let smoothedTwaDeg = null;
+
     if (instTwaRad !== undefined) {
         const dynamicAlpha = Math.max(0.05, 1.1 - CONFIG.averaging.stabilityThreshold);
         const currentSin = Math.sin(instTwaRad);
@@ -436,18 +446,97 @@ function updateWindTrend() {
             emaTwaCos = (currentCos * dynamicAlpha) + (emaTwaCos * (1 - dynamicAlpha));
         }
 
-        const smoothedTwaDeg = radToDeg(Math.atan2(emaTwaSin, emaTwaCos));
+        smoothedTwaDeg = radToDeg(Math.atan2(emaTwaSin, emaTwaCos));
+        const absTwaDeg = Math.abs(smoothedTwaDeg);
 
-        if (Math.abs(smoothedTwaDeg) > 155) {
-            if (Math.sign(smoothedTwaDeg) !== Math.sign(lastInstantTwa) && lastInstantTwa !== null) {
-                if (isNavigating && (now - lastGybeAlarmTime > 60000)) {
-                    lastGybeAlarmTime = now;
-                    playGybeAlarm();
-                    console.log(`⚠️ GYBE ALARM: TWA ${smoothedTwaDeg.toFixed(1)}°`);
+        // Allarme VISIVO: Se siamo in zona di pericolo poppa profonda (> 155°), accendi entrambi i LED di rosso pulsante
+        if (absTwaDeg > 155) {
+            if (gaugeDots.cw) { gaugeDots.cw.classList.add('is-gybing'); gaugeDots.cw.setAttribute('fill', '#ff3b30'); }
+            if (gaugeDots.ccw) { gaugeDots.ccw.classList.add('is-gybing'); gaugeDots.ccw.setAttribute('fill', '#ff3b30'); }
+
+            // LOGICA MACCHINA A STATI CON ISTERESI:
+            // Rileviamo le mure solo se siamo fuori dalla zona cieca di poppa secca (> 170°).
+            // Se oscilliamo tra -175° e +178° (brandeggio), lastGybeSide NON cambia e l'allarme acustico tace.
+            let currentTack = null;
+            if (smoothedTwaDeg > 155 && smoothedTwaDeg < 170) {
+                currentTack = 'starboard';
+            } else if (smoothedTwaDeg < -155 && smoothedTwaDeg > -170) {
+                currentTack = 'port';
+            }
+
+            if (currentTack !== null) {
+                if (lastGybeSide === null) {
+                    // Inizializzazione al primo ingresso nella zona di controllo
+                    lastGybeSide = currentTack;
+                } else if (lastGybeSide !== currentTack) {
+                    // Abbiamo eseguito una vera strambata stabile e siamo usciti dalla zona di poppa secca!
+                    lastGybeSide = currentTack;
+
+                    // Attivazione allarme acustico con blocco temporale di sicurezza (60 secondi)
+                    if (isNavigating && (now - lastGybeAlarmTime > 60000)) {
+                        lastGybeAlarmTime = now;
+                        playGybeAlarm();
+                        console.log(`⚠️ GYBE ALARM TRIGGERED: Tack switched to ${currentTack} (TWA: ${smoothedTwaDeg.toFixed(1)}°)`);
+                    }
                 }
             }
+        } else {
+            // Se usciamo dalla poppa profonda (< 155°), disattiva l'allarme visivo e resetta lo stato delle mure
+            if (gaugeDots.cw) gaugeDots.cw.classList.remove('is-gybing');
+            if (gaugeDots.ccw) gaugeDots.ccw.classList.remove('is-gybing');
+            lastGybeSide = null; // Reset per la prossima poppa
         }
         lastInstantTwa = smoothedTwaDeg;
+    }
+
+    // Gestione normale dei Trend Tattici (Lifts/Headers) se NON siamo in allarme strambata
+    if (twaNow && twaRef && (smoothedTwaDeg === null || Math.abs(smoothedTwaDeg) <= 155)) {
+        let deltaTac = radToDeg((twaNow.val - twaRef.val + Math.PI * 3) % (2 * Math.PI) - Math.PI);
+        const curTwaDeg = radToDeg(twaNow.val);
+        if (Math.abs(deltaTac) > 3.0) {
+            let absTwa = Math.abs(curTwaDeg);
+            let tacticColor;
+            if (absTwa > 75 && absTwa < 105) {
+                tacticColor = "#bbb";
+            } else {
+                let isLift = (curTwaDeg > 0) ? (deltaTac > 0) : (deltaTac < 0);
+                if (absTwa >= 90) isLift = !isLift;
+                tacticColor = isLift ? "#27ae60" : "#c0392b";
+            }
+            if (deltaTac > 0) {
+                if (gaugeDots.cw) { gaugeDots.cw.classList.add('is-trending'); gaugeDots.cw.setAttribute('fill', tacticColor); }
+                if (gaugeDots.ccw) { gaugeDots.ccw.classList.remove('is-trending'); }
+            } else {
+                if (gaugeDots.ccw) { gaugeDots.ccw.classList.add('is-trending'); gaugeDots.ccw.setAttribute('fill', tacticColor); }
+                if (gaugeDots.cw) { gaugeDots.cw.classList.remove('is-trending'); }
+            }
+        } else {
+            [gaugeDots.cw, gaugeDots.ccw].forEach(el => { if(el){ el.classList.remove('is-trending'); el.setAttribute('fill', '#bbb'); }});
+        }
+    }
+
+    // --- 6.3 TREND METEO STRATEGICO (TWD) ---
+    const twdNow = getCircularAverageFromBuffer(store.longBuf.twd, 60000, false);
+    const multiplier = isNavigating ? 1 : 2;
+    const strategicWindowMs = CONFIG.graphs.historyMinutes * 60000 * multiplier;
+    const twdRef = getCircularAverageFromBuffer(store.longBuf.twd, strategicWindowMs, false);
+    const compassDots = { cw: document.getElementById('trend-dot-cw'), ccw: document.getElementById('trend-dot-ccw') };
+
+    if (twdNow && twdRef) {
+        let deltaMeteo = radToDeg((twdNow.val - twdRef.val + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+        if (Math.abs(deltaMeteo) > 6.0) {
+            const isSouth = store.raw["navigation.position"]?.latitude < 0;
+            let meteoColor = (!isSouth) ? (deltaMeteo < 0 ? "#27ae60" : "#c0392b") : (deltaMeteo > 0 ? "#27ae60" : "#c0392b");
+            if (deltaMeteo > 0) {
+                if (compassDots.cw) { compassDots.cw.classList.add('is-trending'); compassDots.cw.setAttribute('fill', meteoColor); }
+                if (compassDots.ccw) { compassDots.ccw.classList.remove('is-trending'); }
+            } else {
+                if (compassDots.ccw) { compassDots.ccw.classList.add('is-trending'); compassDots.ccw.setAttribute('fill', meteoColor); }
+                if (compassDots.cw) { compassDots.cw.classList.remove('is-trending'); }
+            }
+        } else {
+            [compassDots.cw, compassDots.ccw].forEach(el => { if(el){ el.classList.remove('is-trending'); el.setAttribute('fill', '#bbb'); }});
+        }
     }
 }
 
@@ -486,6 +575,9 @@ function startDisplayLoop() {
         const sogKts = msToKts(store.raw["navigation.speedOverGround"] || 0);
         
         isNavigating = stwKts > CONFIG.averaging.minSpeed || sogKts > CONFIG.averaging.minSpeed;
+
+        // --- CALCOLO TREND VENTO & ALLARME STRAMBATA ---
+        updateWindTrend();
 
         // --- AGGIORNAMENTO STATUS CON CONTEGGIO MINUTI REALE ---
         const viewportMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
@@ -766,7 +858,6 @@ function manageHistory(type, value) {
     const tempBuf = store.graphTempBuf[type];
 
     // --- 3. ANTI-DROPOUT DINAMICO (Auto-scaling) ---
-    // Ignora cadute a zero se il valore precedente era superiore al 50% del primo Reef
     if ((type === 'tws' || type === 'aws') && value < 0.05 && tempBuf.length > 0) {
         const lastPoint = tempBuf[tempBuf.length - 1];
         const glitchThreshold = (CONFIG.graphs.reef1 || 15) * 0.5;
@@ -814,11 +905,10 @@ function manageHistory(type, value) {
     }
 
     // --- 6. CLAMPING E VALIDAZIONE FINALE ---
-    // Protezione contro valori negativi (fisicamente impossibili per questi dati) e non finiti
     if (!isFinite(finalValue)) return;
     finalValue = Math.max(0, finalValue);
 
-    // --- 7. STORAGE STORICO (Keys: val, time) ---
+    // --- 7. STORAGE STORICO ---
     store.histories[type].push({ val: finalValue, time: now });
 
     // --- 8. PRUNING DINAMICO ---
@@ -833,13 +923,47 @@ function manageHistory(type, value) {
     store.graphTempBuf[type] = [];
     store.lastUpdates[type] = now;
 }
+
+/**
+ * Gestione dinamica delle scale dei grafici (Involucro Elastico e Safety Zoom)
+ */
 function calculateScale(type, data, mode) {
-    const s = CONFIG.scales[type]; let aMin = Math.min(...data), aMax = Math.max(...data);
-    if (mode === 'hercules') {
-        let avg = (aMin + aMax) / 2; let span = Math.max(s.hercSpan, Math.ceil(aMax - aMin));
-        if (span % 2 !== 0) span += 1; let min = Math.max(0, Math.floor(avg - (span / 2)));
-        return { min, max: min + span };
+    const s = CONFIG.scales[type];
+    let aMin = Math.min(...data), aMax = Math.max(...data);
+    
+    // --- SAFETY ZOOM PER PROFONDITÀ (FONDALE BASSO) ---
+    if (type === 'depth' && mode !== 'hercules') {
+        const currentDepth = data[data.length - 1];
+        const shallowThreshold = Math.max(s.stdMax, 10);
+        if (currentDepth <= shallowThreshold) {
+            return { min: 0, max: shallowThreshold };
+        }
     }
+    
+    // --- MODALITÀ HERCULES AGGIORNATA (INVOLUCRO DINAMICO ELASTICO) ---
+    if (mode === 'hercules') {
+        const padding = (type === 'stw' || type === 'sog') ? 0.5 : 1.0;
+
+        let min = Math.max(0, Math.floor(aMin - padding));
+        let max = Math.ceil(aMax + padding);
+
+        // Garantisce uno span minimo configurato per evitare zoom eccessivi sul rumore di fondo
+        const currentSpan = max - min;
+        if (currentSpan < s.hercSpan) {
+            const diff = s.hercSpan - currentSpan;
+            min = Math.max(0, min - Math.floor(diff / 2));
+            max = min + s.hercSpan;
+        }
+
+        // Arrotonda la griglia numerica a step prefissati per evitare sfarfallamento visivo
+        const roundStep = (type === 'stw' || type === 'sog') ? 0.5 : 1.0;
+        min = Math.floor(min / roundStep) * roundStep;
+        max = Math.ceil(max / roundStep) * roundStep;
+
+        return { min, max };
+    }
+    
+    // Scala Standard (Autocompressione a scatti)
     return { min: 0, max: Math.max(s.stdMax, Math.ceil(aMax / s.step) * s.step) };
 }
 
@@ -863,7 +987,6 @@ function refreshGraph(t) {
 
     if (!rawData || rawData.length < 2) return;
 
-    // ESTRAZIONE SOLO VALORI NUMERICI per calculateScale()
     const values = rawData.map(p => p.val);
     const mode = graphModes[boxType];
     const cfg = calculateScale(boxType, values, mode);
@@ -872,8 +995,6 @@ function refreshGraph(t) {
     if (box) box.classList.toggle('box-hercules', mode === 'hercules');
 
     updateScaleLabels(boxType, cfg.min, cfg.max);
-
-    // Passiamo tutto l'array (oggetti) al nuovo motore
     drawGraph(rawData, boxType + '-graph', cfg.min, cfg.max, t === 'tws', mode === 'hercules');
 }
 
@@ -889,16 +1010,13 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     const isDepth = (id === 'depth-graph');
     const now = Date.now();
 
-    // VIEWPORT TEMPORALE DINAMICO
     const visibleMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
     const viewportMs = visibleMinutes * 60000;
     const viewportStart = now - viewportMs;
 
-    // FILTRO DATI VISIBILI (Gestisce Compressione/Zoom in modo naturale)
     const visibleData = d.filter(p => p.time >= viewportStart);
     if (visibleData.length < 2) return;
 
-    // COLORI
     const colDanger  = "#ff3b30", colWarning = "#ff9800", colTws = "#2c3e50", colAws = "#5c6bc0";
     const colDepth   = "#0088cc", colStw = "#00C851", colSog = "#ffbb33", colVmg = "#00b8d4";
 
@@ -920,18 +1038,15 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
         return { color, opacity, stroke };
     };
 
-    // GRIGLIA ORIZZONTALE
     let grids = "";
     [0.25, 0.5, 0.75].forEach(p => grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`);
 
-    // GRIGLIA VERTICALE VERA
     const gridInterval = (visibleMinutes <= 15) ? 1 : 5;
     for (let m = gridInterval; m < visibleMinutes; m += gridInterval) {
         const x = w - ((m / visibleMinutes) * w);
         grids += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="rgba(0,0,0,0.08)" stroke-width="0.5" />`;
     }
 
-    // RENDER TIME-BASED
     let gradientStops = "", lines = "", areaPath = "";
     let started = false;
 
@@ -939,59 +1054,43 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
         const pA = visibleData[i - 1];
         const pB = visibleData[i];
 
-        // POSIZIONE X ESATTA AL MILLISECONDO
         const x1 = ((pA.time - viewportStart) / viewportMs) * w;
         const x2 = ((pB.time - viewportStart) / viewportMs) * w;
         const y1 = h - (Math.max(0, Math.min(1, (pA.val - min) / range)) * h);
         const y2 = h - (Math.max(0, Math.min(1, (pB.val - min) / range)) * h);
 
         const props = getColorProps(pB.val);
-
-        // GESTIONE GAP TEMPORALI (Network loss)
         const deltaTime = pB.time - pA.time;
         const expectedInterval = viewportMs / CONFIG.graphs.samples;
         const isGap = deltaTime > (expectedInterval * 2.5);
 
-        // STOPS GRADIENTE
         const offset1 = (x1 / w) * 100, offset2 = (x2 / w) * 100;
         gradientStops += `<stop offset="${offset1}%" stop-color="${props.color}" stop-opacity="${props.opacity}" />`;
         gradientStops += `<stop offset="${offset2}%" stop-color="${props.color}" stop-opacity="${props.opacity}" />`;
 
-        // --- FIX: GESTIONE AREA E LINEE DURANTE I GAP ---
         if (isGap) {
-            // Se c'è un buco nei dati e avevamo già iniziato a disegnare...
             if (started) {
-                // Chiudiamo il pezzo di area precedente scendendo verticalmente (Z non serve qui)
                 areaPath += `L ${x1} ${h} `;
-                started = false; // Resettiamo il flag per far ripartire l'area al prossimo punto
+                started = false;
             }
         } else {
-            // I dati sono continui, disegniamo la linea superiore
             lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="stroke:${props.color}; stroke-width:${props.stroke}; stroke-linecap:round; shape-rendering:geometricPrecision;" />`;
-            
-            // Gestione Area
             if (!started) {
-                // Iniziamo un nuovo pezzo di area dal fondo, saliamo a y1
                 areaPath += `M ${Math.max(0, x1)} ${h} L ${Math.max(0, x1)} ${y1} `;
                 started = true;
             }
-            // Aggiungiamo il punto attuale
             areaPath += `L ${x2} ${y2} `;
         }
     }
 
-    // CHIUSURA FINALE DELL'AREA (Solo se non siamo finiti dentro un gap)
     if (started) {
         const last = visibleData[visibleData.length - 1];
         const lastX = ((last.time - viewportStart) / viewportMs) * w;
-        areaPath += `L ${lastX} ${h} Z`; // Z chiude automaticamente il path tornando al punto 'M' iniziale
+        areaPath += `L ${lastX} ${h} Z`;
     }
 
-    // GRADIENTE
     const gradId = `grad-${id}`;
     const defs = `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="${w}" y2="0" gradientUnits="userSpaceOnUse">${gradientStops}</linearGradient></defs>`;
-    
-    // RENDER FINALE
     svg.innerHTML = `${defs}${grids}<path d="${areaPath}" fill="url(#${gradId})" stroke="none" />${lines}`;
 }
 
@@ -1095,7 +1194,18 @@ function connect() {
             const d = JSON.parse(e.data);
             if (d.updates) {
                 d.updates.forEach(u => {
-                    const sourceLabel = u.source ? (u.source.label || u.source.talker || "Unknown") : "Unknown";
+                    // ESTRAZIONE AVANZATA DELLA SORGENTE (Gestisce $source e stringhe native)
+                    let sourceLabel = "Unknown";
+                    if (u.$source) {
+                        sourceLabel = u.$source;
+                    } else if (u.source) {
+                        if (typeof u.source === 'object') {
+                            sourceLabel = u.source.label || u.source.talker || u.source.src || "Unknown";
+                        } else {
+                            sourceLabel = String(u.source);
+                        }
+                    }
+
                     if (u.values) {
                         u.values.forEach(v => processIncomingData(v.path, v.value, sourceLabel));
                     }

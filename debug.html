@@ -56,7 +56,7 @@
         /* Stili Testo Tabella */
         .value { color: #64ffda; font-weight: bold; font-size: 16px; }
         .unit { color: #888; font-size: 12px; margin-left: 5px; }
-        .source { color: #ffb74d; font-size: 12px; }
+        .source { color: #ffb74d; font-size: 12px; word-break: break-all; }
         .time { color: #90caf9; font-size: 12px; }
         .raw { color: #777; font-size: 11px; display: block; margin-top: 4px; }
 
@@ -83,7 +83,7 @@
             color: #aaa;
         }
         
-        /* Area di testo del Log (Non più div separati, ma un unico blocco di testo preformattato) */
+        /* Area di testo del Log */
         textarea#log-container {
             flex-grow: 1;
             background: transparent;
@@ -122,6 +122,7 @@
         <span style="margin-left: 20px; color:#aaa;">Filtra Log:</span>
         <select id="log-filter">
             <option value="all">Tutti i dati monitorati</option>
+            <option value="navigation.position">Solo Posizione (GPS)</option>
             <option value="navigation.speedOverGround">Solo SOG (Velocità sul fondo)</option>
             <option value="navigation.courseOverGroundTrue">Solo COG (Rotta sul fondo)</option>
             <option value="wind">Solo Vento (TWS/TWA/AWS/AWA)</option>
@@ -140,7 +141,7 @@
                     <tr>
                         <th width="30%">Path (Percorso)</th>
                         <th width="20%">Valore Convertito</th>
-                        <th width="30%">Sorgente (Sensore)</th>
+                        <th width="30%">Sorgente (Sensore - Dettagliato)</th>
                         <th width="20%">Ultimo Ricevuto</th>
                     </tr>
                 </thead>
@@ -161,15 +162,16 @@
                 </div>
             </div>
             
-            <!-- Usiamo una textarea readonly per permettere la selezione e lo scroll perfetto di testi lunghi -->
             <textarea id="log-container" readonly></textarea>
         </div>
 
     </div>
 
     <script>
-        // Percorsi da monitorare
         const pathsToWatch = [
+            "navigation.position",
+            "navigation.position.latitude",
+            "navigation.position.longitude",
             "navigation.speedThroughWater",
             "navigation.speedOverGround",
             "navigation.headingTrue",
@@ -182,13 +184,11 @@
         ];
 
         let socket = null;
-        let logLinesArray = []; // Array per conservare le righe in memoria
-        const MAX_LOG_LINES = 1000; // Aumentato a 1000 righe per analisi lunghe in Excel
+        let logLinesArray = [];
+        const MAX_LOG_LINES = 1000;
         
-        // Memoria per rilevare i picchi anomali (Spikes)
         let lastValues = { "navigation.speedOverGround": 0, "navigation.courseOverGroundTrue": 0 };
 
-        // Funzioni di conversione matematica
         const radToDeg = (rad) => rad * (180 / Math.PI);
         const msToKts = (ms) => ms * 1.94384;
 
@@ -207,9 +207,32 @@
             tbody.appendChild(tr);
         });
 
-        // Intestazione fissa del file CSV nel Log
         const csvHeader = "Timestamp,Path,Value,Unit,Source,IsSpike";
         document.getElementById('log-container').value = csvHeader + "\n";
+
+        // =========================================================
+        // ESTRAZIONE AVANZATA DELLA SORGENTE (GPS / NMEA)
+        // =========================================================
+        function extractSourceIdentifier(update) {
+            // 1. Cerca il campo standard moderno $source (es. "can0.GP" o "dbus.gps")
+            if (update.$source) {
+                return update.$source;
+            }
+            
+            // 2. Se non presente, analizza l'oggetto o la stringa source tradizionale
+            if (update.source) {
+                if (typeof update.source === 'object') {
+                    // Estrae label, nome talker o identificativo bus hardware se disponibili
+                    return update.source.label ||
+                           update.source.talker ||
+                           update.source.src ||
+                           (update.source.device ? `${update.source.device}:${update.source.pgn || ''}` : JSON.stringify(update.source));
+                }
+                return String(update.source);
+            }
+            
+            return "Unknown-Source";
+        }
 
         // =========================================================
         // GESTIONE CONNESSIONE WEBSOCKET
@@ -233,7 +256,6 @@
             status.innerText = "CONNESSIONE IN CORSO...";
             status.className = "";
 
-            // Resetting spike logic on new connection
             lastValues = { "navigation.speedOverGround": 0, "navigation.courseOverGroundTrue": 0 };
 
             socket = new WebSocket(`ws://${ip}/signalk/v1/stream?subscribe=self`);
@@ -245,23 +267,27 @@
             };
 
             socket.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                
-                if (data.updates) {
-                    data.updates.forEach(update => {
-                        const sourceName = update.source ? update.source.label : "Unknown";
-                        // ISO String è lo standard perfetto per i file CSV ed Excel (es. 2023-10-25T17:00:56.123Z)
-                        const timeISO = new Date(update.timestamp).toISOString();
-                        const timeUI = new Date(update.timestamp).toLocaleTimeString() + '.' + new Date(update.timestamp).getMilliseconds().toString().padStart(3, '0');
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.updates) {
+                        data.updates.forEach(update => {
+                            // Cattura l'identificativo sorgente con la nuova logica avanzata
+                            const sourceName = extractSourceIdentifier(update);
+                            const timeISO = new Date(update.timestamp).toISOString();
+                            const timeUI = new Date(update.timestamp).toLocaleTimeString() + '.' + new Date(update.timestamp).getMilliseconds().toString().padStart(3, '0');
 
-                        if (update.values) {
-                            update.values.forEach(v => {
-                                if (pathsToWatch.includes(v.path)) {
-                                    processData(v.path, v.value, sourceName, timeISO, timeUI);
-                                }
-                            });
-                        }
-                    });
+                            if (update.values) {
+                                update.values.forEach(v => {
+                                    if (pathsToWatch.includes(v.path)) {
+                                        processData(v.path, v.value, sourceName, timeISO, timeUI);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                } catch (err) {
+                    console.error("Errore elaborazione messaggio: ", err);
                 }
             };
 
@@ -283,17 +309,22 @@
         // ELABORAZIONE DATI E SPIKE DETECTION
         // =========================================================
         function processData(path, rawValue, source, timeISO, timeUI) {
-            let formattedVal = rawValue;
+            let formattedVal = "---";
             let unit = "";
             let isSpike = false;
 
-            // Conversioni
             if (rawValue !== null && rawValue !== undefined) {
-                if (path.includes("speed")) {
+                if (path === "navigation.position") {
+                    if (typeof rawValue === 'object' && rawValue.latitude !== undefined && rawValue.longitude !== undefined) {
+                        formattedVal = `${rawValue.latitude.toFixed(6)};${rawValue.longitude.toFixed(6)}`;
+                        unit = "lat;lon";
+                    } else {
+                        formattedVal = "Invalid Position";
+                    }
+                } else if (path.includes("speed")) {
                     formattedVal = msToKts(rawValue).toFixed(3);
                     unit = "kts";
                     
-                    // Rilevamento Spike SOG (> 5 nodi in un colpo solo)
                     if (path === "navigation.speedOverGround") {
                         let diff = Math.abs(formattedVal - lastValues[path]);
                         if (diff > 5.0 && lastValues[path] > 0) isSpike = true;
@@ -304,7 +335,6 @@
                     formattedVal = radToDeg(rawValue).toFixed(2);
                     unit = "deg";
                     
-                    // Rilevamento Spike COG (> 45 gradi improvviso)
                     if (path === "navigation.courseOverGroundTrue") {
                         let diff = Math.abs(formattedVal - lastValues[path]);
                         if (diff > 180) diff = 360 - diff;
@@ -315,6 +345,12 @@
                 } else if (path.includes("depth")) {
                     formattedVal = rawValue.toFixed(2);
                     unit = "m";
+                } else {
+                    if (typeof rawValue === 'number') {
+                        formattedVal = rawValue.toFixed(6);
+                    } else {
+                        formattedVal = String(rawValue);
+                    }
                 }
             }
 
@@ -330,31 +366,54 @@
 
         function updateTableRow(path, val, unit, raw, source, timeUI) {
             const safeId = path.replace(/\./g, '-');
-            document.getElementById(`val-${safeId}`).innerHTML = `<span class="value">${val}</span><span class="unit">${unit}</span><span class="raw">Raw: ${raw.toFixed(4)}</span>`;
-            document.getElementById(`src-${safeId}`).innerHTML = `<span class="source">${source}</span>`;
-            document.getElementById(`time-${safeId}`).innerHTML = `<span class="time">${timeUI}</span>`;
+            
+            let rawStr = "---";
+            if (raw !== null && raw !== undefined) {
+                if (typeof raw === 'number') {
+                    rawStr = raw.toFixed(4);
+                } else if (typeof raw === 'object') {
+                    rawStr = JSON.stringify(raw);
+                } else {
+                    rawStr = String(raw);
+                }
+            }
+
+            const valCell = document.getElementById(`val-${safeId}`);
+            if (valCell) {
+                valCell.innerHTML = `<span class="value">${val}</span><span class="unit">${unit}</span><span class="raw">Raw: ${rawStr}</span>`;
+            }
+
+            const srcCell = document.getElementById(`src-${safeId}`);
+            if (srcCell) {
+                srcCell.innerHTML = `<span class="source">${source}</span>`;
+            }
+
+            const timeCell = document.getElementById(`time-${safeId}`);
+            if (timeCell) {
+                timeCell.innerHTML = `<span class="time">${timeUI}</span>`;
+            }
             
             const row = document.getElementById(`row-${safeId}`);
-            row.style.backgroundColor = "#334a33";
-            setTimeout(() => row.style.backgroundColor = "", 150);
+            if (row) {
+                row.style.backgroundColor = "#334a33";
+                setTimeout(() => row.style.backgroundColor = "", 150);
+            }
         }
 
         // =========================================================
         // GESTIONE DEL LOG CSV E COPIA APPUNTI
         // =========================================================
         function addLogEntry(timeISO, path, value, unit, source, isSpike) {
-            // Formattazione stringa CSV pulita (niente spazi inutili)
-            // Se c'è una virgola nel nome della sorgente, la mettiamo tra virgolette per non rompere il CSV
-            const safeSource = source.includes(',') ? `"${source}"` : source;
+            const safeValue = (value.includes(',') || value.includes(';')) ? `"${value}"` : value;
+            const safeSource = (source.includes(',') || source.includes(';')) ? `"${source}"` : source;
             const spikeFlag = isSpike ? "TRUE" : "FALSE";
             
-            const csvLine = `${timeISO},${path},${value},${unit},${safeSource},${spikeFlag}`;
+            const csvLine = `${timeISO},${path},${safeValue},${unit},${safeSource},${spikeFlag}`;
             
             logLinesArray.push(csvLine);
 
-            // Mantieni la memoria leggera
             if (logLinesArray.length > MAX_LOG_LINES) {
-                logLinesArray.shift(); // Rimuove la più vecchia
+                logLinesArray.shift();
             }
 
             renderLogTextArea();
@@ -362,11 +421,7 @@
 
         function renderLogTextArea() {
             const textArea = document.getElementById('log-container');
-            
-            // Ricostruisci il testo unendo l'intestazione e l'array con \n (a capo)
             textArea.value = csvHeader + "\n" + logLinesArray.join("\n");
-            
-            // Auto-scroll verso il basso
             textArea.scrollTop = textArea.scrollHeight;
         }
 
@@ -377,14 +432,10 @@
 
         function copyLogCSV() {
             const textArea = document.getElementById('log-container');
-            const notif = document.getElementById('copy-notification');
-            
-            // Seleziona il testo
             textArea.select();
-            textArea.setSelectionRange(0, 999999); // Per mobile
+            textArea.setSelectionRange(0, 999999);
             
             try {
-                // Copia negli appunti (API moderna Navigator o execCommand classico)
                 if (navigator.clipboard) {
                     navigator.clipboard.writeText(textArea.value).then(() => showCopyNotif());
                 } else {
@@ -401,11 +452,8 @@
             const notif = document.getElementById('copy-notification');
             notif.style.opacity = 1;
             setTimeout(() => notif.style.opacity = 0, 2000);
-            
-            // Deseleziona il testo
             window.getSelection().removeAllRanges();
         }
-
     </script>
 </body>
 </html>
