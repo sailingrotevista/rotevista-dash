@@ -1166,8 +1166,9 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     };
 
     let grids = "";
-    // Una sola linea di griglia centrale al 50%, matematicamente sempre intera e allineata all'etichetta
-    [0.5].forEach(p => grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`);
+    // Tracciamo 3 linee simmetriche al 25%, 50% (centrale) e 75%.
+    // La linea al 50% passerà sempre in modo matematicamente esatto dietro il valore medio stampato.
+    [0.25, 0.5, 0.75].forEach(p => grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`);
 
     const gridInterval = (visibleMinutes <= 15) ? 1 : 5;
     for (let m = gridInterval; m < visibleMinutes; m += gridInterval) {
