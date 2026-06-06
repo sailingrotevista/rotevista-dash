@@ -852,6 +852,136 @@ async function fetchServerHistory() {
     }
 }
 
+/**
+ * Gestione dinamica delle scale dei grafici (Involucro Elastico Snapped e Safety Zoom)
+ * Implementa lo "Snap a Griglia" basato sull'hercSpan senza padding per tutti i sensori.
+ */
+function calculateScale(type, data, mode) {
+    const s = CONFIG.scales[type];
+    const currentVal = data[data.length - 1];
+    
+    // Fallback di emergenza se il buffer è momentaneamente vuoto
+    if (currentVal === undefined || currentVal === null) {
+        return { min: 0, max: s ? s.stdMax : 10 };
+    }
+
+    // Inizializzazione della memoria delle scale nello store se non esiste
+    if (!store.herculesScales) store.herculesScales = {};
+    if (!store.herculesScales[type]) {
+        store.herculesScales[type] = { min: 0, max: s ? s.stdMax : 10 };
+    }
+    let currentScale = store.herculesScales[type];
+
+    // ==========================================================================
+    // 1. SEZIONE PROFONDITÀ (DEDICATA A 2 MINUTI DI SICUREZZA, MINIMO FISSO A 0)
+    // ==========================================================================
+    if (type === 'depth') {
+        const shallowThreshold = Math.max(s.stdMax, 10); // Es. 20m
+        if (store.depthProtectedActive === undefined) store.depthProtectedActive = false;
+
+        const now = Date.now();
+        const depthSafetyWindowMs = 120000; // 2 minuti di stabilizzazione fissi per la sicurezza
+        
+        // Estrazione dati reali degli ultimi 2 minuti con timestamp
+        const recentPoints = store.histories.depth.filter(p => (now - p.time) <= depthSafetyWindowMs);
+        const recentVals = recentPoints.map(p => p.val);
+
+        const localMax = recentVals.length > 0 ? Math.max(...recentVals) : currentVal;
+        const localMin = recentVals.length > 0 ? Math.min(...recentVals) : currentVal;
+
+        // --- 1.1 NORMALE PROFONDITÀ (CON SOGLIA STANDARD E FILTRO 2 MINUTI) ---
+        if (mode !== 'hercules') {
+            if (!store.depthProtectedActive && currentVal <= shallowThreshold) {
+                store.depthProtectedActive = true;
+            }
+            if (store.depthProtectedActive) {
+                if (localMin > shallowThreshold) {
+                    store.depthProtectedActive = false;
+                }
+            }
+            if (store.depthProtectedActive) {
+                return { min: 0, max: shallowThreshold };
+            }
+            const maxHistorico = Math.max(...data);
+            return { min: 0, max: Math.max(s.stdMax, Math.ceil(maxHistorico / s.step) * s.step) };
+        }
+
+        // --- 1.2 HERCULES PROFONDITÀ (0 IN BASSO, SNAP SUL MAX SENZA PADDING) ---
+        if (mode === 'hercules') {
+            const roundStep = s.hercSpan; // Passo di griglia selezionato dall'utente
+            
+            let targetMin = 0;
+            let targetMax = Math.ceil(localMax / roundStep) * roundStep;
+
+            // Impediamo una scala inferiore a 4 metri per sicurezza visiva
+            const absoluteMinSpan = 4;
+            if (targetMax < absoluteMinSpan) {
+                targetMax = absoluteMinSpan;
+            }
+
+            // Regola asimmetrica per il MAX (Espansione istantanea, contrazione a 2 minuti)
+            if (currentVal > currentScale.max) {
+                currentScale.max = targetMax;
+            } else {
+                const allStableInTarget = recentVals.every(val => val <= targetMax);
+                if (allStableInTarget) {
+                    currentScale.max = targetMax;
+                }
+            }
+
+            currentScale.min = 0;
+            return { min: currentScale.min, max: currentScale.max };
+        }
+    }
+
+    // ==========================================================================
+    // 2. ALTRI GRAFICI (STW, SOG, TWS): COMPORTAMENTO ADATTIVO SU TERZO DEL GRAFICO
+    // ==========================================================================
+    
+    // --- 2.1 MODALITÀ NORMALE ---
+    if (mode !== 'hercules') {
+        const maxHistorico = Math.max(...data);
+        return { min: 0, max: Math.max(s.stdMax, Math.ceil(maxHistorico / s.step) * s.step) };
+    }
+
+    // --- 2.2 MODALITÀ HERCULES AD ALTO CONTRASTO (SNAP SENZA PADDING) ---
+    if (mode === 'hercules') {
+        const roundStep = s.hercSpan; // Passo di griglia (ex hercSpan)
+
+        const oneThirdCount = Math.max(1, Math.floor(data.length / 3));
+        const recentThirdData = data.slice(-oneThirdCount);
+
+        const localMin = Math.min(...recentThirdData);
+        const localMax = Math.max(...recentThirdData);
+
+        // Applichiamo lo snap diretto ai multipli della griglia
+        let targetMin = Math.max(0, Math.floor(localMin / roundStep) * roundStep);
+        let targetMax = Math.ceil(localMax / roundStep) * roundStep;
+
+        // Se lo span calcolato è nullo (es. velocità costante), forziamo lo span minimo
+        if (targetMax - targetMin === 0) {
+            targetMax = targetMin + roundStep;
+        }
+
+        // APPLICAZIONE REGOLE ASIMMETRICHE ANTI-CLIPPING
+        // A. Espansione ISTANTANEA in alto o in basso (sicurezza)
+        if (currentVal < currentScale.min || currentVal > currentScale.max) {
+            currentScale.min = Math.min(currentScale.min, targetMin);
+            currentScale.max = Math.max(currentScale.max, targetMax);
+        }
+        // B. Contrazione RITARDATA (solo se tutto il terzo recente si è assestato nel target)
+        else {
+            const allStableInTarget = recentThirdData.every(val => val >= targetMin && val <= targetMax);
+            if (allStableInTarget) {
+                currentScale.min = targetMin;
+                currentScale.max = targetMax;
+            }
+        }
+
+        return { min: currentScale.min, max: currentScale.max };
+    }
+}
+
 function updateScaleLabels(t, min, max) {
     const el = document.getElementById(t + '-scale');
     if (el) el.innerHTML = `<span>${Math.round(max)}</span><span>${Math.round((min+max)/2)}</span><span>${Math.round(min)}</span>`;
