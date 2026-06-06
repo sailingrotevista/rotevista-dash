@@ -35,7 +35,7 @@ let CONFIG = {
 const RENDER_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 15000;
 const SIM_SAMPLE_INTERVAL = 1000;
-const DASH_VERSION = "3.8"; // Major Update: Smart Source Locking & Breathing Hercules Scale
+const DASH_VERSION = "6.0"; // Major Update: Smart Source Locking & Breathing Hercules Scale
 
 // ==========================================================================
 // 2. STATO GLOBALE E RIFERIMENTI UI
