@@ -1,6 +1,6 @@
 /**
  * ==========================================================================
- * Signal K Wind Dashboard - Pro Version 3.8 (Dynamic Envelope Architecture)
+ * Signal K Wind Dashboard - Pro Version 6.0 (Dynamic Envelope Architecture)
  * ==========================================================================
  * Autore: Sailing Rotevista
  * Motore di calcolo tattico per navigazione e crociera.
@@ -35,7 +35,7 @@ let CONFIG = {
 const RENDER_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 15000;
 const SIM_SAMPLE_INTERVAL = 1000;
-const DASH_VERSION = "6.0"; // Major Update: Smart Source Locking & Breathing Hercules Scale
+const DASH_VERSION = "6.0"; // Major Update: Server-Side History RAM Logging (Pro v6.0)
 
 // ==========================================================================
 // 2. STATO GLOBALE E RIFERIMENTI UI
@@ -616,11 +616,14 @@ function startDisplayLoop() {
         if (store.raw["navigation.speedThroughWater"] !== undefined) {
             ui.stw.innerText = stwKts.toFixed(1);
             ui.stw.style.color = ""; // Neutro
+            manageHistory('stw', stwKts);
         }
         
         // --- LOGICA SOG / VMG ---
         if (store.raw["navigation.speedOverGround"] !== undefined) {
             const vmgVal = Math.abs(stwKts * Math.cos(store.raw["environment.wind.angleTrueWater"] || 0));
+            manageHistory('vmg', vmgVal);
+            manageHistory('sog', sogKts);
             
             const labelSogVmg = document.getElementById('sog-vmg-label');
             if (displayModeSog === 'VMG') {
@@ -649,12 +652,16 @@ function startDisplayLoop() {
         if (store.raw["environment.depth.belowTransducer"] !== undefined) {
             ui.depth.innerText = store.raw["environment.depth.belowTransducer"].toFixed(1);
             checkDepthAlarm(store.raw["environment.depth.belowTransducer"]);
+            manageHistory('depth', store.raw["environment.depth.belowTransducer"]);
         }
 
         // --- GESTIONE VENTO (TWS / AWS SWITCH) ---
         const twsVal = store.raw["environment.wind.speedTrue"] ? msToKts(store.raw["environment.wind.speedTrue"]) : 0;
         const awsVal = store.raw["environment.wind.speedApparent"] ? msToKts(store.raw["environment.wind.speedApparent"]) : 0;
         
+        if (store.raw["environment.wind.speedTrue"] !== undefined) manageHistory('tws', twsVal);
+        if (store.raw["environment.wind.speedApparent"] !== undefined) manageHistory('aws', awsVal);
+
         if (store.raw["environment.wind.speedTrue"] !== undefined || store.raw["environment.wind.speedApparent"] !== undefined) {
             const labelWind = document.getElementById('tws-aws-label');
             const currentWind = (displayModeTws === 'AWS') ? awsVal : twsVal;
@@ -687,7 +694,7 @@ function startDisplayLoop() {
         if (smTwa) ui.twa.setAttribute('transform', `rotate(${curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val))}, 200, 200)`);
         
         if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
-            let driftDeg = radToDeg((store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+            let driftDeg = radToDeg((store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (2 * Math.PI) - Math.PI);
             smoothedLeeway = (sogKts < CONFIG.averaging.minSpeed) ? 0 : (smoothedLeeway * 0.9) + (driftDeg * 0.1);
             curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway);
             ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
@@ -759,6 +766,16 @@ function startDisplayLoop() {
 let currentConfigString = ""; // Memoria per rilevare cambiamenti nei settings
 
 /**
+ * Risolve dinamicamente l'URL dell'API del Cerbo GX se siamo in locale su Mac/PC
+ */
+function getApiUrl(path) {
+    if (window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return `http://${CONFIG.server.fallbackIp}${path}`;
+    }
+    return path;
+}
+
+/**
  * Funzione Helper: Applica fisicamente i dati JSON all'oggetto CONFIG globale
  */
 function applyConfigData(data) {
@@ -784,7 +801,7 @@ function applyConfigData(data) {
  */
 async function fetchServerConfig() {
     try {
-        const response = await fetch('/rotevista-config');
+        const response = await fetch(getApiUrl('/rotevista-config'));
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
 
@@ -803,7 +820,7 @@ async function fetchServerConfig() {
  */
 async function watchConfigChanges() {
     try {
-        const response = await fetch('/rotevista-config');
+        const response = await fetch(getApiUrl('/rotevista-config'));
         if (!response.ok) return;
         const data = await response.json();
         
@@ -834,7 +851,7 @@ async function watchConfigChanges() {
  */
 async function fetchServerHistory() {
     try {
-        const response = await fetch('/rotevista-history');
+        const response = await fetch(getApiUrl('/rotevista-history'));
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
         
@@ -850,6 +867,96 @@ async function fetchServerHistory() {
         console.warn("⚠️ Impossibile caricare lo storico dal server. Utilizzo dati vuoti/simulati.");
         throw err; // Rilancia l'errore per far attivare il fallback nella funzione init()
     }
+}
+
+/**
+ * manageHistory v3.7 - Aggregazione semantica "Pro-Grade"
+ * Integrazioni:
+ * 1. Strict undefined check per lastUpdates.
+ * 2. Anti-dropout dinamico tarato sul 50% del Reef 1.
+ * 3. Clamping di sicurezza (no negativi, no Infinity).
+ */
+function manageHistory(type, value) {
+    // --- 1. VALIDAZIONE INPUT RIGOROSA ---
+    if (value === undefined || value === null || !isFinite(value)) return;
+
+    const now = Date.now();
+    const historyMinutes = Math.max(1, CONFIG.graphs.historyMinutes || 10);
+    const samples = Math.max(2, CONFIG.graphs.samples || 60);
+    const bucketIntervalMs = (historyMinutes * 60000) / samples;
+
+    // --- 2. INIT SICURO (Strict Check) ---
+    if (!store.graphTempBuf[type]) store.graphTempBuf[type] = [];
+    if (!store.histories[type]) store.histories[type] = [];
+    if (store.lastUpdates[type] === undefined) store.lastUpdates[type] = 0;
+
+    const tempBuf = store.graphTempBuf[type];
+
+    // --- 3. ANTI-DROPOUT DINAMICO (Auto-scaling) ---
+    if ((type === 'tws' || type === 'aws') && value < 0.05 && tempBuf.length > 0) {
+        const lastPoint = tempBuf[tempBuf.length - 1];
+        const glitchThreshold = (CONFIG.graphs.reef1 || 15) * 0.5;
+        if (lastPoint && lastPoint.val > glitchThreshold) return;
+    }
+
+    // --- 4. STORAGE TEMPORANEO ---
+    tempBuf.push({ val: value, time: now });
+
+    // Controllo finestra temporale
+    const bucketReady = (now - store.lastUpdates[type] > bucketIntervalMs) || store.histories[type].length === 0;
+    if (!bucketReady) return;
+
+    // --- 5. AGGREGAZIONE SEMANTICA ---
+    let finalValue = value;
+
+    if (tempBuf.length > 0) {
+        // A. VENTO -> SUSTAINED PEAK (EMA Time-Aware)
+        if (type === 'tws' || type === 'aws') {
+            const tauMs = 2500;
+            let ema = tempBuf[0].val;
+            let maxSustained = ema;
+
+            for (let i = 1; i < tempBuf.length; i++) {
+                const dt = Math.max(1, tempBuf[i].time - tempBuf[i - 1].time);
+                const alpha = 1 - Math.exp(-dt / tauMs);
+                ema = (tempBuf[i].val * alpha) + (ema * (1 - alpha));
+                if (isFinite(ema) && ema > maxSustained) maxSustained = ema;
+            }
+            finalValue = maxSustained;
+        }
+        // B. PROFONDITÀ -> MINIMO
+        else if (type === 'depth') {
+            const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
+            if (vals.length > 0) finalValue = Math.min(...vals);
+        }
+        // C. VELOCITÀ -> MEDIA
+        else {
+            const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
+            if (vals.length > 0) {
+                const sum = vals.reduce((a, b) => a + b, 0);
+                finalValue = sum / tempBuf.length;
+            }
+        }
+    }
+
+    // --- 6. CLAMPING E VALIDAZIONE FINALE ---
+    if (!isFinite(finalValue)) return;
+    finalValue = Math.max(0, finalValue);
+
+    // --- 7. STORAGE STORICO ---
+    store.histories[type].push({ val: finalValue, time: now });
+
+    // --- 8. PRUNING DINAMICO ---
+    const maxViewportMinutes = historyMinutes * 2;
+    const maxHistoryMs = (maxViewportMinutes * 60000) + 60000;
+
+    while (store.histories[type].length > 0 && (now - store.histories[type][0].time) > maxHistoryMs) {
+        store.histories[type].shift();
+    }
+
+    // Reset per il prossimo bucket
+    store.graphTempBuf[type] = [];
+    store.lastUpdates[type] = now;
 }
 
 /**
@@ -880,7 +987,7 @@ function calculateScale(type, data, mode) {
         if (store.depthProtectedActive === undefined) store.depthProtectedActive = false;
 
         const now = Date.now();
-        const depthSafetyWindowMs = 120000; // 2 minuti di stabilizzazione fissi per la sicurezza
+        const depthSafetyWindowMs = 120000; // 2 minuti fissi per la sicurezza
         
         // Estrazione dati reali degli ultimi 2 minuti con timestamp
         const recentPoints = store.histories.depth.filter(p => (now - p.time) <= depthSafetyWindowMs);
@@ -1015,6 +1122,7 @@ function refreshGraph(t) {
 
 /**
  * drawGraph: Motore SVG con Timeline Reale e Gestione GAP
+ * Risolve i conflitti di orologio (Clock Drift) tra Cerbo GX e Tablet.
  */
 function drawGraph(d, id, min, max, isTws, isHercules) {
     const svg = document.getElementById(id);
@@ -1023,7 +1131,11 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     const w = 200, h = 40;
     const range = max - min || 1;
     const isDepth = (id === 'depth-graph');
-    const now = Date.now();
+    
+    // --- RISOLUZIONE DISALLINEAMENTO ORARIO ---
+    // Usiamo il tempo del sensore (l'ultimo dato ricevuto) invece dell'orologio del tablet
+    const latestPoint = d[d.length - 1];
+    const now = latestPoint ? latestPoint.time : Date.now();
 
     const visibleMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
     const viewportMs = visibleMinutes * 60000;
@@ -1253,19 +1365,17 @@ window.addEventListener('contextmenu', e => e.preventDefault(), true);
 async function init() {
     loadDashboardState();
     
-    // Prova a caricare lo storico dal server. Se fallisce (test offline), gestisce il fallback
+    // Prova a caricare lo storico reale dal Cerbo GX tramite l'API deviata
     try {
         await fetchServerHistory();
     } catch (err) {
-        if (simulationMode) {
-            // Se sei in modalità simulazione locale, puoi generare dati finti qui (opzionale)
-            console.log("🎮 Modalità Simulazione Locale attiva.");
-        }
+        console.warn("⚠️ Impossibile caricare lo storico dal server.");
     }
 
     await fetchServerConfig();
     startDisplayLoop();
-    connect();
+    connect(); // Si collegherà in tempo reale al WebSocket del Cerbo (usando l'IP di fallback se sei su Mac)
+    
     setInterval(watchConfigChanges, 10000);
 }
 

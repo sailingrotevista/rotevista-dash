@@ -37,17 +37,19 @@ module.exports = function (app) {
     lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0 };
     raw = {};
 
-    // 2. Registra le rotte API solo la prima volta
-    if (!routeRegistered) {
-      app.get('/rotevista-config', (req, res) => {
-        res.json(currentConfig);
-      });
-      app.get('/rotevista-history', (req, res) => {
-        res.json(histories);
-      });
-      routeRegistered = true;
-      app.debug('Public API endpoints registered at /rotevista-config and /rotevista-history');
-    }
+  // 2. Registra le rotte API solo la prima volta (Abilitate per CORS remoto)
+      if (!routeRegistered) {
+        app.get('/rotevista-config', (req, res) => {
+          res.header("Access-Control-Allow-Origin", "*"); // Sblocca la Dashboard locale su Mac
+          res.json(currentConfig);
+        });
+        app.get('/rotevista-history', (req, res) => {
+          res.header("Access-Control-Allow-Origin", "*"); // Sblocca la Dashboard locale su Mac
+          res.json(histories);
+        });
+        routeRegistered = true;
+        app.debug('Public API endpoints registered at /rotevista-config and /rotevista-history');
+      }
 
     // 3. Iscrizione ai dati dei sensori di bordo tramite Signal K
     const localSubscription = {
