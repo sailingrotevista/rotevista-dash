@@ -1377,7 +1377,34 @@ async function init() {
     connect(); // Si collegherà in tempo reale al WebSocket del Cerbo (usando l'IP di fallback se sei su Mac)
     
     setInterval(watchConfigChanges, 10000);
+
+    // ==========================================================================
+    // WATCHDOG DI RISVEGLIO (SLEEP/WAKE DETECTOR)
+    // ==========================================================================
+    
+    // Rileva quando la scheda del browser torna in primo piano (es. sblocco iPad o Mac aperto)
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            handleWakeUp();
+        }
+    });
+
+    // Rileva se il computer è andato in sospensione misurando il ritardo dei secondi
+    let lastHeartbeat = Date.now();
+    setInterval(() => {
+        const now = Date.now();
+        const diff = now - lastHeartbeat;
+        lastHeartbeat = now;
+        
+        // Se passano più di 6 secondi tra un ciclo e l'altro (invece di 1 secondo),
+        // significa che il PC era in sospensione. Avviamo il risveglio.
+        if (diff > 6000) {
+            handleWakeUp();
+        }
+    }, 1000);
 }
+
+
 
 window.addEventListener('load', init);
 window.addEventListener('pagehide', saveDashboardState);
