@@ -33,7 +33,7 @@ let CONFIG = {
 };
 
 const RENDER_INTERVAL_MS = 1000;
-const TIMEOUT_MS = 5000;
+const TIMEOUT_MS = 15000;
 const SIM_SAMPLE_INTERVAL = 1000;
 const DASH_VERSION = "3.8"; // Major Update: Smart Source Locking & Breathing Hercules Scale
 
@@ -75,6 +75,8 @@ const sourceLocks = {};
 const store = {
     raw: {},
     timestamps: {},
+    depthProtectedActive: false, // Memoria per lo stato della protezione profondità
+    herculesScales: {},          // Memoria per i limiti attivi della modalità Hercules
     smoothBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
     longBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
     histories: { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] },
@@ -926,28 +928,107 @@ function manageHistory(type, value) {
 
 /**
  * Gestione dinamica delle scale dei grafici (Involucro Elastico e Safety Zoom)
+ * Implementa la logica di sicurezza disaccoppiata a 2 minuti per la profondità.
  */
 function calculateScale(type, data, mode) {
     const s = CONFIG.scales[type];
-    let aMin = Math.min(...data), aMax = Math.max(...data);
+    const currentVal = data[data.length - 1];
     
-    // --- SAFETY ZOOM PER PROFONDITÀ (FONDALE BASSO) ---
-    if (type === 'depth' && mode !== 'hercules') {
-        const currentDepth = data[data.length - 1];
-        const shallowThreshold = Math.max(s.stdMax, 10);
-        if (currentDepth <= shallowThreshold) {
-            return { min: 0, max: shallowThreshold };
+    // Fallback di emergenza se il buffer è momentaneamente vuoto
+    if (currentVal === undefined || currentVal === null) {
+        return { min: 0, max: s ? s.stdMax : 10 };
+    }
+
+    // Inizializzazione della memoria delle scale nello store se non esiste
+    if (!store.herculesScales) store.herculesScales = {};
+    if (!store.herculesScales[type]) {
+        store.herculesScales[type] = { min: 0, max: s ? s.stdMax : 10 };
+    }
+    let currentScale = store.herculesScales[type];
+
+    // ==========================================================================
+    // SEZIONE PROFONDITÀ (REGOLA DI SICUREZZA DISACCOPPIATA A 2 MINUTI)
+    // ==========================================================================
+    if (type === 'depth') {
+        const shallowThreshold = Math.max(s.stdMax, 10); // Es. 20m
+        if (store.depthProtectedActive === undefined) store.depthProtectedActive = false;
+
+        const now = Date.now();
+        const depthSafetyWindowMs = 120000; // 2 minuti di stabilizzazione fissi per la sicurezza
+        
+        // Estrazione dati reali degli ultimi 2 minuti con timestamp
+        const recentPoints = store.histories.depth.filter(p => (now - p.time) <= depthSafetyWindowMs);
+        const recentVals = recentPoints.map(p => p.val);
+
+        const localMax = recentVals.length > 0 ? Math.max(...recentVals) : currentVal;
+        const localMin = recentVals.length > 0 ? Math.min(...recentVals) : currentVal;
+
+        // --- NORMALE PROFONDITÀ (CON SOGLIA STANDARD E FILTRO 2 MINUTI) ---
+        if (mode !== 'hercules') {
+            // Entrata istantanea sotto lo Standard Max (sicurezza immediata)
+            if (!store.depthProtectedActive && currentVal <= shallowThreshold) {
+                store.depthProtectedActive = true;
+            }
+
+            // Uscita ritardata: usciamo solo se il minimo degli ultimi 2 minuti è sopra soglia
+            if (store.depthProtectedActive) {
+                if (localMin > shallowThreshold) {
+                    store.depthProtectedActive = false;
+                }
+            }
+
+            if (store.depthProtectedActive) {
+                return { min: 0, max: shallowThreshold }; // Blocco a [0 - 20m]
+            }
+
+            // Se siamo fuori, scala dinamica normale basata sull'intero buffer passato
+            const maxHistorico = Math.max(...data);
+            return { min: 0, max: Math.max(s.stdMax, Math.ceil(maxHistorico / s.step) * s.step) };
+        }
+
+        // --- HERCULES PROFONDITÀ (0 IN BASSO, ZOOM SUL MASSIMO DEI 2 MINUTI) ---
+        if (mode === 'hercules') {
+            const padding = 1.0; // 1 metro di margine sopra il fondo
+            
+            // Calcoliamo i limiti ideali basati solo sugli ultimi 2 minuti
+            let targetMin = 0;
+            let targetMax = Math.ceil(localMax + padding);
+
+            // Impediamo una scala troppo stretta (minimo 4 metri di range totale per sicurezza)
+            const absoluteMinSpan = 4;
+            if (targetMax < absoluteMinSpan) {
+                targetMax = absoluteMinSpan;
+            }
+
+            // Regola asimmetrica di aggiornamento
+            if (currentVal > currentScale.max) {
+                // Se andiamo verso il fondo profondo, allarghiamo istantaneamente
+                currentScale.max = targetMax;
+            } else {
+                // Stringiamo lo zoom solo se tutti i dati degli ultimi 2 minuti sono inferiori al target
+                const allStableInTarget = recentVals.every(val => val <= targetMax);
+                if (allStableInTarget) {
+                    currentScale.max = targetMax;
+                }
+            }
+
+            currentScale.min = 0;
+            return { min: currentScale.min, max: currentScale.max };
         }
     }
-    
-    // --- MODALITÀ HERCULES AGGIORNATA (INVOLUCRO DINAMICO ELASTICO) ---
+
+    // ==========================================================================
+    // ALTRI GRAFICI (STW, SOG, TWS): MANTENGONO IL COMPORTAMENTO ORIGINALE
+    // ==========================================================================
+    let aMin = Math.min(...data), aMax = Math.max(...data);
+
     if (mode === 'hercules') {
         const padding = (type === 'stw' || type === 'sog') ? 0.5 : 1.0;
 
         let min = Math.max(0, Math.floor(aMin - padding));
         let max = Math.ceil(aMax + padding);
 
-        // Garantisce uno span minimo configurato per evitare zoom eccessivi sul rumore di fondo
+        // Garantisce lo span minimo
         const currentSpan = max - min;
         if (currentSpan < s.hercSpan) {
             const diff = s.hercSpan - currentSpan;
@@ -955,7 +1036,7 @@ function calculateScale(type, data, mode) {
             max = min + s.hercSpan;
         }
 
-        // Arrotonda la griglia numerica a step prefissati per evitare sfarfallamento visivo
+        // Arrotonda la griglia numerica a step prefissati
         const roundStep = (type === 'stw' || type === 'sog') ? 0.5 : 1.0;
         min = Math.floor(min / roundStep) * roundStep;
         max = Math.ceil(max / roundStep) * roundStep;
