@@ -885,10 +885,14 @@ function manageHistory(type, value) {
     const samples = Math.max(2, CONFIG.graphs.samples || 60);
     const bucketIntervalMs = (historyMinutes * 60000) / samples;
 
-    // --- 2. INIT SICURO (Strict Check) ---
+    // --- 2. INIT SICURO (Sintonizzato all'epoca assoluta UTC) ---
     if (!store.graphTempBuf[type]) store.graphTempBuf[type] = [];
     if (!store.histories[type]) store.histories[type] = [];
-    if (store.lastUpdates[type] === undefined) store.lastUpdates[type] = 0;
+    
+    // SINTONIZZAZIONE DI FASE: Agganciamo il timer iniziale al multiplo UTC più vicino
+    if (store.lastUpdates[type] === undefined || store.lastUpdates[type] === 0) {
+        store.lastUpdates[type] = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
+    }
 
     const tempBuf = store.graphTempBuf[type];
 
@@ -956,7 +960,8 @@ function manageHistory(type, value) {
 
     // Reset per il prossimo bucket
     store.graphTempBuf[type] = [];
-    store.lastUpdates[type] = now;
+    // Spostiamo il timer esattamente al confine del secchiello assoluto appena concluso
+    store.lastUpdates[type] = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
 }
 
 /**

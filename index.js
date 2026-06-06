@@ -153,11 +153,15 @@ module.exports = function (app) {
     const samples = 60;
     const bucketIntervalMs = (historyMinutes * 60000) / samples;
 
-    if (!graphTempBuf[type]) graphTempBuf[type] = [];
-    if (!histories[type]) histories[type] = [];
-    if (lastUpdates[type] === undefined) lastUpdates[type] = 0;
+      if (!graphTempBuf[type]) graphTempBuf[type] = [];
+      if (!histories[type]) histories[type] = [];
+      
+      // SINTONIZZAZIONE DI FASE LATO SERVER (UTC Snap)
+      if (lastUpdates[type] === undefined || lastUpdates[type] === 0) {
+        lastUpdates[type] = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
+      }
 
-    const tempBuf = graphTempBuf[type];
+      const tempBuf = graphTempBuf[type];
 
     // Anti-dropout dinamico sul vento forte
     if ((type === 'tws' || type === 'aws') && value < 0.05 && tempBuf.length > 0) {
@@ -219,9 +223,10 @@ module.exports = function (app) {
       histories[type].shift();
     }
 
-    graphTempBuf[type] = [];
-    lastUpdates[type] = now;
-  }
+  graphTempBuf[type] = [];
+      // Spostiamo il timer esattamente al confine del secchiello assoluto appena concluso
+      lastUpdates[type] = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
+    }
 
   /**
    * plugin.schema: Definisce l'interfaccia grafica in Signal K Admin.
