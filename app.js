@@ -1317,13 +1317,26 @@ function connect() {
     let addr = window.location.host || CONFIG.server.fallbackIp;
     try {
         socket = new WebSocket(`ws://${addr}/signalk/v1/stream?subscribe=self`);
-        socket.onopen = () => { ui.status.className = "online"; ui.status.innerText = "ONLINE"; reconnectDelay = 1000; };
+        
+        socket.onopen = async () => {
+            ui.status.className = "online";
+            ui.status.innerText = "ONLINE";
+            reconnectDelay = 1000;
+            
+            // SINCRONIZZAZIONE AUTOMATICA: Ogni volta che la connessione si apre o si riapre,
+            // scarichiamo lo storico fresco dal server e ridisegnamo i grafici
+            try {
+                await fetchServerHistory();
+                ['stw', 'sog', 'depth', 'tws'].forEach(refreshGraph);
+            } catch (err) {
+                console.warn("⚠️ Sincronizzazione storico fallita alla connessione:", err);
+            }
+        };
         
         socket.onmessage = (e) => {
             const d = JSON.parse(e.data);
             if (d.updates) {
                 d.updates.forEach(u => {
-                    // ESTRAZIONE AVANZATA DELLA SORGENTE (Gestisce $source e stringhe native)
                     let sourceLabel = "Unknown";
                     if (u.$source) {
                         sourceLabel = u.$source;
@@ -1342,8 +1355,17 @@ function connect() {
             }
         };
 
-        socket.onclose = () => { if (!simulationMode) { ui.status.className = "offline"; ui.status.innerText = "RECONNECTING..."; setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 10000); } };
-    } catch (e) { setTimeout(connect, reconnectDelay); }
+        socket.onclose = () => {
+            if (!simulationMode) {
+                ui.status.className = "offline";
+                ui.status.innerText = "RECONNECTING...";
+                setTimeout(connect, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+            }
+        };
+    } catch (e) {
+        setTimeout(connect, reconnectDelay);
+    }
 }
 
 // ==========================================================================
@@ -1366,45 +1388,34 @@ window.addEventListener('contextmenu', e => e.preventDefault(), true);
 async function init() {
     loadDashboardState();
     
-    // Prova a caricare lo storico reale dal Cerbo GX tramite l'API deviata
-    try {
-        await fetchServerHistory();
-    } catch (err) {
-        console.warn("⚠️ Impossibile caricare lo storico dal server.");
-    }
-
+    // Proviamo un primo caricamento configurazioni
     await fetchServerConfig();
     startDisplayLoop();
-    connect(); // Si collegherà in tempo reale al WebSocket del Cerbo (usando l'IP di fallback se sei su Mac)
+    connect();
     
     setInterval(watchConfigChanges, 10000);
 
     // ==========================================================================
-    // WATCHDOG DI RISVEGLIO (SLEEP/WAKE DETECTOR)
+    // RICONNESSIONE RAPIDA AL RISVEGLIO (VISIBILITY WATCHDOG)
     // ==========================================================================
     
-    // Rileva quando la scheda del browser torna in primo piano (es. sblocco iPad o Mac aperto)
+    // Quando sblocchi l'iPad o riapri il browser, forziamo la chiusura del vecchio
+    // WebSocket orfano. Questo farà scattare immediatamente connect() e la sincronizzazione.
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-            handleWakeUp();
+            console.log("⏰ Schermo sbloccato: forzatura riconnessione rapida.");
+            if (socket) {
+                try {
+                    socket.close(); // Fa scattare onclose -> connect() -> onopen -> fetchServerHistory()
+                } catch (e) {
+                    connect();
+                }
+            } else {
+                connect();
+            }
         }
     });
-
-    // Rileva se il computer è andato in sospensione misurando il ritardo dei secondi
-    let lastHeartbeat = Date.now();
-    setInterval(() => {
-        const now = Date.now();
-        const diff = now - lastHeartbeat;
-        lastHeartbeat = now;
-        
-        // Se passano più di 6 secondi tra un ciclo e l'altro (invece di 1 secondo),
-        // significa che il PC era in sospensione. Avviamo il risveglio.
-        if (diff > 6000) {
-            handleWakeUp();
-        }
-    }, 1000);
 }
-
 
 
 window.addEventListener('load', init);
