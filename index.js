@@ -127,10 +127,10 @@ module.exports = function (app) {
             default: 0.5
           },
           stabilityThreshold: {
-              type: 'number',
-              title: 'Steering Precision (Sensitivity)',
-              description: "How strictly the system judges data coherence (0.0 to 1.0). Due to internal smoothing, 0.97-0.98 requires racing precision; 0.93-0.95 is ideal for cruising in waves. Below this, the display rarely alerts for instability.",
-                default: 0.95 
+            type: 'number',
+            title: 'Steering Precision (Sensitivity)',
+            description: "How strictly the system judges data coherence (0.0 to 1.0). Due to internal smoothing, 0.97-0.98 requires racing precision; 0.93-0.95 is ideal for cruising in waves. Below this, the display rarely alerts for instability.",
+            default: 0.95
           },
           stabilityBreakout: {
             type: 'number',
@@ -152,7 +152,13 @@ module.exports = function (app) {
             properties: {
               stdMax: { type: 'number', title: 'Standard Max', description: "Default top limit of the graph.", default: 12 },
               step: { type: 'number', title: 'Scale Jump', description: "Amount the scale increases when you exceed the limit.", default: 2 },
-              hercSpan: { type: 'number', title: 'Hercules Zoom Span', description: "Width of the zoom window around your current speed.", default: 4 }
+              hercSpan: {
+                type: 'number',
+                title: 'Hercules Grid Step (Resolution)',
+                description: "Select the multiplier step for the Hercules zoom. The scale boundaries will always snap to multiples of this value.",
+                enum: [0.5, 1.0, 2.0, 3.0],
+                default: 1.0
+              }
             }
           },
           sog: {
@@ -161,7 +167,13 @@ module.exports = function (app) {
             properties: {
               stdMax: { type: 'number', title: 'Standard Max', default: 12 },
               step: { type: 'number', title: 'Scale Jump', default: 2 },
-              hercSpan: { type: 'number', title: 'Hercules Zoom Span', default: 4 }
+              hercSpan: {
+                type: 'number',
+                title: 'Hercules Grid Step (Resolution)',
+                description: "Select the multiplier step for the Hercules zoom. The scale boundaries will always snap to multiples of this value.",
+                enum: [0.5, 1.0, 2.0, 3.0],
+                default: 1.0
+              }
             }
           },
           tws: {
@@ -170,7 +182,13 @@ module.exports = function (app) {
             properties: {
               stdMax: { type: 'number', title: 'Standard Max', default: 25 },
               step: { type: 'number', title: 'Scale Jump', default: 5 },
-              hercSpan: { type: 'number', title: 'Hercules Zoom Span', default: 10 }
+              hercSpan: {
+                type: 'number',
+                title: 'Hercules Grid Step (Resolution)',
+                description: "Select the multiplier step for the Hercules zoom. The scale boundaries will always snap to multiples of this value.",
+                enum: [1, 2, 3, 5, 10],
+                default: 2
+              }
             }
           },
           depth: {
@@ -179,7 +197,13 @@ module.exports = function (app) {
             properties: {
               stdMax: { type: 'number', title: 'Standard Max', default: 20 },
               step: { type: 'number', title: 'Scale Jump', default: 10 },
-              hercSpan: { type: 'number', title: 'Hercules Zoom Span', default: 10 }
+              hercSpan: {
+                type: 'number',
+                title: 'Hercules Grid Step (Resolution)',
+                description: "Select the multiplier step for the Hercules zoom. The scale boundaries will always snap to multiples of this value.",
+                enum: [1, 2, 3, 5, 10],
+                default: 2
+              }
             }
           }
         }
