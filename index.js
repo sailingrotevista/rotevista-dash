@@ -1,9 +1,9 @@
 /**
  * ==========================================================================
- * Rotevista Dash Configuration Plugin
+ * Rotevista Dash Configuration & History Plugin (Pro v6.0)
  * ==========================================================================
  * Definisce l'interfaccia di configurazione in Signal K Admin e crea
- * l'endpoint pubblico per la comunicazione con la Dashboard.
+ * gli endpoint pubblici per la Dashboard, mantenendo lo storico in RAM.
  */
 
 module.exports = function (app) {
@@ -14,39 +14,212 @@ module.exports = function (app) {
 
   let currentConfig = {};
   let routeRegistered = false;
+  let unsubscribes = [];
+
+  // Database dello storico in RAM sul server
+  let histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] };
+  let graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] };
+  let lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0 };
+  let raw = {};
 
   /**
    * plugin.start: Inizializza il plugin.
    * Viene chiamato all'avvio e OGNI VOLTA che clicchi "Save" nelle impostazioni.
    */
   plugin.start = function (options) {
-    // 1. Aggiorna la configurazione in memoria (per l'endpoint pubblico)
+    // 1. Aggiorna la configurazione in memoria
     currentConfig = options;
-
-    // 2. Log di debug nel server Signal K
     app.debug(`${plugin.name} started/updated with new options`);
 
-    // 3. Registra la rotta API solo la prima volta
+    // Reset dello storico al riavvio del plugin per evitare incoerenze
+    histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] };
+    graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] };
+    lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0 };
+    raw = {};
+
+    // 2. Registra le rotte API solo la prima volta
     if (!routeRegistered) {
       app.get('/rotevista-config', (req, res) => {
         res.json(currentConfig);
       });
+      app.get('/rotevista-history', (req, res) => {
+        res.json(histories);
+      });
       routeRegistered = true;
-      app.debug('Public API endpoint registered at /rotevista-config');
+      app.debug('Public API endpoints registered at /rotevista-config and /rotevista-history');
     }
+
+    // 3. Iscrizione ai dati dei sensori di bordo tramite Signal K
+    const localSubscription = {
+      context: 'vessels.self',
+      subscribe: [
+        { path: 'navigation.speedThroughWater' },
+        { path: 'navigation.speedOverGround' },
+        { path: 'environment.depth.belowTransducer' },
+        { path: 'environment.wind.speedApparent' },
+        { path: 'environment.wind.angleApparent' },
+        { path: 'navigation.headingTrue' },
+        { path: 'navigation.courseOverGroundTrue' }
+      ]
+    };
+
+    app.subscriptionmanager.subscribe(
+      localSubscription,
+      unsubscribes,
+      subscriptionError => {
+        app.error('Subscription error: ' + subscriptionError);
+      },
+      delta => {
+        if (delta.updates) {
+          delta.updates.forEach(update => {
+            if (update.values) {
+              update.values.forEach(v => {
+                processIncomingDelta(v.path, v.value);
+              });
+            }
+          });
+        }
+      }
+    );
   };
 
   /**
-   * plugin.stop: Chiamato quando il plugin viene disattivato o prima di un aggiornamento.
+   * plugin.stop: Chiamato quando il plugin viene disattivato.
    */
   plugin.stop = function () {
+    unsubscribes.forEach(f => f());
+    unsubscribes = [];
     app.debug(`${plugin.name} stopped`);
   };
 
-  // Se desideri avere una funzione plugin.debug personalizzata (opzionale)
   plugin.debug = function(msg) {
     app.debug(msg);
   };
+
+  /**
+   * processIncomingDelta: Decodifica i dati dei sensori in Knots/Meters ed esegue l'aggregazione
+   */
+  function processIncomingDelta(path, val) {
+    if (val === null || val === undefined) return;
+    raw[path] = val;
+
+    // Elaborazione e invio alla macchina a stati temporali dello storico
+    if (path === 'navigation.speedThroughWater') {
+      manageHistory('stw', val * 1.94384);
+    }
+    else if (path === 'navigation.speedOverGround') {
+      manageHistory('sog', val * 1.94384);
+    }
+    else if (path === 'environment.depth.belowTransducer') {
+      manageHistory('depth', val);
+    }
+    else if (path === 'environment.wind.speedApparent') {
+      manageHistory('aws', val * 1.94384);
+    }
+
+    // Calcolo combinato del Vento Reale (TWS) e della VMG a livello Server
+    const aws = raw["environment.wind.speedApparent"];
+    const awa = raw["environment.wind.angleApparent"];
+    const stw = raw["navigation.speedThroughWater"] || 0;
+    const sog = raw["navigation.speedOverGround"] || 0;
+    const hdg = raw["navigation.headingTrue"] || 0;
+    const cog = raw["navigation.courseOverGroundTrue"] || 0;
+
+    if (aws !== undefined && awa !== undefined) {
+      const awsKts = aws * 1.94384;
+      const stwKts = stw * 1.94384;
+      const tw_water_x = awsKts * Math.cos(awa) - stwKts;
+      const tw_water_y = awsKts * Math.sin(awa);
+      const tws = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
+
+      manageHistory('tws', tws);
+
+      const twa = Math.atan2(tw_water_y, tw_water_x);
+      const vmg = Math.abs(stwKts * Math.cos(twa));
+      manageHistory('vmg', vmg);
+    }
+  }
+
+  /**
+   * manageHistory: Versione Server-side dell'aggregatore matematico tattico
+   */
+  function manageHistory(type, value) {
+    if (value === undefined || value === null || !isFinite(value)) return;
+
+    const now = Date.now();
+    const historyMinutes = currentConfig.graphs ? currentConfig.graphs.historyMinutes : 5;
+    const samples = 60;
+    const bucketIntervalMs = (historyMinutes * 60000) / samples;
+
+    if (!graphTempBuf[type]) graphTempBuf[type] = [];
+    if (!histories[type]) histories[type] = [];
+    if (lastUpdates[type] === undefined) lastUpdates[type] = 0;
+
+    const tempBuf = graphTempBuf[type];
+
+    // Anti-dropout dinamico sul vento forte
+    if ((type === 'tws' || type === 'aws') && value < 0.05 && tempBuf.length > 0) {
+      const lastPoint = tempBuf[tempBuf.length - 1];
+      const reef1 = currentConfig.graphs ? currentConfig.graphs.reef1 : 15;
+      const glitchThreshold = reef1 * 0.5;
+      if (lastPoint && lastPoint.val > glitchThreshold) return;
+    }
+
+    tempBuf.push({ val: value, time: now });
+
+    // Controllo avanzamento del secchiello temporale (Bucket)
+    const bucketReady = (now - lastUpdates[type] > bucketIntervalMs) || histories[type].length === 0;
+    if (!bucketReady) return;
+
+    let finalValue = value;
+
+    if (tempBuf.length > 0) {
+      // A. VENTO -> SUSTAINED PEAK (EMA Time-Aware)
+      if (type === 'tws' || type === 'aws') {
+        const tauMs = 2500;
+        let ema = tempBuf[0].val;
+        let maxSustained = ema;
+
+        for (let i = 1; i < tempBuf.length; i++) {
+          const dt = Math.max(1, tempBuf[i].time - tempBuf[i-1].time);
+          const alpha = 1 - Math.exp(-dt / tauMs);
+          ema = (tempBuf[i].val * alpha) + (ema * (1 - alpha));
+          if (isFinite(ema) && ema > maxSustained) maxSustained = ema;
+        }
+        finalValue = maxSustained;
+      }
+      // B. PROFONDITÀ -> MINIMO
+      else if (type === 'depth') {
+        const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
+        if (vals.length > 0) finalValue = Math.min(...vals);
+      }
+      // C. VELOCITÀ -> MEDIA
+      else {
+        const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
+        if (vals.length > 0) {
+          const sum = vals.reduce((a, b) => a + b, 0);
+          finalValue = sum / tempBuf.length;
+        }
+      }
+    }
+
+    if (!isFinite(finalValue)) return;
+    finalValue = Math.max(0, finalValue);
+
+    // Salvataggio nel ring buffer dello storico principale
+    histories[type].push({ val: finalValue, time: now });
+
+    // Pruning automatico basato sulle impostazioni di timeline
+    const maxViewportMinutes = historyMinutes * 2;
+    const maxHistoryMs = (maxViewportMinutes * 60000) + 60000;
+
+    while (histories[type].length > 0 && (now - histories[type][0].time) > maxHistoryMs) {
+      histories[type].shift();
+    }
+
+    graphTempBuf[type] = [];
+    lastUpdates[type] = now;
+  }
 
   /**
    * plugin.schema: Definisce l'interfaccia grafica in Signal K Admin.

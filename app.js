@@ -616,14 +616,11 @@ function startDisplayLoop() {
         if (store.raw["navigation.speedThroughWater"] !== undefined) {
             ui.stw.innerText = stwKts.toFixed(1);
             ui.stw.style.color = ""; // Neutro
-            manageHistory('stw', stwKts);
         }
         
         // --- LOGICA SOG / VMG ---
         if (store.raw["navigation.speedOverGround"] !== undefined) {
             const vmgVal = Math.abs(stwKts * Math.cos(store.raw["environment.wind.angleTrueWater"] || 0));
-            manageHistory('vmg', vmgVal);
-            manageHistory('sog', sogKts);
             
             const labelSogVmg = document.getElementById('sog-vmg-label');
             if (displayModeSog === 'VMG') {
@@ -652,16 +649,12 @@ function startDisplayLoop() {
         if (store.raw["environment.depth.belowTransducer"] !== undefined) {
             ui.depth.innerText = store.raw["environment.depth.belowTransducer"].toFixed(1);
             checkDepthAlarm(store.raw["environment.depth.belowTransducer"]);
-            manageHistory('depth', store.raw["environment.depth.belowTransducer"]);
         }
 
         // --- GESTIONE VENTO (TWS / AWS SWITCH) ---
         const twsVal = store.raw["environment.wind.speedTrue"] ? msToKts(store.raw["environment.wind.speedTrue"]) : 0;
         const awsVal = store.raw["environment.wind.speedApparent"] ? msToKts(store.raw["environment.wind.speedApparent"]) : 0;
         
-        if (store.raw["environment.wind.speedTrue"] !== undefined) manageHistory('tws', twsVal);
-        if (store.raw["environment.wind.speedApparent"] !== undefined) manageHistory('aws', awsVal);
-
         if (store.raw["environment.wind.speedTrue"] !== undefined || store.raw["environment.wind.speedApparent"] !== undefined) {
             const labelWind = document.getElementById('tws-aws-label');
             const currentWind = (displayModeTws === 'AWS') ? awsVal : twsVal;
@@ -801,7 +794,7 @@ async function fetchServerConfig() {
         applyConfigData(data);
         console.log("✅ Configurazione iniziale applicata con successo.");
     } catch (err) {
-        console.warn("⚠️ Impossibile raggiungere il server per le configurazioni. Utilizzo default locali. Motivo:", err.message);
+        console.warn("⚠️ Impossibile raggiungere le configurazioni dal server. Utilizzo default.");
     }
 }
 
@@ -837,222 +830,25 @@ async function watchConfigChanges() {
 }
 
 /**
- * manageHistory v3.7 - Aggregazione semantica "Pro-Grade"
- * Integrazioni:
- * 1. Strict undefined check per lastUpdates.
- * 2. Anti-dropout dinamico tarato sul 50% del Reef 1.
- * 3. Clamping di sicurezza (no negativi, no Infinity).
+ * Recupera lo storico dei grafici pre-popolato dal server Signal K (Pro v6.0)
  */
-function manageHistory(type, value) {
-    // --- 1. VALIDAZIONE INPUT RIGOROSA ---
-    if (value === undefined || value === null || !isFinite(value)) return;
-
-    const now = Date.now();
-    const historyMinutes = Math.max(1, CONFIG.graphs.historyMinutes || 10);
-    const samples = Math.max(2, CONFIG.graphs.samples || 60);
-    const bucketIntervalMs = (historyMinutes * 60000) / samples;
-
-    // --- 2. INIT SICURO (Strict Check) ---
-    if (!store.graphTempBuf[type]) store.graphTempBuf[type] = [];
-    if (!store.histories[type]) store.histories[type] = [];
-    if (store.lastUpdates[type] === undefined) store.lastUpdates[type] = 0;
-
-    const tempBuf = store.graphTempBuf[type];
-
-    // --- 3. ANTI-DROPOUT DINAMICO (Auto-scaling) ---
-    if ((type === 'tws' || type === 'aws') && value < 0.05 && tempBuf.length > 0) {
-        const lastPoint = tempBuf[tempBuf.length - 1];
-        const glitchThreshold = (CONFIG.graphs.reef1 || 15) * 0.5;
-        if (lastPoint && lastPoint.val > glitchThreshold) return;
-    }
-
-    // --- 4. STORAGE TEMPORANEO ---
-    tempBuf.push({ val: value, time: now });
-
-    // Controllo finestra temporale
-    const bucketReady = (now - store.lastUpdates[type] > bucketIntervalMs) || store.histories[type].length === 0;
-    if (!bucketReady) return;
-
-    // --- 5. AGGREGAZIONE SEMANTICA ---
-    let finalValue = value;
-
-    if (tempBuf.length > 0) {
-        // A. VENTO -> SUSTAINED PEAK (EMA Time-Aware)
-        if (type === 'tws' || type === 'aws') {
-            const tauMs = 2500;
-            let ema = tempBuf[0].val;
-            let maxSustained = ema;
-
-            for (let i = 1; i < tempBuf.length; i++) {
-                const dt = Math.max(1, tempBuf[i].time - tempBuf[i - 1].time);
-                const alpha = 1 - Math.exp(-dt / tauMs);
-                ema = (tempBuf[i].val * alpha) + (ema * (1 - alpha));
-                if (isFinite(ema) && ema > maxSustained) maxSustained = ema;
-            }
-            finalValue = maxSustained;
-        }
-        // B. PROFONDITÀ -> MINIMO
-        else if (type === 'depth') {
-            const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
-            if (vals.length > 0) finalValue = Math.min(...vals);
-        }
-        // C. VELOCITÀ -> MEDIA
-        else {
-            const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
-            if (vals.length > 0) {
-                const sum = vals.reduce((a, b) => a + b, 0);
-                finalValue = sum / tempBuf.length;
-            }
-        }
-    }
-
-    // --- 6. CLAMPING E VALIDAZIONE FINALE ---
-    if (!isFinite(finalValue)) return;
-    finalValue = Math.max(0, finalValue);
-
-    // --- 7. STORAGE STORICO ---
-    store.histories[type].push({ val: finalValue, time: now });
-
-    // --- 8. PRUNING DINAMICO ---
-    const maxViewportMinutes = historyMinutes * 2;
-    const maxHistoryMs = (maxViewportMinutes * 60000) + 60000;
-
-    while (store.histories[type].length > 0 && (now - store.histories[type][0].time) > maxHistoryMs) {
-        store.histories[type].shift();
-    }
-
-    // Reset per il prossimo bucket
-    store.graphTempBuf[type] = [];
-    store.lastUpdates[type] = now;
-}
-
-/**
- * Gestione dinamica delle scale dei grafici (Involucro Elastico Snapped e Safety Zoom)
- * Implementa lo "Snap a Griglia" basato sull'hercSpan senza padding per tutti i sensori.
- */
-function calculateScale(type, data, mode) {
-    const s = CONFIG.scales[type];
-    const currentVal = data[data.length - 1];
-    
-    // Fallback di emergenza se il buffer è momentaneamente vuoto
-    if (currentVal === undefined || currentVal === null) {
-        return { min: 0, max: s ? s.stdMax : 10 };
-    }
-
-    // Inizializzazione della memoria delle scale nello store se non esiste
-    if (!store.herculesScales) store.herculesScales = {};
-    if (!store.herculesScales[type]) {
-        store.herculesScales[type] = { min: 0, max: s ? s.stdMax : 10 };
-    }
-    let currentScale = store.herculesScales[type];
-
-    // ==========================================================================
-    // 1. SEZIONE PROFONDITÀ (DEDICATA A 2 MINUTI DI SICUREZZA, MINIMO FISSO A 0)
-    // ==========================================================================
-    if (type === 'depth') {
-        const shallowThreshold = Math.max(s.stdMax, 10); // Es. 20m
-        if (store.depthProtectedActive === undefined) store.depthProtectedActive = false;
-
-        const now = Date.now();
-        const depthSafetyWindowMs = 120000; // 2 minuti fissi per la sicurezza
+async function fetchServerHistory() {
+    try {
+        const response = await fetch('/rotevista-history');
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
         
-        // Estrazione dati reali degli ultimi 2 minuti con timestamp
-        const recentPoints = store.histories.depth.filter(p => (now - p.time) <= depthSafetyWindowMs);
-        const recentVals = recentPoints.map(p => p.val);
-
-        const localMax = recentVals.length > 0 ? Math.max(...recentVals) : currentVal;
-        const localMin = recentVals.length > 0 ? Math.min(...recentVals) : currentVal;
-
-        // --- 1.1 NORMALE PROFONDITÀ (CON SOGLIA STANDARD E FILTRO 2 MINUTI) ---
-        if (mode !== 'hercules') {
-            if (!store.depthProtectedActive && currentVal <= shallowThreshold) {
-                store.depthProtectedActive = true;
-            }
-            if (store.depthProtectedActive) {
-                if (localMin > shallowThreshold) {
-                    store.depthProtectedActive = false;
+        if (data && typeof data === 'object') {
+            for (let key in data) {
+                if (store.histories[key] !== undefined) {
+                    store.histories[key] = data[key];
                 }
             }
-            if (store.depthProtectedActive) {
-                return { min: 0, max: shallowThreshold };
-            }
-            const maxHistorico = Math.max(...data);
-            return { min: 0, max: Math.max(s.stdMax, Math.ceil(maxHistorico / s.step) * s.step) };
+            console.log("📈 Storico dei grafici pre-popolato caricato dal server.");
         }
-
-        // --- 1.2 HERCULES PROFONDITÀ (0 IN BASSO, SNAP SUL MAX SENZA PADDING) ---
-        if (mode === 'hercules') {
-            const roundStep = s.hercSpan; // Passo di griglia selezionato dall'utente
-            
-            let targetMin = 0;
-            let targetMax = Math.ceil(localMax / roundStep) * roundStep;
-
-            // Impediamo una scala inferiore a 4 metri per sicurezza visiva
-            const absoluteMinSpan = 4;
-            if (targetMax < absoluteMinSpan) {
-                targetMax = absoluteMinSpan;
-            }
-
-            // Regola asimmetrica per il MAX (Espansione istantanea, contrazione a 2 minuti)
-            if (currentVal > currentScale.max) {
-                currentScale.max = targetMax;
-            } else {
-                const allStableInTarget = recentVals.every(val => val <= targetMax);
-                if (allStableInTarget) {
-                    currentScale.max = targetMax;
-                }
-            }
-
-            currentScale.min = 0;
-            return { min: currentScale.min, max: currentScale.max };
-        }
-    }
-
-    // ==========================================================================
-    // 2. ALTRI GRAFICI (STW, SOG, TWS): COMPORTAMENTO ADATTIVO SU TERZO DEL GRAFICO
-    // ==========================================================================
-    
-    // --- 2.1 MODALITÀ NORMALE ---
-    if (mode !== 'hercules') {
-        const maxHistorico = Math.max(...data);
-        return { min: 0, max: Math.max(s.stdMax, Math.ceil(maxHistorico / s.step) * s.step) };
-    }
-
-    // --- 2.2 MODALITÀ HERCULES AD ALTO CONTRASTO (SNAP SENZA PADDING) ---
-    if (mode === 'hercules') {
-        const roundStep = s.hercSpan; // Passo di griglia (ex hercSpan)
-
-        const oneThirdCount = Math.max(1, Math.floor(data.length / 3));
-        const recentThirdData = data.slice(-oneThirdCount);
-
-        const localMin = Math.min(...recentThirdData);
-        const localMax = Math.max(...recentThirdData);
-
-        // Applichiamo lo snap diretto ai multipli della griglia
-        let targetMin = Math.max(0, Math.floor(localMin / roundStep) * roundStep);
-        let targetMax = Math.ceil(localMax / roundStep) * roundStep;
-
-        // Se lo span calcolato è nullo (es. velocità costante), forziamo lo span minimo
-        if (targetMax - targetMin === 0) {
-            targetMax = targetMin + roundStep;
-        }
-
-        // APPLICAZIONE REGOLE ASIMMETRICHE ANTI-CLIPPING
-        // A. Espansione ISTANTANEA in alto o in basso (sicurezza)
-        if (currentVal < currentScale.min || currentVal > currentScale.max) {
-            currentScale.min = Math.min(currentScale.min, targetMin);
-            currentScale.max = Math.max(currentScale.max, targetMax);
-        }
-        // B. Contrazione RITARDATA (solo se tutto il terzo recente si è assestato nel target)
-        else {
-            const allStableInTarget = recentThirdData.every(val => val >= targetMin && val <= targetMax);
-            if (allStableInTarget) {
-                currentScale.min = targetMin;
-                currentScale.max = targetMax;
-            }
-        }
-
-        return { min: currentScale.min, max: currentScale.max };
+    } catch (err) {
+        console.warn("⚠️ Impossibile caricare lo storico dal server. Utilizzo dati vuoti/simulati.");
+        throw err; // Rilancia l'errore per far attivare il fallback nella funzione init()
     }
 }
 
@@ -1128,7 +924,8 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     };
 
     let grids = "";
-    [0.25, 0.5, 0.75].forEach(p => grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`);
+    // Una sola linea di griglia centrale al 50%, matematicamente sempre intera e allineata all'etichetta
+    [0.5].forEach(p => grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`);
 
     const gridInterval = (visibleMinutes <= 15) ? 1 : 5;
     for (let m = gridInterval; m < visibleMinutes; m += gridInterval) {
@@ -1325,6 +1122,17 @@ window.addEventListener('contextmenu', e => e.preventDefault(), true);
 
 async function init() {
     loadDashboardState();
+    
+    // Prova a caricare lo storico dal server. Se fallisce (test offline), gestisce il fallback
+    try {
+        await fetchServerHistory();
+    } catch (err) {
+        if (simulationMode) {
+            // Se sei in modalità simulazione locale, puoi generare dati finti qui (opzionale)
+            console.log("🎮 Modalità Simulazione Locale attiva.");
+        }
+    }
+
     await fetchServerConfig();
     startDisplayLoop();
     connect();
