@@ -116,11 +116,13 @@ function getShortestRotation(curr, target) {
 }
 
 /**
- * Scrive il testo nel DOM solo se il valore è realmente cambiato (Evita layout reflow inutili)
+ * Scrive il testo nel DOM/SVG solo se il valore è realmente cambiato.
+ * Utilizza innerHTML perché è l'unico metodo sicuro al 100% per forzare il ridisegno dei testi negli SVG.
  */
 function safeSetText(el, text) {
-    if (el && el.innerText !== text) {
-        el.innerText = text;
+    if (!el) return;
+    if (el.innerHTML !== text) {
+        el.innerHTML = text;
     }
 }
 
@@ -609,17 +611,18 @@ function startDisplayLoop() {
         ui.status.className = (socket && socket.readyState === WebSocket.OPEN) ? "online" : "offline";
 
         // --- WATCHDOG: CONTROLLO TIMEOUT ---
-        const watch = {
-            "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog,
-            "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog,
-            "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth,
-            "environment.wind.speedTrue": ui.tws
-        };
-        for (let p in watch) {
-            if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) {
-                watch[p].innerText = "---"; delete store.raw[p];
+            const watch = {
+                "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog,
+                "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog,
+                "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth,
+                "environment.wind.speedTrue": ui.tws
+            };
+            for (let p in watch) {
+                if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) {
+                    safeSetText(watch[p], "---"); // Sostituito innerText con la funzione protetta!
+                    delete store.raw[p];
+                }
             }
-        }
 
         // --- AGGIORNAMENTO VELOCITÀ SULL'ACQUA (STW) ---
         if (store.raw["navigation.speedThroughWater"] !== undefined) {
@@ -664,14 +667,20 @@ function startDisplayLoop() {
             manageHistory('depth', store.raw["environment.depth.belowTransducer"]);
         }
 
-        // --- GESTIONE VENTO (TWS / AWS SWITCH) ---
-        const twsVal = store.raw["environment.wind.speedTrue"] ? msToKts(store.raw["environment.wind.speedTrue"]) : 0;
-        const awsVal = store.raw["environment.wind.speedApparent"] ? msToKts(store.raw["environment.wind.speedApparent"]) : 0;
+        // --- GESTIONE VENTO (TWS / AWS SWITCH & BUSSOLA) ---
+                
+        // Estrazione dati sicura: controlliamo esplicitamente se il dato esiste, altrimenti 0
+        const rawTws = store.raw["environment.wind.speedTrue"];
+        const rawAws = store.raw["environment.wind.speedApparent"];
         
-        if (store.raw["environment.wind.speedTrue"] !== undefined) manageHistory('tws', twsVal);
-        if (store.raw["environment.wind.speedApparent"] !== undefined) manageHistory('aws', awsVal);
+        const twsVal = (rawTws !== undefined && rawTws !== null) ? msToKts(rawTws) : 0;
+        const awsVal = (rawAws !== undefined && rawAws !== null) ? msToKts(rawAws) : 0;
+        
+        if (rawTws !== undefined && rawTws !== null) manageHistory('tws', twsVal);
+        if (rawAws !== undefined && rawAws !== null) manageHistory('aws', awsVal);
 
-        if (store.raw["environment.wind.speedTrue"] !== undefined || store.raw["environment.wind.speedApparent"] !== undefined) {
+        // Disegno testo casella destra (TWS o AWS)
+        if (rawTws !== undefined || rawAws !== undefined) {
             const labelWind = document.getElementById('tws-aws-label');
             const currentWind = (displayModeTws === 'AWS') ? awsVal : twsVal;
             
@@ -692,8 +701,21 @@ function startDisplayLoop() {
             }
         }
 
-        if (store.raw["environment.wind.speedApparent"] !== undefined) {
-            safeSetText(ui.awsSvg, awsVal.toFixed(1));
+        // --- SBLOCCO FORZATO TESTO BUSSOLA (AWS) ---
+        if (rawAws !== undefined && rawAws !== null && !isNaN(awsVal)) {
+            const strVal = awsVal.toFixed(1);
+            // Recupero robusto dell'elemento
+            let awsSvgEl = document.getElementById('aws-val-svg');
+            
+            if (awsSvgEl) {
+                // Trucco anti-congelamento SVG: se il testo non combacia, lo forziamo usando
+                // textContent (standard SVG) invece di innerHTML (standard HTML).
+                if (awsSvgEl.textContent !== strVal) {
+                    awsSvgEl.textContent = strVal;
+                }
+            } else {
+                console.error("ERRORE: Elemento SVG bussola ('aws-val-svg') non trovato nel documento!");
+            }
         }
 
         // --- PUNTATORI ANALOGICI ---
