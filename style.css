@@ -175,8 +175,7 @@ body.night-mode .alarm-danger {
 
 .focus-active .is-focused .sparkline path,
 .focus-active .is-focused .sparkline line {
-    stroke-width: 1.5px !important; /* Un briciolo più spessa per la stabilità visiva su schermi grandi */
-}
+  }
 
 .focus-active.focus-side-left {
     grid-template-columns: 3fr 2fr !important;
@@ -415,7 +414,6 @@ body.night-mode .alarm-danger {
 rect[fill="#222"] { fill: #eee !important; }
 #leeway-val { color: #000 !important; }
 
-#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow, #twd-boat-wrap { transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1); }
 #wind-gauge { width: 100%; height: 100%; max-height: 100%; object-fit: contain; }
 
 /* ==========================================================================

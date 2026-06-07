@@ -116,6 +116,15 @@ function getShortestRotation(curr, target) {
 }
 
 /**
+ * Scrive il testo nel DOM solo se il valore è realmente cambiato (Evita layout reflow inutili)
+ */
+function safeSetText(el, text) {
+    if (el && el.innerText !== text) {
+        el.innerText = text;
+    }
+}
+
+/**
  * Inserimento sicuro nel buffer con trigonometria precaricata e pruning automatico
  */
 function safePush(buffer, val, time) {
@@ -614,7 +623,7 @@ function startDisplayLoop() {
 
         // --- AGGIORNAMENTO VELOCITÀ SULL'ACQUA (STW) ---
         if (store.raw["navigation.speedThroughWater"] !== undefined) {
-            ui.stw.innerText = stwKts.toFixed(1);
+            safeSetText(ui.stw, stwKts.toFixed(1));
             ui.stw.style.color = ""; // Neutro
             manageHistory('stw', stwKts);
         }
@@ -627,11 +636,11 @@ function startDisplayLoop() {
             
             const labelSogVmg = document.getElementById('sog-vmg-label');
             if (displayModeSog === 'VMG') {
-                ui.sog.innerText = vmgVal.toFixed(1);
+                safeSetText(ui.sog, vmgVal.toFixed(1));
                 ui.sog.style.setProperty('color', '#00b8d4', 'important'); // Cyan
                 if (labelSogVmg) labelSogVmg.textContent = 'VMG';
             } else {
-                ui.sog.innerText = sogKts.toFixed(1);
+                safeSetText(ui.sog, sogKts.toFixed(1));
                 if (labelSogVmg) labelSogVmg.textContent = 'SOG';
                 
                 if (isNavigating) {
@@ -650,7 +659,7 @@ function startDisplayLoop() {
 
         // --- AGGIORNAMENTO PROFONDITÀ (DEPTH) ---
         if (store.raw["environment.depth.belowTransducer"] !== undefined) {
-            ui.depth.innerText = store.raw["environment.depth.belowTransducer"].toFixed(1);
+            safeSetText(ui.depth, store.raw["environment.depth.belowTransducer"].toFixed(1));
             checkDepthAlarm(store.raw["environment.depth.belowTransducer"]);
             manageHistory('depth', store.raw["environment.depth.belowTransducer"]);
         }
@@ -666,7 +675,7 @@ function startDisplayLoop() {
             const labelWind = document.getElementById('tws-aws-label');
             const currentWind = (displayModeTws === 'AWS') ? awsVal : twsVal;
             
-            ui.tws.innerText = currentWind.toFixed(1);
+            safeSetText(ui.tws, currentWind.toFixed(1));
             if (labelWind) labelWind.textContent = displayModeTws;
 
             if (currentWind >= CONFIG.graphs.reef2) {
@@ -684,7 +693,7 @@ function startDisplayLoop() {
         }
 
         if (store.raw["environment.wind.speedApparent"] !== undefined) {
-            ui.awsSvg.textContent = awsVal.toFixed(1);
+            safeSetText(ui.awsSvg, awsVal.toFixed(1));
         }
 
         // --- PUNTATORI ANALOGICI ---
@@ -702,9 +711,8 @@ function startDisplayLoop() {
             updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
         }
         
-        // --- HEAVY TIER (2s) E SLOW TIER (3s) ---
-        if (lastAvgUIUpdate++ % 2 === 0) {
-            ['stw', 'sog', 'depth', 'tws'].forEach(refreshGraph);
+        // --- SLOW TIER (Salvataggio stato ogni 10 secondi) ---
+        if (lastAvgUIUpdate++ % 10 === 0) {
             saveDashboardState();
         }
 
@@ -949,6 +957,10 @@ function manageHistory(type, value) {
 
     // --- 7. STORAGE STORICO ---
     store.histories[type].push({ val: finalValue, time: now });
+    
+    // --- TRIGGER STRATEGIA 1 (EVENT-DRIVEN) ---
+    // Ridisegnamo lo strumento SOLO nell'esatto istante in cui viene generato un nuovo punto storico!
+    refreshGraph(type);
 
     // --- 8. PRUNING DINAMICO ---
     const maxViewportMinutes = historyMinutes * 2;
@@ -958,9 +970,8 @@ function manageHistory(type, value) {
         store.histories[type].shift();
     }
 
-    // Reset per il prossimo bucket
+    // Reset per il prossimo bucket (sincronizzato)
     store.graphTempBuf[type] = [];
-    // Spostiamo il timer esattamente al confine del secchiello assoluto appena concluso
     store.lastUpdates[type] = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
 }
 
@@ -1018,30 +1029,36 @@ function calculateScale(type, data, mode) {
             return { min: 0, max: Math.max(s.stdMax, Math.ceil(maxHistorico / s.step) * s.step) };
         }
 
-        // --- 1.2 HERCULES PROFONDITÀ (0 IN BASSO, SNAP SUL MAX SENZA PADDING) ---
+        // --- 1.2 HERCULES PROFONDITÀ (BASE 0 IN ACQUE BASSE, FLUTTUANTE AL LARGO) ---
         if (mode === 'hercules') {
             const roundStep = s.hercSpan; // Passo di griglia selezionato dall'utente
+            const shallowThreshold = Math.max(s.stdMax, 10); // Es. 20m
             
             let targetMin = 0;
+            // Se siamo in acque profonde, lasciamo che il minimo fluttui per mostrare i micro-dettagli
+            if (localMin > shallowThreshold) {
+                targetMin = Math.max(0, Math.floor(localMin / roundStep) * roundStep);
+            }
+            
             let targetMax = Math.ceil(localMax / roundStep) * roundStep;
 
-            // Impediamo una scala inferiore a 4 metri per sicurezza visiva
-            const absoluteMinSpan = 4;
-            if (targetMax < absoluteMinSpan) {
-                targetMax = absoluteMinSpan;
+            // Impediamo uno span inferiore a 4 metri per evitare grafici piatti
+            if (targetMax - targetMin < 4) {
+                targetMax = targetMin + 4;
             }
 
-            // Regola asimmetrica per il MAX (Espansione istantanea, contrazione a 2 minuti)
-            if (currentVal > currentScale.max) {
-                currentScale.max = targetMax;
+            // Regola asimmetrica per il MIN e il MAX (Espansione istantanea, contrazione a 2 minuti)
+            if (currentVal < currentScale.min || currentVal > currentScale.max) {
+                currentScale.min = Math.min(currentScale.min, targetMin);
+                currentScale.max = Math.max(currentScale.max, targetMax);
             } else {
-                const allStableInTarget = recentVals.every(val => val <= targetMax);
+                const allStableInTarget = recentVals.every(val => val >= targetMin && val <= targetMax);
                 if (allStableInTarget) {
+                    currentScale.min = targetMin;
                     currentScale.max = targetMax;
                 }
             }
 
-            currentScale.min = 0;
             return { min: currentScale.min, max: currentScale.max };
         }
     }
@@ -1100,10 +1117,21 @@ function updateScaleLabels(t, min, max) {
 }
 
 /**
- * refreshGraph: Recupero dati, switch AWS/TWS e passaggio a motore grafico.
+ * refreshGraph: Recupero dati, switch AWS/TWS/VMG e passaggio a motore grafico.
+ * Redirige e protegge i canali secondari (AWS/VMG) evitando ridisegni inutili.
  */
 function refreshGraph(t) {
-    const boxType = (t === 'vmg') ? 'sog' : t;
+    // Redirezione di sicurezza dei canali secondari (AWS / VMG) verso i contenitori principali
+    if (t === 'aws') {
+        if (displayModeTws !== 'AWS') return; // Se non stiamo visualizzando AWS a schermo, ignora il rinfresco
+        t = 'tws';
+    }
+    if (t === 'vmg') {
+        if (displayModeSog !== 'VMG') return; // Se non stiamo visualizzando VMG a schermo, ignora il rinfresco
+        t = 'sog';
+    }
+
+    const boxType = t;
     let rawData;
 
     if (t === 'tws' && displayModeTws === 'AWS') {
@@ -1128,6 +1156,7 @@ function refreshGraph(t) {
 /**
  * drawGraph: Motore SVG con Timeline Reale e Gestione GAP
  * Risolve i conflitti di orologio (Clock Drift) tra Cerbo GX e Tablet.
+ * Integra la reattività dello spessore della curva in modalità Dual Screen (Focus).
  */
 function drawGraph(d, id, min, max, isTws, isHercules) {
     const svg = document.getElementById(id);
@@ -1142,6 +1171,10 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     const latestPoint = d[d.length - 1];
     const now = latestPoint ? latestPoint.time : Date.now();
 
+    // --- RILEVAMENTO DINAMICO DUAL SCREEN BLINDATO ---
+    const box = svg.closest('.data-box');
+    const isFocused = isFocusActive && box && box.classList.contains('is-focused');
+
     const visibleMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
     const viewportMs = visibleMinutes * 60000;
     const viewportStart = now - viewportMs;
@@ -1153,15 +1186,20 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     const colDepth   = "#0088cc", colStw = "#00C851", colSog = "#ffbb33", colVmg = "#00b8d4";
 
     const getColorProps = (val) => {
-        let color = colTws, opacity = "0.15", stroke = "1";
+        // Se siamo in Dual Screen (focus), aumentiamo lo spessore base della curva di un filino (da 1.6 a 2.2)
+        const baseStroke = isFocused ? "4.2" : "1.6";
+        const alertStroke = isFocused ? "4.8" : "2.2";
+        const warnStroke = isFocused ? "4.4" : "1.8";
+
+        let color = colTws, opacity = "0.15", stroke = baseStroke;
         if (isTws) {
             const baseWind = (displayModeTws === 'AWS') ? colAws : colTws;
-            if (val >= CONFIG.graphs.reef2) { color = colDanger; opacity = "0.55"; stroke = "1.2"; }
-            else if (val >= CONFIG.graphs.reef1) { color = colWarning; opacity = "0.45"; stroke = "1"; }
+            if (val >= CONFIG.graphs.reef2) { color = colDanger; opacity = "0.55"; stroke = alertStroke; }
+            else if (val >= CONFIG.graphs.reef1) { color = colWarning; opacity = "0.45"; stroke = warnStroke; }
             else color = baseWind;
         } else if (isDepth) {
-            if (val < CONFIG.alarms.depthDanger) { color = colDanger; opacity = "0.55"; stroke = "1.2"; }
-            else if (val < CONFIG.alarms.depthWarning) { color = colWarning; opacity = "0.45"; stroke = "1"; }
+            if (val < CONFIG.alarms.depthDanger) { color = colDanger; opacity = "0.55"; stroke = alertStroke; }
+            else if (val < CONFIG.alarms.depthWarning) { color = colWarning; opacity = "0.45"; stroke = warnStroke; }
             else color = colDepth;
         } else {
             if (id === 'stw-graph') color = colStw;
@@ -1171,14 +1209,37 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     };
 
     let grids = "";
-    // Tracciamo 3 linee simmetriche al 25%, 50% (centrale) e 75%.
-    // La linea al 50% passerà sempre in modo matematicamente esatto dietro il valore medio stampato.
-    [0.25, 0.5, 0.75].forEach(p => grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" />`);
+    // --- GRIGLIE ORIZZONTALI (Spessore fisso a 0.5px, non deformabile) ---
+    [0.25, 0.5, 0.75].forEach(p => grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" vector-effect="non-scaling-stroke" />`);
 
+    // --- GRIGLIE VERTICALI (Spessore fisso a 0.4px, non deformabile) ---
     const gridInterval = (visibleMinutes <= 15) ? 1 : 5;
     for (let m = gridInterval; m < visibleMinutes; m += gridInterval) {
         const x = w - ((m / visibleMinutes) * w);
-        grids += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="rgba(0,0,0,0.08)" stroke-width="0.5" />`;
+        grids += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="rgba(0,0,0,0.08)" stroke-width="0.4" vector-effect="non-scaling-stroke" />`;
+    }
+    
+    // --- DISEGNO LINEE DI SICUREZZA ALLARME PROFONDITÀ (DANGER & WARNING) ---
+    if (isDepth) {
+        const dangerVal = CONFIG.alarms.depthDanger;     // Es. 2.5m
+        const warningVal = CONFIG.alarms.depthWarning;   // Es. 3.5m
+        const marginX = 4; // Margine per non toccare i bordi esterni
+
+        // Spessore dinamico per gli allarmi: 4.8px in Dual Screen, 1.8px nella griglia normale
+        const alarmStrokeWidth = isFocused ? "4.8" : "1.8";
+
+        // Linea Rossa Viva (Spessore dinamico, con il tuo tratteggio alternato personalizzato)
+        if (dangerVal >= min && dangerVal <= max) {
+            const p = (dangerVal - min) / range;
+            const y = h - (p * h);
+            grids += `<line x1="${marginX}" y1="${y}" x2="${w - marginX}" y2="${y}" stroke="rgba(255, 59, 48, 0.95)" stroke-width="${alarmStrokeWidth}" stroke-dasharray="12, 6, 2, 6" vector-effect="non-scaling-stroke" />`;
+        }
+        // Linea Giallo Oro Viva (Spessore dinamico, con il tuo tratteggio alternato personalizzato)
+        if (warningVal >= min && warningVal <= max) {
+            const p = (warningVal - min) / range;
+            const y = h - (p * h);
+            grids += `<line x1="${marginX}" y1="${y}" x2="${w - marginX}" y2="${y}" stroke="rgba(255, 204, 0, 0.95)" stroke-width="${alarmStrokeWidth}" stroke-dasharray="6 , 2, 6, 12" vector-effect="non-scaling-stroke" />`;
+        }
     }
 
     let gradientStops = "", lines = "", areaPath = "";
@@ -1208,7 +1269,8 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
                 started = false;
             }
         } else {
-            lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="stroke:${props.color}; stroke-width:${props.stroke}; stroke-linecap:round; shape-rendering:geometricPrecision;" />`;
+            // Curva del grafico: spessore reattivo al focus e protezione da deformazione (non-scaling)
+            lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="stroke:${props.color}; stroke-width:${props.stroke}; stroke-linecap:round; shape-rendering:geometricPrecision;" vector-effect="non-scaling-stroke" />`;
             if (!started) {
                 areaPath += `M ${Math.max(0, x1)} ${h} L ${Math.max(0, x1)} ${y1} `;
                 started = true;
@@ -1235,8 +1297,20 @@ function toggleFocusMode(type, element) {
     const container = document.querySelector('.main-container');
     const isLeft = ['stw', 'sog', 'hdg', 'cog', 'tack'].includes(type);
     isFocusActive = !isFocusActive;
-    if (isFocusActive) { container.classList.add('focus-active', isLeft ? 'focus-side-left' : 'focus-side-right'); element.classList.add('is-focused'); }
-    else { container.classList.remove('focus-active', 'focus-side-left', 'focus-side-right'); document.querySelectorAll('.data-box').forEach(b => b.classList.remove('is-focused')); }
+    if (isFocusActive) {
+        container.classList.add('focus-active', isLeft ? 'focus-side-left' : 'focus-side-right');
+        element.classList.add('is-focused');
+    } else {
+        container.classList.remove('focus-active', 'focus-side-left', 'focus-side-right');
+        document.querySelectorAll('.data-box').forEach(b => b.classList.remove('is-focused'));
+    }
+    
+    // --- FORZATURA REDRAW IMMEDIATO DUAL SCREEN ---
+    // Quando entriamo o usciamo dal Focus, ridisegnamo subito lo strumento
+    // interessato per applicare istantaneamente il cambio di spessore della linea!
+    if (['stw', 'sog', 'tws', 'depth'].includes(type)) {
+        refreshGraph(type);
+    }
 }
 
 ['stw', 'sog', 'tws', 'depth'].forEach(type => {
@@ -1275,8 +1349,10 @@ function toggleFocusMode(type, element) {
                 } else if (!isFocusActive) {
                     if (type === 'sog') {
                         displayModeSog = (displayModeSog === 'SOG') ? 'VMG' : 'SOG';
+                        refreshGraph('sog'); // --- FORZA RINFRESCO ISTANTANEO AL CAMBIO SOG/VMG ---
                     } else if (type === 'tws') {
                         displayModeTws = (displayModeTws === 'TWS') ? 'AWS' : 'TWS';
+                        refreshGraph('tws'); // --- FORZA RINFRESCO ISTANTANEO AL CAMBIO TWS/AWS ---
                     }
                     el.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
                     setTimeout(() => el.style.backgroundColor = "", 150);
@@ -1404,22 +1480,45 @@ async function init() {
     // RICONNESSIONE RAPIDA AL RISVEGLIO (VISIBILITY WATCHDOG)
     // ==========================================================================
     
-    // Quando sblocchi l'iPad o riapri il browser, forziamo la chiusura del vecchio
-    // WebSocket orfano. Questo farà scattare immediatamente connect() e la sincronizzazione.
+    // Quando sblocchi l'iPad o riapri la scheda, sincronizziamo in modo intelligente
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-            console.log("⏰ Schermo sbloccato: forzatura riconnessione rapida.");
-            if (socket) {
-                try {
-                    socket.close(); // Fa scattare onclose -> connect() -> onopen -> fetchServerHistory()
-                } catch (e) {
+            // 1. Se la connessione è già attiva e sana, scarichiamo solo lo storico senza disconnetterci
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                console.log("⏰ Schermo sbloccato: connessione attiva, sincronizzazione dello storico.");
+                fetchServerHistory().then(() => {
+                    ['stw', 'sog', 'depth', 'tws'].forEach(refreshGraph);
+                }).catch(err => {});
+            }
+            // 2. Se la connessione è persa o morta, forzatura riconnessione rapida
+            else {
+                console.log("⏰ Schermo sbloccato: connessione assente, forzatura riconnessione rapida.");
+                if (socket) {
+                    try {
+                        socket.close();
+                    } catch (e) {
+                        connect();
+                    }
+                } else {
                     connect();
                 }
-            } else {
-                connect();
             }
         }
     });
+
+    // Rileva se il dispositivo è andato in sospensione misurando il ritardo dei secondi
+    let lastHeartbeat = Date.now();
+    setInterval(() => {
+        const now = Date.now();
+        const diff = now - lastHeartbeat;
+        lastHeartbeat = now;
+        
+        // Se passano più di 6 secondi tra un ciclo e l'altro (invece di 1 secondo),
+        // significa che il PC era in sospensione. Avviamo il risveglio.
+        if (diff > 6000) {
+            handleWakeUp();
+        }
+    }, 1000);
 }
 
 
