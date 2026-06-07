@@ -3,7 +3,7 @@
   "name": "Signal K Wind Dashboard",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/959/959711.png",
+      "src": "./icons/dash.png",
       "type": "image/png",
       "sizes": "512x512"
     }
