@@ -16,11 +16,11 @@ module.exports = function (app) {
   let routeRegistered = false;
   let unsubscribes = [];
 
-  // Database dello storico in RAM sul server
-  let histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] };
-  let graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] };
-  let lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0 };
-  let raw = {};
+    // Database dello storico in RAM sul server (Sintonizzato Pro v6.0)
+      let histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
+      let graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
+      let lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0, twd: 0 };
+      let raw = {};
 
   /**
    * plugin.start: Inizializza il plugin.
@@ -128,18 +128,25 @@ module.exports = function (app) {
     const cog = raw["navigation.courseOverGroundTrue"] || 0;
 
     if (aws !== undefined && awa !== undefined) {
-      const awsKts = aws * 1.94384;
-      const stwKts = stw * 1.94384;
-      const tw_water_x = awsKts * Math.cos(awa) - stwKts;
-      const tw_water_y = awsKts * Math.sin(awa);
-      const tws = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
+        const awsKts = aws * 1.94384;
+        const stwKts = stw * 1.94384;
+        const tw_water_x = awsKts * Math.cos(awa) - stwKts;
+        const tw_water_y = awsKts * Math.sin(awa);
+        const tws = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
 
-      manageHistory('tws', tws);
+        manageHistory('tws', tws);
 
-      const twa = Math.atan2(tw_water_y, tw_water_x);
-      const vmg = Math.abs(stwKts * Math.cos(twa));
-      manageHistory('vmg', vmg);
-    }
+        const twa = Math.atan2(tw_water_y, tw_water_x);
+        const vmg = Math.abs(stwKts * Math.cos(twa));
+        manageHistory('vmg', vmg);
+
+        // --- CALCOLO TWD STRATEGICO SERVER-SIDE ---
+        if (hdg !== undefined) {
+          // Calcolo della direzione del vento reale rispetto al nord (TWD) in radianti
+          const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
+          manageHistory('twd', twd);
+        }
+      }
   }
 
   /**
