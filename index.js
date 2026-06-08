@@ -219,16 +219,18 @@ module.exports = function (app) {
     if (!isFinite(finalValue)) return;
     finalValue = Math.max(0, finalValue);
 
-    // Salvataggio nel ring buffer dello storico principale
-    histories[type].push({ val: finalValue, time: now });
+  // Salvataggio nel ring buffer dello storico principale
+      histories[type].push({ val: finalValue, time: now });
 
-    // Pruning automatico basato sulle impostazioni di timeline
-    const maxViewportMinutes = historyMinutes * 2;
-    const maxHistoryMs = (maxViewportMinutes * 60000) + 60000;
+      // Pruning automatico basato sulle impostazioni di timeline
+      // (Forziamo il server a conservare sempre almeno 60 minuti per il TWD!)
+      const limitMinutes = (type === 'twd') ? 60 : historyMinutes;
+      const maxViewportMinutes = limitMinutes * 2;
+      const maxHistoryMs = (maxViewportMinutes * 60000) + 60000;
 
-    while (histories[type].length > 0 && (now - histories[type][0].time) > maxHistoryMs) {
-      histories[type].shift();
-    }
+      while (histories[type].length > 0 && (now - histories[type][0].time) > maxHistoryMs) {
+        histories[type].shift();
+      }
 
   graphTempBuf[type] = [];
       // Spostiamo il timer esattamente al confine del secchiello assoluto appena concluso

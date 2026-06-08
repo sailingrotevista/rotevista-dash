@@ -128,6 +128,7 @@ function safeSetText(el, text) {
 
 /**
  * Inserimento sicuro nel buffer con trigonometria precaricata e pruning automatico
+ * Mantiene sempre almeno 60 minuti di memoria locale per il calcolo della bussola meteo.
  */
 function safePush(buffer, val, time) {
     if (val === null || val === undefined || isNaN(val)) return;
@@ -139,7 +140,11 @@ function safePush(buffer, val, time) {
         cos: Math.cos(val)
     });
 
-    const maxHistoryMs = (CONFIG.graphs.historyMinutes * 60000 * 2) + 60000;
+    // Se stiamo spingendo nel buffer TWD, conserviamo sempre almeno 60 minuti in memoria locale
+    const isTwdBuffer = (buffer === store.longBuf.twd);
+    const limitMinutes = isTwdBuffer ? 60 : CONFIG.graphs.historyMinutes;
+    const maxHistoryMs = (limitMinutes * 60000 * 2) + 60000;
+
     while (buffer.length > 0 && (time - buffer[0].time) > maxHistoryMs) {
         buffer.shift();
     }
@@ -436,16 +441,20 @@ function processIncomingData(path, val, source, timeMs) {
 
 // ==========================================================================
 // 6. TREND VENTO (Tattico 2s vs 10s | Strategico 1m vs 10m)
+// Sincronizzato sul tempo reale dei sensori per eliminare i conflitti di orologio.
 // ==========================================================================
 function updateWindTrend() {
-    const now = Date.now();
+    // --- RISOLUZIONE CLOCK DRIFT SUI PALLINI METEO ---
+    // Usiamo il tempo del sensore (l'ultimo dato del TWD in memoria) invece dell'orologio del tablet
+    const latestTwdPoint = store.longBuf.twd.length > 0 ? store.longBuf.twd[store.longBuf.twd.length - 1] : null;
+    const now = latestTwdPoint ? latestTwdPoint.time : Date.now();
 
-    // --- 6.1 TREND TATTICO (AWA/TWA) ---
-    const twaNow = getCircularAverageFromBuffer(store.longBuf.twa, 2000, true);
-    const twaRef = getCircularAverageFromBuffer(store.longBuf.twa, 10000, true);
+    // --- 6.1 TREND TATTICO (AWA/TWA Sintonizzato) ---
+    const twaNow = getCircularAverageFromBuffer(store.longBuf.twa, 2000, true, now);
+    const twaRef = getCircularAverageFromBuffer(store.longBuf.twa, 10000, true, now);
     const gaugeDots = { cw: document.getElementById('trend-gauge-cw'), ccw: document.getElementById('trend-gauge-ccw') };
 
-    // --- 6.2 ALLARME STRAMBATA CON ISTERESI (MACCHINA A STATI ANTI-BRANDEGGIO) ---
+    // --- 6.2 ALLARME STRAMBATA CON ISTERESI (MACCHINA A STATI ANTI-BRANDEGGIO Sintonizzato) ---
     const instTwaRad = store.raw["environment.wind.angleTrueWater"];
     let smoothedTwaDeg = null;
 
@@ -530,11 +539,15 @@ function updateWindTrend() {
         }
     }
 
-    // --- 6.3 TREND METEO STRATEGICO (TWD) ---
-    const twdNow = getCircularAverageFromBuffer(store.longBuf.twd, 60000, false);
-    const multiplier = isNavigating ? 1 : 2;
-    const strategicWindowMs = CONFIG.graphs.historyMinutes * 60000 * multiplier;
-    const twdRef = getCircularAverageFromBuffer(store.longBuf.twd, strategicWindowMs, false);
+    // --- 6.3 TREND METEO STRATEGICO (TWD PARAMETRIZZATO E SINTONIZZATO) ---
+    const twdNow = getCircularAverageFromBuffer(store.longBuf.twd, 60000, false, now); // 1 minuto fisso
+
+    // Parametrizzazione rigida nel codice: 15 minuti in navigazione, 60 minuti all'ancora
+    const fixedTwdMinutes = isNavigating ? 15 : 60;
+    const strategicWindowMs = fixedTwdMinutes * 60000;
+
+    const twdRef = getCircularAverageFromBuffer(store.longBuf.twd, strategicWindowMs, false, now);
+
     const compassDots = { cw: document.getElementById('trend-dot-cw'), ccw: document.getElementById('trend-dot-ccw') };
 
     if (twdNow && twdRef) {
@@ -894,11 +907,16 @@ async function fetchServerHistory() {
                 }
             }
             // --- SILLABAZIONE STRATEGICA DELLA BUSSOLA METEO (TWD) ---
-            // Se il server ci invia lo storico del TWD, lo inseriamo direttamente nella memoria a lungo termine
+            // Se il server ci invia lo storico del TWD, lo inseriamo calcolando i seni e coseni per i vettori
             if (data.twd && data.twd.length > 0) {
-                store.longBuf.twd = data.twd;
+                store.longBuf.twd = data.twd.map(p => ({
+                    val: p.val,
+                    time: p.time,
+                    sin: Math.sin(p.val),
+                    cos: Math.cos(p.val)
+                }));
                 console.log(`📈 Memoria strategica TWD sincronizzata dal server (${data.twd.length} punti).`);
-            }
+                }
             console.log("📈 Storico dei grafici pre-popolato caricato dal server.");
         }
     } catch (err) {
