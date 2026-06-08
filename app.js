@@ -22,12 +22,12 @@ let CONFIG = {
         minSpeed: 0.5,
         stabilityBreakout: 15
     },
-    graphs: { reef1: 10, reef2: 15, historyMinutes: 10, samples: 60 },
+    graphs: { reef1: 5, reef2: 10, historyMinutes: 10, samples: 60 },
     scales: {
         stw: { stdMax: 4, hercSpan: 2, step: 1 },
         sog: { stdMax: 4, hercSpan: 2, step: 1 },
         tws: { stdMax: 15, hercSpan: 2, step: 1 },
-        depth: { stdMax: 8, hercSpan: 1, step: 1 }
+        depth: { stdMax: 5, hercSpan: 2, step: 1 }
     },
     server: { fallbackIp: "192.168.111.240:3000" }
 };
@@ -1501,56 +1501,31 @@ window.addEventListener('contextmenu', e => e.preventDefault(), true);
 async function init() {
     loadDashboardState();
     
-    // Proviamo un primo caricamento configurazioni
-    await fetchServerConfig();
+    // Rileviamo se siamo sul Mac tramite file:// (Ambiente di sviluppo locale)
+    const isLocalFile = (window.location.protocol === 'file:');
+
+    // 1. CARICAMENTO STORICO GRAFICI REALI DAL CERBO GX
+    try {
+        await fetchServerHistory();
+    } catch (err) {
+        console.warn("⚠️ Impossibile caricare lo storico reale dal server.");
+    }
+
+    // 2. CARICAMENTO CONFIGURAZIONI REALI (Bypassato su Mac per preservare i tuoi test!)
+    if (!isLocalFile) {
+        await fetchServerConfig();
+    } else {
+        // Mantiene la CONFIG locale di app.js per farti fare le prove delle scale sul Mac
+        console.log("🎮 Esecuzione locale file://: utilizzo delle calibrazioni di CONFIG locali di debug.");
+    }
+    
     startDisplayLoop();
-    connect();
+    connect(); // Si collegherà in tempo reale al WebSocket reale della barca
     
-    setInterval(watchConfigChanges, 10000);
-
-    // ==========================================================================
-    // RICONNESSIONE RAPIDA AL RISVEGLIO (VISIBILITY WATCHDOG)
-    // ==========================================================================
-    
-    // Quando sblocchi l'iPad o riapri la scheda, sincronizziamo in modo intelligente
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            // 1. Se la connessione è già attiva e sana, scarichiamo solo lo storico senza disconnetterci
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                console.log("⏰ Schermo sbloccato: connessione attiva, sincronizzazione dello storico.");
-                fetchServerHistory().then(() => {
-                    ['stw', 'sog', 'depth', 'tws'].forEach(refreshGraph);
-                }).catch(err => {});
-            }
-            // 2. Se la connessione è persa o morta, forzatura riconnessione rapida
-            else {
-                console.log("⏰ Schermo sbloccato: connessione assente, forzatura riconnessione rapida.");
-                if (socket) {
-                    try {
-                        socket.close();
-                    } catch (e) {
-                        connect();
-                    }
-                } else {
-                    connect();
-                }
-            }
-        }
-    });
-
-    // Rileva se il dispositivo è andato in sospensione misurando il ritardo dei secondi
-    let lastHeartbeat = Date.now();
-    setInterval(() => {
-        const now = Date.now();
-        const diff = now - lastHeartbeat;
-        lastHeartbeat = now;
-        
-        // Se passano più di 6 secondi tra un ciclo e l'altro (invece di 1 secondo),
-        // significa che il PC era in sospensione. Avviamo il risveglio.
-        if (diff > 6000) {
-            handleWakeUp();
-        }
-    }, 1000);
+    // Controlla le modifiche di configurazione sul Cerbo solo se non siamo sul Mac via file://
+    if (!isLocalFile) {
+        setInterval(watchConfigChanges, 10000);
+    }
 }
 
 
