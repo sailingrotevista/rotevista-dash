@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SignalK Data Debugger & Logger CSV</title>
+    <title>SignalK Data Debugger & Logger CSV (Pro v6.0)</title>
     <style>
         body {
             background-color: #121212;
@@ -19,9 +19,8 @@
         h1 { color: #4CAF50; border-bottom: 1px solid #333; padding-bottom: 10px; margin-top: 0; flex-shrink: 0; }
         
         /* Controlli in alto */
-        .controls { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
-        input[type="text"], select { padding: 8px; background: #222; color: #fff; border: 1px solid #444; }
-        input[type="text"] { width: 200px; }
+        .controls { margin-bottom: 15px; display: flex; gap: 10px; align-items: center; flex-shrink: 0; flex-wrap: wrap; }
+        input[type="text"] { padding: 8px; background: #222; color: #fff; border: 1px solid #444; width: 200px; }
         button { padding: 8px 15px; background: #4CAF50; color: white; border: none; cursor: pointer; font-weight: bold; border-radius: 4px; }
         button:hover { opacity: 0.8; }
         button.stop { background: #f44336; }
@@ -30,6 +29,41 @@
         #status { font-weight: bold; color: #f44336; margin-left: auto; }
         #status.online { color: #4CAF50; }
         
+        /* Pannello dei filtri avanzati */
+        .filter-container {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            flex-shrink: 0;
+        }
+        .presets {
+            margin: 10px 0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+            gap: 8px;
+            margin-top: 12px;
+            border-top: 1px solid #222;
+            padding-top: 10px;
+        }
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: #ccc;
+            cursor: pointer;
+        }
+        .checkbox-item input {
+            cursor: pointer;
+        }
+
         /* Layout a due pannelli (Sopra Tabella, Sotto Log) */
         .panels-container {
             display: flex;
@@ -47,18 +81,31 @@
             border-radius: 8px;
             padding: 10px;
             overflow-x: auto;
+            max-height: 250px;
+            overflow-y: auto;
         }
-        table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        th, td { border: 1px solid #333; padding: 8px; text-align: left; }
-        th { background-color: #222; color: #aaa; text-transform: uppercase; position: sticky; top: 0; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            table-layout: fixed; /* BLOCCO RIGIDO DELLE COLONNE (Evita ridimensionamenti continui) */
+        }
+        th, td {
+            border: 1px solid #333;
+            padding: 6px 8px;
+            text-align: left;
+            overflow: hidden;
+            word-wrap: break-word; /* Forza l'andamento a capo dei testi lunghi dentro le colonne fisse */
+        }
+        th { background-color: #222; color: #aaa; text-transform: uppercase; position: sticky; top: 0; z-index: 10; }
         .val-cell { min-width: 120px; }
         
         /* Stili Testo Tabella */
-        .value { color: #64ffda; font-weight: bold; font-size: 16px; }
-        .unit { color: #888; font-size: 12px; margin-left: 5px; }
-        .source { color: #ffb74d; font-size: 12px; word-break: break-all; }
-        .time { color: #90caf9; font-size: 12px; }
-        .raw { color: #777; font-size: 11px; display: block; margin-top: 4px; }
+        .value { color: #64ffda; font-weight: bold; font-size: 15px; }
+        .unit { color: #888; font-size: 11px; margin-left: 5px; }
+        .source { color: #ffb74d; font-size: 11px; word-break: break-all; }
+        .time { color: #90caf9; font-size: 11px; }
+        .raw { color: #777; font-size: 10px; display: block; margin-top: 2px; }
 
         /* Pannello Inferiore: Log Sequenziale in Formato Testo (simil-CSV) */
         .log-panel {
@@ -78,7 +125,7 @@
             justify-content: space-between;
             align-items: center;
             border-radius: 8px 8px 0 0;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: bold;
             color: #aaa;
         }
@@ -112,24 +159,27 @@
 </head>
 <body>
 
-    <h1>SignalK Data Debugger & Logger CSV</h1>
+    <h1>SignalK Data Debugger & Logger CSV (Pro v6.0)</h1>
     
     <div class="controls">
         <label>Server IP:</label>
         <input type="text" id="server-ip" value="192.168.111.240:3000">
         <button id="btn-connect" onclick="toggleConnection()">Connetti</button>
-        
-        <span style="margin-left: 20px; color:#aaa;">Filtra Log:</span>
-        <select id="log-filter">
-            <option value="all">Tutti i dati monitorati</option>
-            <option value="navigation.position">Solo Posizione (GPS)</option>
-            <option value="navigation.speedOverGround">Solo SOG (Velocità sul fondo)</option>
-            <option value="navigation.courseOverGroundTrue">Solo COG (Rotta sul fondo)</option>
-            <option value="wind">Solo Vento (TWS/TWA/AWS/AWA)</option>
-            <option value="depth">Solo Profondità</option>
-        </select>
-        
         <span id="status">DISCONNESSO</span>
+    </div>
+
+    <!-- AREA FILTRI AVANZATA CON CHECKBOX E PRESET -->
+    <div class="filter-container">
+        <span style="font-weight: bold; color: #4CAF50; font-size: 13px;">Seleziona percorsi da scrivere nel Log CSV:</span>
+        <div class="presets">
+            <button class="secondary" onclick="applyPreset('all')">Seleziona Tutto</button>
+            <button class="secondary" style="background-color: #2c3e50;" onclick="applyPreset('twd')">Analisi Bussola Meteo (TWD/Vento/Rotta)</button>
+            <button class="secondary" style="background-color: #0088cc;" onclick="applyPreset('gps')">Solo GPS / Rotte</button>
+            <button class="secondary" onclick="applyPreset('none')">Deseleziona Tutto</button>
+        </div>
+        <div id="path-checkboxes" class="checkbox-grid">
+            <!-- Generate via JS -->
+        </div>
     </div>
 
     <div class="panels-container">
@@ -139,10 +189,11 @@
             <table>
                 <thead>
                     <tr>
-                        <th width="30%">Path (Percorso)</th>
-                        <th width="20%">Valore Convertito</th>
-                        <th width="30%">Sorgente (Sensore - Dettagliato)</th>
-                        <th width="20%">Ultimo Ricevuto</th>
+                        <!-- BLOCCO RIGIDO DELLE LARGHEZZE DELLE COLONNE -->
+                        <th width="25%">Path (Percorso)</th>
+                        <th width="31.5%">Valore Convertito</th>
+                        <th width="31.5%">Sorgente (Sensore - Dettagliato)</th>
+                        <th width="12%">Ultimo Ricevuto</th>
                     </tr>
                 </thead>
                 <tbody id="data-table">
@@ -180,6 +231,7 @@
             "environment.wind.angleApparent",
             "environment.wind.speedTrue",
             "environment.wind.angleTrueWater",
+            "environment.wind.directionTrue",
             "environment.depth.belowTransducer"
         ];
 
@@ -192,37 +244,69 @@
         const radToDeg = (rad) => rad * (180 / Math.PI);
         const msToKts = (ms) => ms * 1.94384;
 
-        // Inizializza la Tabella Riassuntiva
+        // Inizializza la Tabella Riassuntiva e genera le Checkbox
         const tbody = document.getElementById('data-table');
+        const checkboxGrid = document.getElementById('path-checkboxes');
+
         pathsToWatch.forEach(path => {
+            const safeId = path.replace(/\./g, '-');
+
+            // 1. Creazione righe Tabella
             const tr = document.createElement('tr');
-            tr.id = `row-${path.replace(/\./g, '-')}`;
-            
+            tr.id = `row-${safeId}`;
             tr.innerHTML = `
                 <td><strong>${path}</strong></td>
-                <td id="val-${path.replace(/\./g, '-')}" class="val-cell"><span class="value">---</span></td>
-                <td id="src-${path.replace(/\./g, '-')}"><span class="source">---</span></td>
-                <td id="time-${path.replace(/\./g, '-')}"><span class="time">---</span></td>
+                <td id="val-${safeId}" class="val-cell"><span class="value">---</span></td>
+                <td id="src-${safeId}"><span class="source">---</span></td>
+                <td id="time-${safeId}"><span class="time">---</span></td>
             `;
             tbody.appendChild(tr);
+
+            // 2. Creazione Checkbox
+            const label = document.createElement('label');
+            label.className = 'checkbox-item';
+            label.innerHTML = `
+                <input type="checkbox" id="chk-${safeId}" checked>
+                <span>${path}</span>
+            `;
+            checkboxGrid.appendChild(label);
         });
 
         const csvHeader = "Timestamp,Path,Value,Unit,Source,IsSpike";
         document.getElementById('log-container').value = csvHeader + "\n";
 
         // =========================================================
+        // PRESET RAPIDI DI SELEZIONE
+        // =========================================================
+        function applyPreset(preset) {
+            pathsToWatch.forEach(path => {
+                const safeId = path.replace(/\./g, '-');
+                const chk = document.getElementById(`chk-${safeId}`);
+                if (!chk) return;
+
+                if (preset === 'all') {
+                    chk.checked = true;
+                } else if (preset === 'none') {
+                    chk.checked = false;
+                } else if (preset === 'gps') {
+                    // Solo GPS, SOG e COG
+                    const isGps = path.includes('position') || path === 'navigation.speedOverGround' || path === 'navigation.courseOverGroundTrue';
+                    chk.checked = isGps;
+                } else if (preset === 'twd') {
+                    // Analisi strategica bussola vento ( Heading, COG, AWA, TWA, TWD, TWS, AWS )
+                    const isTwd = path.includes('wind') || path === 'navigation.headingTrue' || path === 'navigation.courseOverGroundTrue';
+                    chk.checked = isTwd;
+                }
+            });
+        }
+
+        // =========================================================
         // ESTRAZIONE AVANZATA DELLA SORGENTE (GPS / NMEA)
         // =========================================================
         function extractSourceIdentifier(update) {
-            // 1. Cerca il campo standard moderno $source (es. "can0.GP" o "dbus.gps")
-            if (update.$source) {
-                return update.$source;
-            }
-            
-            // 2. Se non presente, analizza l'oggetto o la stringa source tradizionale
+            if (update.$source) return update.$source;
             if (update.source) {
                 if (typeof update.source === 'object') {
-                    // Estrae label, nome talker o identificativo bus hardware se disponibili
                     return update.source.label ||
                            update.source.talker ||
                            update.source.src ||
@@ -230,7 +314,6 @@
                 }
                 return String(update.source);
             }
-            
             return "Unknown-Source";
         }
 
@@ -272,7 +355,6 @@
                     
                     if (data.updates) {
                         data.updates.forEach(update => {
-                            // Cattura l'identificativo sorgente con la nuova logica avanzata
                             const sourceName = extractSourceIdentifier(update);
                             const timeISO = new Date(update.timestamp).toISOString();
                             const timeUI = new Date(update.timestamp).toLocaleTimeString() + '.' + new Date(update.timestamp).getMilliseconds().toString().padStart(3, '0');
@@ -331,7 +413,7 @@
                         lastValues[path] = formattedVal;
                     }
 
-                } else if (path.includes("angle") || path.includes("heading") || path.includes("course")) {
+                } else if (path.includes("angle") || path.includes("heading") || path.includes("course") || path.includes("direction")) {
                     formattedVal = radToDeg(rawValue).toFixed(2);
                     unit = "deg";
                     
@@ -357,9 +439,10 @@
             // 1. Aggiorna la Tabella in alto
             updateTableRow(path, formattedVal, unit, rawValue, source, timeUI);
 
-            // 2. Aggiungi riga al Log CSV (rispettando il filtro della Dropdown)
-            const filter = document.getElementById('log-filter').value;
-            if (filter === "all" || path.includes(filter)) {
+            // 2. Aggiungi riga al Log CSV (Solo ed esclusivamente se la checkbox di questo percorso è spuntata!)
+            const safeId = path.replace(/\./g, '-');
+            const chk = document.getElementById(`chk-${safeId}`);
+            if (chk && chk.checked) {
                 addLogEntry(timeISO, path, formattedVal, unit, source, isSpike);
             }
         }

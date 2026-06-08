@@ -31,11 +31,11 @@ module.exports = function (app) {
     currentConfig = options;
     app.debug(`${plugin.name} started/updated with new options`);
 
-    // Reset dello storico al riavvio del plugin per evitare incoerenze
-    histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] };
-    graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] };
-    lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0 };
-    raw = {};
+  // Reset dello storico al riavvio del plugin per evitare incoerenze (Sintonizzato Pro v6.0)
+      histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
+      graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
+      lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0, twd: 0 };
+      raw = {};
 
   // 2. Registra le rotte API solo la prima volta (Abilitate per CORS remoto)
       if (!routeRegistered) {

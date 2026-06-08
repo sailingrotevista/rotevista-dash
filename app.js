@@ -328,7 +328,8 @@ function computeTrueWind() {
     const tw_ground_x = aws * Math.cos(awa) - sog * Math.cos(drift), tw_ground_y = aws * Math.sin(awa) - sog * Math.sin(drift);
     const tws_ground = Math.sqrt(tw_ground_x * tw_ground_x + tw_ground_y * tw_ground_y);
 
-    const now = Date.now();
+    // Usiamo il tempo esatto di arrivo del pacchetto del vento per la coerenza dei buffer
+    const now = store.timestamps["environment.wind.speedApparent"] || Date.now();
     store.raw["environment.wind.speedTrue"] = tws_water;
     if (tws_water > 0.05) {
         const twa = Math.atan2(tw_water_y, tw_water_x);
@@ -372,8 +373,9 @@ function getSourcePriorityScore(sourceName) {
     return 30; // Punteggio standard per sorgenti sconosciute
 }
 
-function processIncomingData(path, val, source) {
-    const now = Date.now();
+function processIncomingData(path, val, source, timeMs) {
+    // Usiamo il tempo reale del pacchetto del server per eliminare lo sfasamento
+    const now = timeMs || Date.now();
     const score = getSourcePriorityScore(source);
 
     // Gestione dello Smart Lock
@@ -890,6 +892,12 @@ async function fetchServerHistory() {
                 if (store.histories[key] !== undefined) {
                     store.histories[key] = data[key];
                 }
+            }
+            // --- SILLABAZIONE STRATEGICA DELLA BUSSOLA METEO (TWD) ---
+            // Se il server ci invia lo storico del TWD, lo inseriamo direttamente nella memoria a lungo termine
+            if (data.twd && data.twd.length > 0) {
+                store.longBuf.twd = data.twd;
+                console.log(`📈 Memoria strategica TWD sincronizzata dal server (${data.twd.length} punti).`);
             }
             console.log("📈 Storico dei grafici pre-popolato caricato dal server.");
         }
@@ -1440,6 +1448,8 @@ function connect() {
             const d = JSON.parse(e.data);
             if (d.updates) {
                 d.updates.forEach(u => {
+                    // Sincronizzazione dell'orologio sul tempo reale del server (NMEA/GPS)
+                    const timeMs = u.timestamp ? new Date(u.timestamp).getTime() : Date.now();
                     let sourceLabel = "Unknown";
                     if (u.$source) {
                         sourceLabel = u.$source;
@@ -1452,7 +1462,7 @@ function connect() {
                     }
 
                     if (u.values) {
-                        u.values.forEach(v => processIncomingData(v.path, v.value, sourceLabel));
+                        u.values.forEach(v => processIncomingData(v.path, v.value, sourceLabel, timeMs));
                     }
                 });
             }
