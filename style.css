@@ -75,7 +75,11 @@ body {
 }
 
 /* COLONNA DESTRA: Titolo a DX (bordo), Unità a SX */
-.box-depth, .box-tws, .box-twa, .box-awa, .box-twd { align-items: flex-end !important; text-align: right !important; }
+.box-depth, .box-tws, .box-twa, .box-awa, .box-twd {
+    align-items: flex-end !important;
+    text-align: right !important;
+    padding-right: 14px !important; /* BUG RISOLTO: Aumenta il padding destro per evitare il clipping dei numeri sul bordo */
+}
 .box-depth .label-row, .box-tws .label-row, .box-twa .label-row, .box-awa .label-row, .box-twd .label-row {
     flex-direction: row-reverse !important; justify-content: space-between !important;
 }

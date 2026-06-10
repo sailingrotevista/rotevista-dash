@@ -91,6 +91,8 @@ module.exports = function (app) {
         { path: 'environment.depth.belowTransducer' },
         { path: 'environment.wind.speedApparent' },
         { path: 'environment.wind.angleApparent' },
+        { path: 'environment.wind.speedTrue' },      // Aggiunto chirurgicamente
+        { path: 'environment.wind.directionTrue' },  // Aggiunto chirurgicamente
         { path: 'navigation.headingTrue' },
         { path: 'navigation.headingMagnetic' },
         { path: 'navigation.magneticVariation' },
@@ -163,6 +165,9 @@ module.exports = function (app) {
     }
     else if (path === 'environment.wind.speedApparent') {
       manageHistory('aws', val * 1.94384);
+    }
+    else if (path === 'environment.wind.angleApparent') {
+      raw[path] = val; // BUG RISOLTO: Acquisizione dell'AWA mancante inserita!
     }
     else if (path === 'environment.wind.speedTrue') {
       lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
@@ -713,7 +718,7 @@ module.exports = function (app) {
       const diff = Math.atan2(Math.sin(s2.twd - s1.twd), Math.cos(s2.twd - s1.twd));
       const interpolatedTwd = (s1.twd + diff * ratio + Math.PI * 2) % (Math.PI * 2);
 
-      // Salviamo il record della previsione futura
+      // Salviamo le previsioni future nel server
       futureForecast = {
         timestamp: targetTime,
         tws: interpolatedTws,

@@ -186,7 +186,8 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now
             const clampedDiff = Math.sign(diffRad) * limitRad;
             const clampedRad = pilotRad + clampedDiff;
             finalSin = Math.sin(clampedRad);
-            finalCos = Math.cos(clampedRad);
+            const relativeCos = Math.cos(clampedRad);
+            finalCos = relativeCos;
         } else {
             finalSin = item.sin;
             finalCos = item.cos;
@@ -347,13 +348,14 @@ function computeTrueWind() {
         // Altrimenti eseguiamo il calcolo vettoriale tattico sull'acqua
         tws_water = Math.sqrt(aws * aws + stw * stw - 2 * aws * stw * Math.cos(awa));
         store.raw["environment.wind.speedTrue"] = tws_water;
-        
-        if (tws_water > 0.05) {
-            const twa = Math.atan2(aws * Math.sin(awa), aws * Math.cos(awa) - stw);
-            store.raw["environment.wind.angleTrueWater"] = twa;
-            safePush(store.smoothBuf.twa, twa, now);
-            safePush(store.longBuf.twa, twa, now);
-        }
+    }
+    
+    // BUG RISOLTO: Calcoliamo il TWA sempre, indipendentemente dal TWS nativo!
+    if (tws_water > 0.05) {
+        const twa = Math.atan2(aws * Math.sin(awa), aws * Math.cos(awa) - stw);
+        store.raw["environment.wind.angleTrueWater"] = twa;
+        safePush(store.smoothBuf.twa, twa, now);
+        safePush(store.longBuf.twa, twa, now);
     }
 
     // ==========================================================================
@@ -444,6 +446,19 @@ function processIncomingData(path, val, source, timeMs) {
     if (path === "environment.wind.angleApparent") {
         safePush(store.smoothBuf.awa, val, now);
         safePush(store.longBuf.awa, val, now);
+    }
+
+    // BUG RISOLTO: Intercetta il TWD nativo e lo spinge nei buffer della bussola radar
+    if (path === "environment.wind.directionTrue") {
+        let directionVal = (val && typeof val === 'object' && val.val !== undefined) ? val.val : val;
+        safePush(store.smoothBuf.twd, directionVal, now);
+        safePush(store.longBuf.twd, directionVal, now);
+    }
+
+    // BUG RISOLTO: Intercetta il TWS nativo e lo memorizza in tempo reale
+    if (path === "environment.wind.speedTrue") {
+        let speedVal = (val && typeof val === 'object' && val.val !== undefined) ? val.val : val;
+        store.raw["environment.wind.speedTrue"] = speedVal;
     }
     
     // --- GESTIONE PRUA VERA / MAGNETICA CON AUTODIVIAZIONE ---
@@ -1278,7 +1293,7 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     if (visibleData.length < 2) return;
 
     const colDanger  = "#ff3b30", colWarning = "#ff9800", colTws = "#2c3e50", colAws = "#5c6bc0";
-    const colDepth   = "#0088cc", colStw = "#00C851", colSog = "#ffbb33", colVmg = "#00b8d4";
+    const colDepth   = "#0088cc", colStw = "#00C851", colStwBorder = "#007a3d", colSog = "#ffbb33", colVmg = "#00b8d4";
 
     const getColorProps = (val) => {
         // Se siamo in Dual Screen (focus), aumentiamo lo spessore base della curva di un filino (da 1.6 a 2.2)
