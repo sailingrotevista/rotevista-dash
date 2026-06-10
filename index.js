@@ -338,31 +338,45 @@ module.exports = function (app) {
       }
     }
 
-    // Validazione e clamping di sicurezza (non si applica all'oggetto TWD)
-    if (!isTwdType) {
-      if (!isFinite(finalValue)) return;
-      finalValue = Math.max(0, finalValue);
-      histories[type].push({ val: finalValue, time: now });
-    } else {
-      // Salvataggio specifico del TWD contenente l'oggetto { val, min, max, time }
-      histories['twd'].push({
-        val: finalValue.val,
-        min: finalValue.min,
-        max: finalValue.max,
-        time: now
-      });
+      // Validazione e clamping di sicurezza (non si applica all'oggetto TWD)
+          if (!isTwdType) {
+            if (!isFinite(finalValue)) return;
+            finalValue = Math.max(0, finalValue);
+            histories[type].push({ val: finalValue, time: now });
 
-      // --- TRIGGER DI CONGELAMENTO ARCO (Ogni :00 e :30 dell'orologio) ---
-      const current30mSlot = Math.floor(now / 1800000) * 1800000;
-      if (lastFrozen30mSlot === 0) {
-        lastFrozen30mSlot = current30mSlot; // Inizializzazione al primo avvio
-      } else if (current30mSlot > lastFrozen30mSlot) {
-        // Lo slot da 30 minuti precedente (lastFrozen30mSlot) si è appena concluso!
-        // Avviamo la procedura di compressione e congelamento dei dati di quel periodo
-        freeze30mSlot(lastFrozen30mSlot);
-        lastFrozen30mSlot = current30mSlot;
-      }
-    }
+            // EMISSIONE DEL DELTA: Se abbiamo calcolato il TWS di fallback, lo trasmettiamo a Signal K
+            if (type === 'tws' && (now - lastNativeTwsTime > 5000)) {
+              emitDelta('environment.wind.speedTrue', finalValue / 1.94384); // Converte nodi in m/s
+            }
+          } else {
+            // Salvataggio specifico del TWD contenente l'oggetto { val, min, max, time }
+            histories['twd'].push({
+              val: finalValue.val,
+              min: finalValue.min,
+              max: finalValue.max,
+              time: now
+            });
+
+            // EMISSIONE DEL DELTA: Se abbiamo calcolato il TWD di fallback, lo trasmettiamo a Signal K
+            if (now - lastNativeTwdTime > 5000) {
+              emitDelta('environment.wind.directionTrue', {
+                val: finalValue.val,
+                min: finalValue.min,
+                max: finalValue.max
+              });
+            }
+
+            // --- TRIGGER DI CONGELAMENTO ARCO (Ogni :00 e :30 dell'orologio) ---
+            const current30mSlot = Math.floor(now / 1800000) * 1800000;
+            if (lastFrozen30mSlot === 0) {
+              lastFrozen30mSlot = current30mSlot; // Inizializzazione al primo avvio
+            } else if (current30mSlot > lastFrozen30mSlot) {
+              // Lo slot da 30 minuti precedente (lastFrozen30mSlot) si è appena concluso!
+              // Avviamo la procedura di compressione e congelamento dei dati di quel periodo
+              freeze30mSlot(lastFrozen30mSlot);
+              lastFrozen30mSlot = current30mSlot;
+            }
+          }
 
     // Pruning automatico basato sulle impostazioni di timeline
     // (Forziamo il server a conservare sempre almeno 60 minuti per il TWD!)
@@ -730,6 +744,29 @@ module.exports = function (app) {
       app.error('[Open-Meteo] Forecast matching slots not found for target time');
     }
   }
+    /**
+       * emitDelta: Scrive ed emette un aggiornamento di rotta direttamente nel
+       * server principale di Signal K per renderlo disponibile a tutti i client WebSocket.
+       */
+      function emitDelta(path, value) {
+        if (typeof app.handleMessage === 'function') {
+          app.handleMessage(plugin.id, {
+            updates: [
+              {
+                source: { label: 'rotevista-dash-plugin' },
+                timestamp: new Date().toISOString(),
+                values: [
+                  {
+                    path: path,
+                    value: value
+                  }
+                ]
+              }
+            ]
+          });
+        }
+      }
+    
     
   return plugin;
 };
