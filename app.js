@@ -317,34 +317,61 @@ function updateLeewayDisplay(deg) {
     ui.leewayVal.textContent = `LEEWAY: ${deg.toFixed(1)}°`;
 }
 
-// ==========================================================================
-// 5. MOTORE DI CALCOLO VENTO E DATA ROUTING
-// ==========================================================================
+/**
+ * computeTrueWind: Calcola TWS, TWA e TWD strategico.
+ * Gestisce il fallback separato (Split-Fallback) in caso di dati parzialmente nativi di bordo.
+ */
 function computeTrueWind() {
     const aws = store.raw["environment.wind.speedApparent"], awa = store.raw["environment.wind.angleApparent"];
     const stw = store.raw["navigation.speedThroughWater"] || 0, sog = store.raw["navigation.speedOverGround"] || 0;
     const hdg = store.raw["navigation.headingTrue"] || 0, cog = store.raw["navigation.courseOverGroundTrue"] || 0;
     if (aws === undefined || awa === undefined) return;
 
-    const tw_water_x = aws * Math.cos(awa) - stw, tw_water_y = aws * Math.sin(awa);
-    const tws_water = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
-
-    const drift = (cog - hdg + Math.PI * 3) % (2 * Math.PI) - Math.PI;
-    const tw_ground_x = aws * Math.cos(awa) - sog * Math.cos(drift), tw_ground_y = aws * Math.sin(awa) - sog * Math.sin(drift);
-    const tws_ground = Math.sqrt(tw_ground_x * tw_ground_x + tw_ground_y * tw_ground_y);
-
     // Usiamo il tempo esatto di arrivo del pacchetto del vento per la coerenza dei buffer
     const now = store.timestamps["environment.wind.speedApparent"] || Date.now();
-    store.raw["environment.wind.speedTrue"] = tws_water;
-    if (tws_water > 0.05) {
-        const twa = Math.atan2(tw_water_y, tw_water_x);
-        store.raw["environment.wind.angleTrueWater"] = twa;
-        safePush(store.smoothBuf.twa, twa, now); safePush(store.longBuf.twa, twa, now);
+
+    // ==========================================================================
+    // 1. GESTIONE TWS (NATIVO vs FALLBACK)
+    // ==========================================================================
+    const hasNativeTws = store.timestamps["environment.wind.speedTrue"] && (Date.now() - store.timestamps["environment.wind.speedTrue"] < 5000);
+    let tws_water = 0;
+
+    if (hasNativeTws) {
+        // Se la barca invia il TWS nativo, usiamo direttamente quello
+        tws_water = store.raw["environment.wind.speedTrue"] ? msToKts(store.raw["environment.wind.speedTrue"]) : 0;
+    } else {
+        // Altrimenti eseguiamo il calcolo vettoriale tattico sull'acqua
+        tws_water = Math.sqrt(aws * aws + stw * stw - 2 * aws * stw * Math.cos(awa));
+        store.raw["environment.wind.speedTrue"] = tws_water;
+        
+        if (tws_water > 0.05) {
+            const twa = Math.atan2(aws * Math.sin(awa), aws * Math.cos(awa) - stw);
+            store.raw["environment.wind.angleTrueWater"] = twa;
+            safePush(store.smoothBuf.twa, twa, now);
+            safePush(store.longBuf.twa, twa, now);
+        }
     }
-    if (tws_ground > 0.05) {
-        let twd = (hdg + Math.atan2(tw_ground_y, tw_ground_x) + 2 * Math.PI) % (2 * Math.PI);
-        store.raw["environment.wind.directionTrue"] = twd;
-        safePush(store.smoothBuf.twd, twd, now); safePush(store.longBuf.twd, twd, now);
+
+    // ==========================================================================
+    // 2. GESTIONE TWD (NATIVO vs FALLBACK)
+    // ==========================================================================
+    const hasNativeTwd = store.timestamps["environment.wind.directionTrue"] && (Date.now() - store.timestamps["environment.wind.directionTrue"] < 5000);
+
+    if (hasNativeTwd) {
+        // Se il TWD è nativo della centralina, lo lasciamo scorrere passivamente
+    } else {
+        // Altrimenti calcoliamo lo scarroccio e ricaviamo il TWD geografico sul fondo
+        const drift = (cog - hdg + Math.PI * 3) % (2 * Math.PI) - Math.PI;
+        const tw_ground_x = aws * Math.cos(awa) - sog * Math.cos(drift);
+        const tw_ground_y = aws * Math.sin(awa) - sog * Math.sin(drift);
+        const tws_ground = Math.sqrt(tw_ground_x * tw_ground_x + tw_ground_y * tw_ground_y);
+
+        if (tws_ground > 0.05) {
+            let twd = (hdg + Math.atan2(tw_ground_y, tw_ground_x) + 2 * Math.PI) % (2 * Math.PI);
+            store.raw["environment.wind.directionTrue"] = twd;
+            safePush(store.smoothBuf.twd, twd, now);
+            safePush(store.longBuf.twd, twd, now); // Alimenta la bussola meteo strategica!
+        }
     }
 }
 

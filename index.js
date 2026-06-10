@@ -21,6 +21,9 @@ module.exports = function (app) {
       let graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
       let lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0, twd: 0 };
       let raw = {};
+    // Memoria temporale per rilevare la presenza di sensori nativi sul Cerbo
+      let lastNativeTwsTime = 0;
+      let lastNativeTwdTime = 0;
 
   /**
    * plugin.start: Inizializza il plugin.
@@ -98,14 +101,17 @@ module.exports = function (app) {
     app.debug(msg);
   };
 
-  /**
+/**
    * processIncomingDelta: Decodifica i dati dei sensori in Knots/Meters ed esegue l'aggregazione
+   * Gestisce l'architettura "Nativo Prima, Fallback Dopo" per il vento reale.
    */
   function processIncomingDelta(path, val) {
     if (val === null || val === undefined) return;
     raw[path] = val;
 
-    // Elaborazione e invio alla macchina a stati temporali dello storico
+    const now = Date.now();
+
+    // 1. Cattura dei dati nativi (Se presenti, li scrive direttamente nello storico)
     if (path === 'navigation.speedThroughWater') {
       manageHistory('stw', val * 1.94384);
     }
@@ -118,8 +124,16 @@ module.exports = function (app) {
     else if (path === 'environment.wind.speedApparent') {
       manageHistory('aws', val * 1.94384);
     }
+    else if (path === 'environment.wind.speedTrue') {
+      lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
+      manageHistory('tws', val * 1.94384);
+    }
+    else if (path === 'environment.wind.directionTrue') {
+      lastNativeTwdTime = now; // Rilevato TWD nativo della centralina!
+      manageHistory('twd', val);
+    }
 
-    // Calcolo combinato del Vento Reale (TWS) e della VMG a livello Server
+    // 2. Calcolo combinato di FALLBACK (Si attiva solo se la centralina non invia TWS/TWD nativi)
     const aws = raw["environment.wind.speedApparent"];
     const awa = raw["environment.wind.angleApparent"];
     const stw = raw["navigation.speedThroughWater"] || 0;
@@ -128,25 +142,29 @@ module.exports = function (app) {
     const cog = raw["navigation.courseOverGroundTrue"] || 0;
 
     if (aws !== undefined && awa !== undefined) {
-        const awsKts = aws * 1.94384;
-        const stwKts = stw * 1.94384;
-        const tw_water_x = awsKts * Math.cos(awa) - stwKts;
-        const tw_water_y = awsKts * Math.sin(awa);
+      const awsKts = aws * 1.94384;
+      const stwKts = stw * 1.94384;
+      const tw_water_x = awsKts * Math.cos(awa) - stwKts;
+      const tw_water_y = awsKts * Math.sin(awa);
+
+      // Calcoliamo il TWS di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
+      if (now - lastNativeTwsTime > 5000) {
         const tws = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
-
         manageHistory('tws', tws);
-
-        const twa = Math.atan2(tw_water_y, tw_water_x);
-        const vmg = Math.abs(stwKts * Math.cos(twa));
-        manageHistory('vmg', vmg);
-
-        // --- CALCOLO TWD STRATEGICO SERVER-SIDE ---
-        if (hdg !== undefined) {
-          // Calcolo della direzione del vento reale rispetto al nord (TWD) in radianti
-          const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
-          manageHistory('twd', twd);
-        }
       }
+
+      const twa = Math.atan2(tw_water_y, tw_water_x);
+      
+      // La VMG viene sempre calcolata a livello server poiché raramente è nativa
+      const vmg = Math.abs(stwKts * Math.cos(twa));
+      manageHistory('vmg', vmg);
+
+      // Calcoliamo il TWD di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
+      if (hdg !== undefined && (now - lastNativeTwdTime > 5000)) {
+        const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
+        manageHistory('twd', twd);
+      }
+    }
   }
 
   /**
