@@ -311,6 +311,16 @@
                 document.getElementById('debug-tws').innerText = tws.toFixed(1);
                 document.getElementById('debug-twa').innerText = Math.round(radToDeg(twa)) + '°';
                 document.getElementById('debug-twd').innerText = Math.round(radToDeg(twd)) + '°';
+
+                // --- ACCUMULO DATI REALI LOCALE (1Hz) ---
+                // Popoliamo i buffer locali ogni secondo per garantire il disegno immediato del Presente
+                store.twdMinuteBuffer.push({ val: twd, min: twd, max: twd, time: now });
+                while(store.twdMinuteBuffer.length > 1800) store.twdMinuteBuffer.shift(); // conserva 30 minuti a 1Hz
+
+                store.twsMinuteBuffer.push({ val: tws, time: now });
+                while(store.twsMinuteBuffer.length > 1800) store.twsMinuteBuffer.shift();
+
+                renderRadar(); // Rinfresco grafico istantaneo reattivo
             }
         }
 
@@ -352,7 +362,7 @@
                         document.getElementById('debug-gps').innerText = val.latitude.toFixed(4) + '; ' + val.longitude.toFixed(4);
                     }
                     
-                    // BUG RISOLTO CHIRURGICAMENTE: Allineamento chiavi REST storiche twd e tws sintonizzate!
+                    // Sincronizzazione automatica allineata alle chiavi REST storiche reali del server
                     if (data.twd) store.twdMinuteBuffer = data.twd;
                     if (data.tws) store.twsMinuteBuffer = data.tws;
                 }
@@ -388,7 +398,7 @@
                             u.values.forEach(v => {
                                 processIncomingDelta(v.path, v.value, sourceLabel, timeMs);
                                 
-                                // COMPATIBILITÀ TOTALE DEL COPRIMENTO WEB-SOCKET:
+                                // Ricezione live delle emissioni delta del nostro plugin server
                                 if (v.path === 'environment.wind.directionTrue') {
                                     let val, min, max;
                                     if (v.value && typeof v.value === 'object' && v.value.val !== undefined) {
@@ -678,7 +688,7 @@
                 const radius = ringRadii[index];
                 const gradId = `chord-gradient-${index}`;
                 
-                // BUG RISOLTO CHIRURGICAMENTE: Rimosso il sbiadimento grigio (opacità sempre fissa a 1 per colore solido e brillante)
+                // Opacità sempre fissa a 1 per colore solido e brillante (BUG RISOLTO)
                 const opacityValue = 1;
 
                 // Caso A: Calma Piatta

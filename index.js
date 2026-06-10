@@ -212,12 +212,11 @@ module.exports = function (app) {
       const vmg = Math.abs(stwKts * Math.cos(twa));
       manageHistory('vmg', vmg);
 
-      // Calcoliamo il TWD di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
-      if (hdg !== undefined && (now - lastNativeTwdTime > 5000)) {
-        const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
-        twd = (twd + 2 * Math.PI) % (2 * Math.PI); // Sicurezza extra
-        manageHistory('twd', twd);
-      }
+        // Calcoliamo il TWD di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
+              if (hdg !== undefined && (now - lastNativeTwdTime > 5000)) {
+                const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
+                manageHistory('twd', twd); // BUG RISOLTO: Rimossa la riassegnazione di "const" che mandava in crash il server
+              }
     }
   }
 
@@ -744,6 +743,7 @@ module.exports = function (app) {
       app.error('[Open-Meteo] Forecast matching slots not found for target time');
     }
   }
+    
     /**
        * emitDelta: Scrive ed emette un aggiornamento di rotta direttamente nel
        * server principale di Signal K per renderlo disponibile a tutti i client WebSocket.
@@ -751,6 +751,7 @@ module.exports = function (app) {
       function emitDelta(path, value) {
         if (typeof app.handleMessage === 'function') {
           app.handleMessage(plugin.id, {
+            context: 'vessels.self', // BUG RISOLTO: Inserito il contesto Signal K per evitare lo scarto del delta
             updates: [
               {
                 source: { label: 'rotevista-dash-plugin' },
@@ -766,7 +767,6 @@ module.exports = function (app) {
           });
         }
       }
-    
     
   return plugin;
 };
