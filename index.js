@@ -64,6 +64,8 @@ module.exports = function (app) {
         { path: 'environment.wind.speedApparent' },
         { path: 'environment.wind.angleApparent' },
         { path: 'navigation.headingTrue' },
+        { path: 'navigation.headingMagnetic' },
+        { path: 'navigation.magneticVariation' },
         { path: 'navigation.courseOverGroundTrue' }
       ]
     };
@@ -127,6 +129,14 @@ module.exports = function (app) {
     else if (path === 'environment.wind.speedTrue') {
       lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
       manageHistory('tws', val * 1.94384);
+    }
+    // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
+    else if (path === 'navigation.headingMagnetic') {
+      const hasTrueHdg = raw['navigation.headingTrue'] !== undefined;
+      if (!hasTrueHdg) {
+        const variation = raw['navigation.magneticVariation'] || 0;
+        raw['navigation.headingTrue'] = (val + variation + 2 * Math.PI) % (2 * Math.PI);
+      }
     }
     else if (path === 'environment.wind.directionTrue') {
       lastNativeTwdTime = now; // Rilevato TWD nativo della centralina!

@@ -441,10 +441,26 @@ function processIncomingData(path, val, source, timeMs) {
         safePush(store.smoothBuf.awa, val, now);
         safePush(store.longBuf.awa, val, now);
     }
+    
+    // --- GESTIONE PRUA VERA / MAGNETICA CON AUTODIVIAZIONE ---
     if (path === "navigation.headingTrue") {
         safePush(store.smoothBuf.hdg, val, now);
         safePush(store.longBuf.hdg, val, now);
     }
+    else if (path === "navigation.headingMagnetic") {
+        // Se non abbiamo ricevuto una prua vera negli ultimi 5 secondi, convertiamo quella magnetica!
+        const hasTrueHdg = store.timestamps["navigation.headingTrue"] && (now - store.timestamps["navigation.headingTrue"] < 5000);
+        if (!hasTrueHdg) {
+            const variation = store.raw["navigation.magneticVariation"] || 0; // Legge la declinazione magnetica del GPS
+            const calculatedTrueHdg = (val + variation + 2 * Math.PI) % (2 * Math.PI);
+            
+            // Registriamo il valore calcolato come Prua Vera temporanea
+            store.raw["navigation.headingTrue"] = calculatedTrueHdg;
+            safePush(store.smoothBuf.hdg, calculatedTrueHdg, now);
+            safePush(store.longBuf.hdg, calculatedTrueHdg, now);
+        }
+    }
+    
     if (path === "navigation.courseOverGroundTrue") {
         safePush(store.smoothBuf.cog, val, now);
         safePush(store.longBuf.cog, val, now);
