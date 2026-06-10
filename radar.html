@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wind Radar Test - Prototipo Concentrico</title>
+    <style>
+        body {
+            background-color: #050505;
+            color: #eee;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            color: #27ae60;
+            font-size: 1.5rem;
+            margin-bottom: 5px;
+        }
+
+        p {
+            color: #888;
+            font-size: 0.9rem;
+            margin-top: 0;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 40px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Pannello dei controlli interattivi */
+        .controls-panel {
+            background: #121212;
+            border: 1px solid #222;
+            padding: 20px;
+            border-radius: 12px;
+            width: 320px;
+            box-sizing: border-box;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: bold;
+            color: #aaa;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+            accent-color: #27ae60;
+        }
+
+        .val-display {
+            float: right;
+            color: #27ae60;
+            font-weight: bold;
+        }
+
+        /* Contenitore della bussola radar */
+        .radar-box {
+            background: #0d0d0d;
+            border: 1px solid #1a1a1a;
+            border-radius: 50%;
+            padding: 10px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+        }
+
+        svg {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Wind Radar Test (Prototipo v6.0)</h1>
+    <p>Usa gli slider per modificare le calibrazioni dei Reef.<br>Gli archi e i gradienti sfumati si adatteranno dinamicamente.</p>
+
+    <div class="container">
+        
+        <!-- PANNELLO CONTROLLI -->
+        <div class="controls-panel">
+            <div class="control-group">
+                <label>Reef 1 (Limite 1) <span class="val-display" id="r1-val">18 kts</span></label>
+                <input type="range" id="slider-r1" min="10" max="22" value="18" step="1" oninput="updateReefs()">
+            </div>
+            
+            <div class="control-group">
+                <label>Reef 2 (Limite 2) <span class="val-display" id="r2-val">24 kts</span></label>
+                <input type="range" id="slider-r2" min="16" max="32" value="24" step="1" oninput="updateReefs()">
+            </div>
+
+            <div class="control-group" style="border-top: 1px solid #222; padding-top: 15px;">
+                <label>Reef 3 (Calcolato) <span class="val-display" id="r3-val" style="color: #9c27b0;">30 kts</span></label>
+                <span style="font-size: 0.75rem; color: #666; display: block; margin-top: -5px;">
+                    Formula: R2 + (R2 - R1) - Colore Viola
+                </span>
+            </div>
+        </div>
+
+        <!-- BUSSOLA RADAR SVG -->
+        <div class="radar-box">
+            <svg id="wind-radar" width="400" height="400" viewBox="0 0 400 400">
+                <!-- Sfondo nero profondo -->
+                <circle cx="200" cy="200" r="190" fill="#030303" />
+                
+                <!-- Defs per i gradienti SVG dinamici -->
+                <defs id="radar-gradients"></defs>
+                
+                <!-- Linee di griglia bussola N S E W -->
+                <g stroke="#1a1a1a" stroke-width="0.8">
+                    <line x1="200" y1="10" x2="200" y2="390" />
+                    <line x1="10" y1="200" x2="390" y2="200" />
+                </g>
+                <g fill="#444" font-size="10" font-weight="900" text-anchor="middle" dominant-baseline="middle">
+                    <text x="200" y="18">N</text>
+                    <text x="382" y="200">E</text>
+                    <text x="200" y="382">S</text>
+                    <text x="18" y="200">W</text>
+                </g>
+
+                <!-- Gli anelli radar verranno renderizzati qui via Javascript -->
+                <g id="radar-rings"></g>
+
+                <!-- Valore centrale digitale del vento corrente -->
+                <g transform="translate(200, 200)">
+                    <circle cx="0" cy="0" r="32" fill="#0d0d0d" stroke="#222" stroke-width="1" />
+                    <text x="0" y="-5" fill="#aaa" font-size="8" font-weight="bold" text-anchor="middle" text-transform="uppercase">WIND</text>
+                    <text x="0" y="10" fill="#fff" font-size="15" font-weight="900" text-anchor="middle">5.7</text>
+                    <text x="0" y="20" fill="#27ae60" font-size="8" font-weight="bold" text-anchor="middle">N</text>
+                </g>
+            </svg>
+        </div>
+
+    </div>
+
+    <script>
+        // Configurazione iniziale di simulazione
+        let REEF1 = 18;
+        let REEF2 = 24;
+        let REEF3 = 30; // Calcolato: R2 + (R2 - R1)
+
+        // Soglia di calma piatta inserita in index.js
+        const CALM_THRESHOLD_KTS = 1.5;
+
+        // Dati finti di esempio strutturati esattamente come nello store
+        const mockData = [
+            // Anello 0 (Al Centro): Previsione del futuro (Open-Meteo) - Semitrasparente
+            { isFuture: true, twdMin: 40, twdMax: 50, twsPeak: 6.5 },
+            
+            // Anello 1: Presente Mobile (Ultimi 30 minuti reali) - Molto largo per oscillazione
+            { isActive: true, twdMin: 220, twdMax: 260, twsPeak: 14.5 },
+            
+            // Anelli da 2 a 8: Storico passato a blocchi fissi da mezz'ora
+            { twdMin: 230, twdMax: 255, twsPeak: 19.5 }, // Ora -0.5 (Fascia 3: Arancio/Rosso)
+            { twdMin: 240, twdMax: 250, twsPeak: 22.0 }, // Ora -1.0 (Fascia 4: Rosso/Rosso scuro)
+            { twdMin: 235, twdMax: 245, twsPeak: 31.0 }, // Ora -1.5 (Fascia 5: Viola/Rosso - Tempesta)
+            { twdMin: 0, twdMax: 360, twsPeak: 0.8 },   // Ora -2.0 (Calma piatta -> cerchio bianco 360°)
+            { twdMin: 90, twdMax: 110, twsPeak: 12.0 },  // Ora -2.5 (Fascia 2: Arancio/Bianco)
+            { twdMin: 85, twdMax: 115, twsPeak: 8.0 }    // Ora -3.0 (Fascia 1: Bianco solido)
+        ];
+
+        // Definizione raggio e spaziature per gli 8 anelli (Index 0 a 7)
+        // Grouping: inseriti piccoli gap tra mezz'ore della stessa ora e gap grandi tra ore diverse
+        const ringRadii = [
+            45,  // Anello 0: Previsione Futuro
+            60,  // Anello 1: Presente Mobile
+            75,  // Anello 2: Ora -0.5 (Inizio blocco Ora -1)
+            87,  // Anello 3: Ora -1.0 (Stretta spaziatura con precedente)
+            105, // Anello 4: Ora -1.5 (Ampia spaziatura con precedente)
+            117, // Anello 5: Ora -2.0
+            135, // Anello 6: Ora -2.5 (Ampia spaziatura)
+            147  // Anello 7: Ora -3.0
+        ];
+
+        // Traduzione coordinate Polari (Angolo/Raggio) in Cartesiane (X/Y)
+        function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
+            // Sottraiamo 90° per allineare lo 0° di SignalK (Nord) con la cima dell'SVG
+            const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
+            return {
+                x: centerX + (radius * Math.cos(angleInRadians)),
+                y: centerY + (radius * Math.sin(angleInRadians))
+            };
+        }
+
+        // Funzione geometrica SVG per tracciare un arco pulito
+        function describeArc(x, y, radius, startAngle, endAngle) {
+            const start = polarToCartesian(x, y, radius, endAngle);
+            const end = polarToCartesian(x, y, radius, startAngle);
+
+            let arcSweep = endAngle - startAngle;
+            if (arcSweep < 0) arcSweep += 360;
+
+            const largeArcFlag = arcSweep <= 180 ? "0" : "1";
+
+            return [
+                "M", start.x, start.y,
+                "A", radius, radius, 0, largeArcFlag, 0, end.x, end.y
+            ].join(" ");
+        }
+
+        // Calcola e aggiorna le soglie dei Reef al variare degli slider
+        function updateReefs() {
+            REEF1 = parseInt(document.getElementById('slider-r1').value);
+            REEF2 = parseInt(document.getElementById('slider-r2').value);
+            REEF3 = REEF2 + (REEF2 - REEF1);
+
+            document.getElementById('r1-val').innerText = REEF1 + " kts";
+            document.getElementById('r2-val').innerText = REEF2 + " kts";
+            document.getElementById('r3-val').innerText = REEF3 + " kts";
+
+            renderRadar();
+        }
+
+        // Genera lo stile del gradiente sfumato in base all'intensità del vento
+        function getArcGradient(id, tws) {
+            let stops = '';
+
+            // Fascia 1: Vento Leggero (0 a R1/2) -> Bianco Solido
+            if (tws < REEF1 / 2) {
+                return { type: 'solid', color: '#ffffff' };
+            }
+            // Fascia 2: Vento Medio (R1/2 a R1) -> Arancione al centro, Bianco ai lati
+            else if (tws >= REEF1 / 2 && tws < REEF1) {
+                stops = `
+                    <stop offset="0%" stop-color="#ffffff" />
+                    <stop offset="50%" stop-color="#ff9800" />
+                    <stop offset="100%" stop-color="#ffffff" />
+                `;
+            }
+            // Fascia 3: Vento Forte (R1 a R1.5) -> Arancione al centro, Rosso ai lati
+            else if (tws >= REEF1 && tws < REEF1 + (REEF2 - REEF1) / 2) {
+                stops = `
+                    <stop offset="0%" stop-color="#ff3b30" />
+                    <stop offset="50%" stop-color="#ff9800" />
+                    <stop offset="100%" stop-color="#ff3b30" />
+                `;
+            }
+            // Fascia 4: Vento Estremo (R1.5 a Reef2) -> Rosso vivo al centro, Rosso scuro ai lati
+            else if (tws >= REEF1 + (REEF2 - REEF1) / 2 && tws < REEF3) {
+                stops = `
+                    <stop offset="0%" stop-color="#4a0000" />
+                    <stop offset="50%" stop-color="#ff3b30" />
+                    <stop offset="100%" stop-color="#4a0000" />
+                `;
+            }
+            // Fascia 5: Vento Tempesta (Sopra Reef 3) -> Viola al centro, Rosso scuro ai lati
+            else {
+                stops = `
+                    <stop offset="0%" stop-color="#4a0000" />
+                    <stop offset="50%" stop-color="#9c27b0" />
+                    <stop offset="100%" stop-color="#4a0000" />
+                `;
+            }
+
+            // Se è un gradiente, restituiamo il markup XML e l'ID di riferimento
+            return {
+                type: 'gradient',
+                xml: `<linearGradient id="${id}" x1="0%" y1="0%" x2="100%" y2="0%">${stops}</linearGradient>`,
+                url: `url(#${id})`
+            };
+        }
+
+        // Funzione di disegno principale della bussola radar
+        function renderRadar() {
+            const ringsContainer = document.getElementById('radar-rings');
+            const defsContainer = document.getElementById('radar-gradients');
+            
+            ringsContainer.innerHTML = '';
+            defsContainer.innerHTML = '';
+
+            mockData.forEach((data, index) => {
+                const radius = ringRadii[index];
+                const gradId = `gradient-arc-${index}`;
+
+                // --- GESTIONE CASO 1: CALMA PIATTA (Cerchio completo bianco sottile) ---
+                if (data.twsPeak < CALM_THRESHOLD_KTS) {
+                    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    circle.setAttribute("cx", "200");
+                    circle.setAttribute("cy", "200");
+                    circle.setAttribute("r", radius);
+                    circle.setAttribute("fill", "none");
+                    circle.setAttribute("stroke", "rgba(255, 255, 255, 0.45)");
+                    circle.setAttribute("stroke-width", "0.8");
+                    circle.setAttribute("stroke-dasharray", "3, 3"); // Tratteggio elegante per calma piatta
+                    ringsContainer.appendChild(circle);
+                    return;
+                }
+
+                // --- GESTIONE CASO 2: ARCO DIREZIONALE ---
+                // Generazione gradiente sfumato dinamico
+                const grad = getArcGradient(gradId, data.twsPeak);
+                let strokeColor = '';
+
+                if (grad.type === 'gradient') {
+                    defsContainer.innerHTML += grad.xml;
+                    strokeColor = grad.url;
+                } else {
+                    strokeColor = grad.color;
+                }
+
+                // Creazione del tracciato dell'arco SVG
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                const pathData = describeArc(200, 200, radius, data.twdMin, data.twdMax);
+                
+                path.setAttribute("d", pathData);
+                path.setAttribute("fill", "none");
+                path.setAttribute("stroke", strokeColor);
+                
+                // Spessori differenziati
+                // Il presente mobile e il futuro sono leggermente più spessi
+                if (data.isFuture) {
+                    path.setAttribute("stroke-width", "5");
+                    path.setAttribute("opacity", "0.35"); // Trasparenza per la previsione futura
+                } else if (data.isActive) {
+                    path.setAttribute("stroke-width", "6.5");
+                    path.setAttribute("opacity", "1");
+                } else {
+                    path.setAttribute("stroke-width", "5.5"); // Storico solido
+                    path.setAttribute("opacity", "0.8");
+                }
+
+                // Arrotondamento delle estremità degli archi
+                path.setAttribute("stroke-linecap", "round");
+                
+                ringsContainer.appendChild(path);
+            });
+        }
+
+        // Inizializza la visualizzazione al caricamento
+        window.onload = function() {
+            renderRadar();
+        };
+    </script>
+</body>
+</html>
