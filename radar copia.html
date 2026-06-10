@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wind Radar - Twin Light Compass Calibrata (v6.0)</title>
+    <style>
+        :root {
+            /* Dimensione dinamica reattiva del widget quadrato */
+            --box-size: 400px;
+        }
+
+        body {
+            background-color: #ffffff;
+            color: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            color: #000;
+            font-size: 1.3rem;
+            margin-bottom: 5px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+
+        p {
+            color: #666;
+            font-size: 0.85rem;
+            margin-top: 0;
+            margin-bottom: 25px;
+            text-align: center;
+        }
+
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 30px;
+            align-items: flex-start;
+            justify-content: center;
+        }
+
+        .controls-panel {
+            background: #fdfdfd;
+            border: 1px solid #e5e5e5;
+            padding: 20px;
+            border-radius: 12px;
+            width: 320px;
+            box-sizing: border-box;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            letter-spacing: 0.5px;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+            accent-color: #00C851;
+            background: #ddd;
+            height: 4px;
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .val-display {
+            float: right;
+            color: #000;
+            font-weight: bold;
+        }
+
+        /* BOX STRUTTURALE SCALABILE */
+        .data-box-square {
+            position: relative;
+            width: var(--box-size);
+            height: var(--box-size);
+            background: rgb(255, 255, 255);
+            border: 1px solid #eee;
+            border-radius: 12px;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            transition: width 0.1s ease, height 0.1s ease;
+        }
+
+        .label-row {
+            position: absolute;
+            top: 10px;
+            left: 12px;
+            right: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .label {
+            color: #888;
+            font-size: 0.65rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .unit {
+            color: #aaa;
+            font-size: 0.6rem;
+            font-weight: bold;
+        }
+
+        /* Forza l'SVG a riempire lo spazio a disposizione mantenendo le proporzioni */
+        svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Tactical Wind Radar (v6.0)</h1>
+    <p>Calibrazione Spaziatura: Compressione proporzionale degli anelli con luce di 5px dal dial</p>
+
+    <div class="container">
+        
+        <div class="controls-panel">
+            
+            <!-- SLIDER DI ZOOM SCALABILITÀ -->
+            <div class="control-group" style="padding-bottom: 15px; border-bottom: 1px solid #eee; margin-bottom: 20px;">
+                <label style="color: #0088cc;">Zoom Box / Scalabilità <span class="val-display" id="scale-val" style="color: #0088cc;">400 px</span></label>
+                <input type="range" id="slider-scale" min="200" max="800" value="400" step="10" oninput="resizeBox()">
+            </div>
+
+            <div class="control-group">
+                <label>Reef 1 (Limite 1) <span class="val-display" id="r1-val">18 kts</span></label>
+                <input type="range" id="slider-r1" min="10" max="22" value="18" step="1" oninput="updateReefs()">
+            </div>
+            
+            <div class="control-group">
+                <label>Reef 2 (Limite 2) <span class="val-display" id="r2-val">24 kts</span></label>
+                <input type="range" id="slider-r2" min="16" max="32" value="24" step="1" oninput="updateReefs()">
+            </div>
+
+            <div class="control-group" style="border-top: 1px solid #eee; padding-top: 15px; margin-bottom: 0;">
+                <label>Reef 3 (Storm) <span class="val-display" id="r3-val" style="color: #9c27b0;">30 kts</span></label>
+                <span style="font-size: 0.7rem; color: #888; display: block; margin-top: -3px; line-height: 1.2;">
+                    Calcolato dinamicamente: R2 + (R2 - R1)
+                </span>
+            </div>
+        </div>
+
+        <div class="data-box-square">
+            <div class="label-row">
+                <span class="label">TWD (HISTORICAL)</span>
+                <span class="unit">ECMWF + N2K</span>
+            </div>
+
+            <!-- BUSSOLA RADAR SVG (Esatto ViewBox dell'originale, nativamente scalabile) -->
+            <svg id="wind-radar" viewBox="35 38 330 395" preserveAspectRatio="xMidYMid meet">
+                <defs id="radar-gradients">
+                    <clipPath id="boat-clip"><circle cx="200" cy="200" r="50" /></clipPath>
+                    <linearGradient id="axiom-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#333333;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#999999;stop-opacity:1" />
+                    </linearGradient>
+                    
+                    <filter id="center-glow" x="-20%" y="-20%" width="140%" height="140%">
+                        <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#aaaaaa" flood-opacity="0.5" />
+                    </filter>
+                </defs>
+                
+                <!-- I tre sfondi speculari originali diurni con coordinate RGB esatte -->
+                <circle cx="200" cy="200" r="160" fill="rgb(252, 252, 252)" />
+                <circle cx="200" cy="200" r="125" fill="rgb(240, 240, 240)" />
+                
+                <!-- Ticks originali generati dinamicamente -->
+                <g id="ticks"></g>
+                
+                <!-- Etichette cardinali N/S/E/W -->
+                <g id="tick-labels" fill="#000000" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold">
+                    <text font-size="16" transform="translate(200, 74)">N</text>
+                    <text font-size="16" transform="translate(326, 200) rotate(90)">E</text>
+                    <text font-size="16" transform="translate(74, 200) rotate(-90)">W</text>
+                    <text font-size="16" transform="translate(200, 326) rotate(180)">S</text>
+                    
+                    <text font-size="11" transform="translate(262.5, 91.7) rotate(30)">30</text>
+                    <text font-size="11" transform="translate(308.3, 137.5) rotate(60)">60</text>
+                    <text font-size="11" transform="translate(308.3, 262.5) rotate(120)">120</text>
+                    <text font-size="11" transform="translate(262.5, 308.3) rotate(150)">150</text>
+                    <text font-size="11" transform="translate(137.5, 91.7) rotate(-30)">30</text>
+                    <text font-size="11" transform="translate(91.7, 137.5) rotate(-60)">60</text>
+                    <text font-size="11" transform="translate(91.7, 262.5) rotate(-120)">120</text>
+                    <text font-size="11" transform="translate(137.5, 308.3) rotate(-150)">150</text>
+                </g>
+
+                <!-- 1. ORBITA DEL PRESENTE "ORA" SUL LIVELLO DI SFONDO (Sotto gli archi) -->
+                <!-- Posizionata esattamente sulla mezzeria del raggio dell'Anello 1 (67.2px) -->
+                <circle id="ora-orbit" cx="200" cy="200" r="67.2" fill="none" stroke="#cfd8dc" stroke-width="1.2" stroke-dasharray="4, 4" />
+
+                <!-- Gli anelli radar degli archi verranno stampati qui -->
+                <g id="radar-rings"></g>
+
+                <!-- Cerchio centrale interattivo originale e Barca NERA SOLIDA -->
+                <circle id="fullscreen-hotspot" cx="200" cy="200" r="55" fill="rgb(238, 238, 238)" stroke="#e0e0e0" stroke-width="1" filter="url(#center-glow)" cursor="pointer" />
+                <path id="boat-icon" d="M200,150 Q165,185 170,250 Q165,190 200,173 Q235,190 230,250 Q235,185 200,150 Z"
+                      fill="#000000" transform="translate(0, 5)" clip-path="url(#boat-clip)" style="pointer-events: none;" />
+            </svg>
+        </div>
+    </div>
+
+    <script>
+        // Funzione per testare dinamicamente il ridimensionamento del div
+        function resizeBox() {
+            const size = document.getElementById('slider-scale').value;
+            // Modifichiamo la variabile CSS, l'SVG seguirà nativamente
+            document.documentElement.style.setProperty('--box-size', size + 'px');
+            document.getElementById('scale-val').innerText = size + " px";
+        }
+
+        const CALM_THRESHOLD_KTS = 1.5;
+
+        // Default Reef settings
+        let REEF1 = 18;
+        let REEF2 = 24;
+        let REEF3 = 30;
+
+        // Dati di simulazione calibrati su 8 anelli reali con la correzione ripristinata dei diametri
+        const mockData = [
+            { isFuture: true, twdMin: 235, twdMax: 245, twsPeak: 5.0 },   // Anello 0 (r:59.0px): Previsione futura (Bianco Solido - 100% OPACITÀ CON TRATTEGGIO)
+            { isActive: true, twdMin: 220, twdMax: 260, twsPeak: 11.5 },  // Anello 1 (r:67.2px): Presente Mobile (Sfumatura Bianco -> Verde -> Bianco)
+            { twdMin: 225, twdMax: 255, twsPeak: 13.5 },                  // Anello 2 (r:75.4px): Ora -0.5 (Verde Solido)
+            { twdMin: 230, twdMax: 250, twsPeak: 16.0 },                  // Anello 3 (r:83.6px): Ora -1.0 (Sfumatura Verde -> Arancio -> Verde)
+            { twdMin: 235, twdMax: 245, twsPeak: 20.0 },                  // Anello 4 (r:91.8px): Ora -1.5 (Arancio Solido)
+            { twdMin: 220, twdMax: 260, twsPeak: 22.5 },                  // Anello 5 (r:100.0px): Ora -2.0 (Sfumatura Arancio -> Rosso -> Arancio)
+            { twdMin: 230, twdMax: 250, twsPeak: 25.5 },                  // Anello 6 (r:108.2px): Ora -2.5 (Rosso Solido)
+            { twdMin: 215, twdMax: 265, twsPeak: 28.5 }                   // Anello 7 (r:116.4px): Ora -3.0 (Sfumatura Rosso -> Viola -> Rosso)
+        ];
+
+        // --- MAPPA RADIALE SPECULARE COMPRESSA AL MILLIMETRO SU 8 ANELLI ---
+        // r_i = 59.0px + 8.2px * i (Incastonati in sicurezza, massimo raggio a 116.4px)
+        const ringRadii = [59.0, 67.2, 75.4, 83.6, 91.8, 100.0, 108.2, 116.4];
+        const chronologicalMapping = [0, 1, 2, 3, 4, 5, 6, 7];
+
+        const ARC_STROKE_WIDTH = 5.0; // Spessore arco ridotto a 5.0px per una visualizzazione affilatissima
+        const BORDER_STROKE_WIDTH = ARC_STROKE_WIDTH + 2; // Spessore 7.0px (bordo da 1px per lato)
+
+        function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
+            const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
+            return {
+                x: centerX + (radius * Math.cos(angleInRadians)),
+                y: centerY + (radius * Math.sin(angleInRadians))
+            };
+        }
+
+        function describeArc(centerX, centerY, radius, startAngle, endAngle) {
+            const start = polarToCartesian(centerX, centerY, radius, endAngle);
+            const end = polarToCartesian(centerX, centerY, radius, startAngle);
+
+            let arcSweep = endAngle - startAngle;
+            if (arcSweep < 0) arcSweep += 360;
+
+            const largeArcFlag = arcSweep <= 180 ? "0" : "1";
+
+            return [
+                "M", start.x, start.y,
+                "A", radius, radius, 0, largeArcFlag, 0, end.x, end.y
+            ].join(" ");
+        }
+
+        function drawCompassTicks() {
+            const ticksGroup = document.getElementById('ticks');
+            ticksGroup.innerHTML = '';
+            for (let i = 0; i < 360; i += 10) {
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                const isMajor = (i % 30 === 0);
+                
+                line.setAttribute("x1", "200");
+                line.setAttribute("y1", "40");
+                line.setAttribute("x2", "200");
+                line.setAttribute("y2", isMajor ? "60" : "50");
+                
+                line.setAttribute("stroke", isMajor ? "#000000" : "#bbbbbb");
+                line.setAttribute("stroke-width", isMajor ? "2" : "1");
+                line.setAttribute("transform", `rotate(${i}, 200, 200)`);
+                ticksGroup.appendChild(line);
+            }
+        }
+
+        function updateReefs() {
+            REEF1 = parseInt(document.getElementById('slider-r1').value);
+            REEF2 = parseInt(document.getElementById('slider-r2').value);
+            REEF3 = REEF2 + (REEF2 - REEF1);
+
+            document.getElementById('r1-val').innerText = REEF1 + " kts";
+            document.getElementById('r2-val').innerText = REEF2 + " kts";
+            document.getElementById('r3-val').innerText = REEF3 + " kts";
+
+            renderRadar();
+        }
+
+        // --- LA NUOVA SCALA A COLORE DI PROSSIMITÀ CON CONTRASTO RICALIBRATO ---
+        function getChordAlignedGradient(id, radius, tws, startAngle, endAngle) {
+            const startPt = polarToCartesian(200, 200, radius, endAngle);
+            const endPt = polarToCartesian(200, 200, radius, startAngle);
+
+            let stops = '';
+            const R1 = REEF1;
+            const R2 = REEF2;
+            const R3 = REEF3;
+            const colorEdge = 'rgb(240, 240, 240)';
+
+            // 1. BIANCO SOLIDO (0 - 40% di R1)
+            if (tws < R1 * 0.4) {
+                return { type: 'solid', color: '#ffffff' };
+            }
+            // 2. TRANSIZIONE BIANCO -> VERDE (40% - 60% di R1)
+            else if (tws >= R1 * 0.4 && tws < R1 * 0.6) {
+                stops = `
+                    <stop offset="0%" stop-color="#ffffff" />
+                    <stop offset="50%" stop-color="#00C851" />
+                    <stop offset="100%" stop-color="#ffffff" />
+                `;
+            }
+            // 3. VERDE SOLIDO (60% - 75% di R1) -> Brezza stabile
+            else if (tws >= R1 * 0.6 && tws < R1 * 0.75) {
+                return { type: 'solid', color: '#00C851' };
+            }
+            // 4. TRANSIZIONE VERDE -> ARANCIONE (75% R1 - R1) -> Raffiche in aumento
+            else if (tws >= R1 * 0.75 && tws < R1) {
+                stops = `
+                    <stop offset="0%" stop-color="#00C851" />
+                    <stop offset="50%" stop-color="#ff9800" />
+                    <stop offset="100%" stop-color="#00C851" />
+                `;
+            }
+            // 5. ARANCIONE SOLIDO (R1 -> Metà di R2) -> Vento forte stabile
+            else if (tws >= R1 && tws < R1 + (R2 - R1) * 0.5) {
+                return { type: 'solid', color: '#ff9800' };
+            }
+            // 6. TRANSIZIONE ARANCIONE -> ROSSO (Metà R2 -> R2) -> RICALIBRATO AD ALTO CONTRASTO (Dorato -> Cremisi)
+            else if (tws >= R1 + (R2 - R1) * 0.5 && tws < R2) {
+                stops = `
+                    <stop offset="0%" stop-color="#ffaa00" /> <!-- Arancio Dorato Brillante sui bordi -->
+                    <stop offset="50%" stop-color="#d50000" /> <!-- Rosso Cremisi Intenso e saturo al centro -->
+                    <stop offset="100%" stop-color="#ffaa00" />
+                `;
+            }
+            // 7. ROSSO SOLIDO (R2 -> Metà di R3) -> Burrasca stabile
+            else if (tws >= R2 && tws < R2 + (R3 - R2) * 0.5) {
+                return { type: 'solid', color: '#ff3b30' };
+            }
+            // 8. TRANSIZIONE ROSSO -> VIOLA (Metà R3 -> R3) -> Transizione Spettrale (Rosso vivo -> Viola)
+            else if (tws >= R2 + (R3 - R2) * 0.5 && tws < R3) {
+                stops = `
+                    <stop offset="0%" stop-color="#ff3b30" />
+                    <stop offset="50%" stop-color="#9c27b0" />
+                    <stop offset="100%" stop-color="#ff3b30" />
+                `;
+            }
+            // 9. VIOLA SOLIDO (Oltre R3) -> Tempesta stabile
+            else {
+                return { type: 'solid', color: '#9c27b0' };
+            }
+
+            const xml = `
+                <linearGradient id="${id}" x1="${startPt.x.toFixed(1)}" y1="${startPt.y.toFixed(1)}" x2="${endPt.x.toFixed(1)}" y2="${endPt.y.toFixed(1)}" gradientUnits="userSpaceOnUse">
+                    ${stops}
+                </linearGradient>
+            `;
+
+            return { type: 'gradient', xml: xml, url: `url(#${id})` };
+        }
+
+        function renderRadar() {
+            const ringsContainer = document.getElementById('radar-rings');
+            const defsContainer = document.getElementById('radar-gradients');
+            
+            defsContainer.innerHTML = `
+                <clipPath id="boat-clip"><circle cx="200" cy="200" r="50" /></clipPath>
+                <linearGradient id="axiom-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#333333;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#999999;stop-opacity:1" />
+                </linearGradient>
+                <filter id="center-glow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#aaaaaa" flood-opacity="0.5" />
+                </filter>
+            `;
+            ringsContainer.innerHTML = '';
+
+            // Imposta dinamicamente i raggi in base a X per renderli scalabili
+            const oraOrbit = document.getElementById('ora-orbit');
+            if (oraOrbit) oraOrbit.setAttribute("r", 67.2);
+
+            mockData.forEach((data, index) => {
+                const radius = ringRadii[index];
+                const gradId = `chord-gradient-${index}`;
+                
+                // IMPORTANTE: Rimosso il dimezzamento dell'opacità per la previsione.
+                // Ora l'opacità è sempre 1 (100% solida) per tutti gli anelli,
+                // garantendo che il Bianco sia puro e brillante, senza sbiadire in grigio!
+                const opacityValue = 1;
+
+                // --- 1. CASO CALMA PIATTA (Cerchio grigio-azzurro discreto sottile) ---
+                if (data.twsPeak < CALM_THRESHOLD_KTS) {
+                    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    circle.setAttribute("cx", "200");
+                    circle.setAttribute("cy", "200");
+                    circle.setAttribute("r", radius);
+                    circle.setAttribute("fill", "none");
+                    circle.setAttribute("stroke", "#b0bec5");
+                    circle.setAttribute("stroke-width", "1.2");
+                    circle.setAttribute("stroke-dasharray", "4, 4");
+                    ringsContainer.appendChild(circle);
+                    return;
+                }
+
+                // --- 2. CASO ARCO DIREZIONALE ---
+                const grad = getChordAlignedGradient(gradId, radius, data.twsPeak, data.twdMin, data.twdMax);
+                let strokeColor = '';
+
+                if (grad.type === 'gradient') {
+                    defsContainer.innerHTML += grad.xml;
+                    strokeColor = grad.url;
+                } else {
+                    strokeColor = grad.color;
+                }
+
+                const pathData = describeArc(200, 200, radius, data.twdMin, data.twdMax);
+
+                const borderPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                borderPath.setAttribute("d", pathData);
+                borderPath.setAttribute("fill", "none");
+                borderPath.setAttribute("stroke", "#000000");
+                borderPath.setAttribute("stroke-width", BORDER_STROKE_WIDTH);
+                borderPath.setAttribute("stroke-linecap", "round");
+                borderPath.setAttribute("opacity", opacityValue);
+                
+                // Tratteggio per l'Anello Previsione (Anello 0)
+                if (data.isFuture) {
+                    borderPath.setAttribute("stroke-dasharray", "10, 6");
+                }
+                ringsContainer.appendChild(borderPath);
+
+                const mainPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                mainPath.setAttribute("d", pathData);
+                mainPath.setAttribute("fill", "none");
+                mainPath.setAttribute("stroke", strokeColor);
+                mainPath.setAttribute("stroke-width", ARC_STROKE_WIDTH);
+                mainPath.setAttribute("stroke-linecap", "round");
+                mainPath.setAttribute("opacity", opacityValue);
+                
+                // Tratteggio per l'Anello Previsione (Anello 0)
+                if (data.isFuture) {
+                    mainPath.setAttribute("stroke-dasharray", "10, 6");
+                }
+                ringsContainer.appendChild(mainPath);
+            });
+        }
+
+        window.onload = function() {
+            drawCompassTicks();
+            renderRadar();
+        };
+    </script>
+</body>
+</html>
