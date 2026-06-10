@@ -79,7 +79,7 @@ const store = {
     herculesScales: {},          // Memoria per i limiti attivi della modalità Hercules
     smoothBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
     longBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
-    histories: { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] },
+    histories: { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] },
     graphTempBuf: { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [] },
     lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0 }
 };
@@ -121,8 +121,12 @@ function getShortestRotation(curr, target) {
  */
 function safeSetText(el, text) {
     if (!el) return;
-    if (el.innerHTML !== text) {
-        el.innerHTML = text;
+    // Se l'elemento è parte di un SVG, usiamo textContent, altrimenti innerHTML
+    const isSVG = el instanceof SVGElement;
+    if (isSVG) {
+        if (el.textContent !== text) el.textContent = text;
+    } else {
+        if (el.innerHTML !== text) el.innerHTML = text;
     }
 }
 
@@ -713,7 +717,7 @@ function startDisplayLoop() {
                     else if (drift > 0.3) ui.sog.style.setProperty('color', '#00C851', 'important'); // Favore
                     else ui.sog.style.setProperty('color', '#ffbb33', 'important'); // Neutro SOG
                 } else {
-                    ui.sog.style.color = "";
+                    ui.sog.style.removeProperty('color');
                 }
             }
         }
@@ -1589,6 +1593,27 @@ async function init() {
     }
 }
 
+// Watchdog per il risveglio dallo stato di sospensione / cambio scheda
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        console.log("🔌 [Watchdog] Tab ritornato visibile. Verifica connessione...");
+        
+        // Se il socket esiste ma non è attivo o se vogliamo forzare la pulizia delle connessioni fantasma:
+        if (socket) {
+            if (socket.readyState !== WebSocket.OPEN) {
+                // Se era già chiuso o in errore, proviamo a riconnettere subito
+                connect();
+            } else {
+                // Se risulta "OPEN" ma potrebbe essere una connessione fantasma,
+                // la chiudiamo forzatamente per scatenare la riconnessione pulita e il download della cronologia
+                console.log("🔌 [Watchdog] Riavvio precauzionale del WebSocket per evitare connessioni fantasma.");
+                socket.close();
+            }
+        } else {
+            connect();
+        }
+    }
+});
 
 window.addEventListener('load', init);
 window.addEventListener('pagehide', saveDashboardState);

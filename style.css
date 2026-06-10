@@ -173,10 +173,6 @@ body.night-mode .alarm-danger {
 .focus-active .data-box:not(.is-focused),
 .focus-active .box-gauge { display: none !important; }
 
-.focus-active .is-focused .sparkline path,
-.focus-active .is-focused .sparkline line {
-  }
-
 .focus-active.focus-side-left {
     grid-template-columns: 3fr 2fr !important;
     grid-template-areas: "focused gauge" !important;
