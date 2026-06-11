@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>SignalK Config Scanner</title>
+    <style>
+        body { background: #121212; color: #fff; font-family: monospace; padding: 20px; }
+        h1 { color: #2ecc71; }
+        .log-entry { margin-bottom: 10px; padding: 10px; border-left: 3px solid #444; background: #1e1e1e; }
+        .success { border-color: #2ecc71; color: #2ecc71; }
+        .error { border-color: #e74c3c; color: #e74c3c; }
+        .pending { border-color: #f1c40f; color: #f1c40f; }
+        pre { background: #000; padding: 10px; overflow-x: auto; color: #aaa; }
+    </style>
+</head>
+<body>
+    <h1>SignalK Plugin Configuration Scanner</h1>
+    <p>Questo test proverà a trovare l'indirizzo esatto dove SignalK salva le tue impostazioni.</p>
+    <button id="scan-btn" style="padding: 10px 20px; cursor:pointer;">INIZIA SCANSIONE</button>
+    <div id="results" style="margin-top: 20px;"></div>
+
+    <script>
+        const results = document.getElementById('results');
+        const btn = document.getElementById('scan-btn');
+
+        const urlsToTest = [
+            '/plugins/rotevista-dash/settings',
+            '/plugins/@sailingrotevista%2frotevista-dash/settings',
+            '/signalk/v1/api/plugins/rotevista-dash/settings',
+            '/signalk/v1/api/plugins/@sailingrotevista%2frotevista-dash/settings',
+            '/signalk/v1/applicationData/user/rotevista-dash/1.0/settings'
+        ];
+
+        function log(msg, type = 'pending', data = null) {
+            const div = document.createElement('div');
+            div.className = `log-entry ${type}`;
+            div.innerHTML = `<strong>[TEST]</strong> ${msg}`;
+            if (data) {
+                const pre = document.createElement('pre');
+                pre.innerText = JSON.stringify(data, null, 2);
+                div.appendChild(pre);
+            }
+            results.appendChild(div);
+        }
+
+        async function startScan() {
+            results.innerHTML = '';
+            log("Inizio scansione percorsi...");
+
+            for (let url of urlsToTest) {
+                log(`Provo URL: ${url}...`);
+                try {
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const data = await response.json();
+                        log(`TROVATO! Risposta OK da: ${url}`, 'success', data);
+                    } else {
+                        log(`FALLITO (${response.status}) su: ${url}`, 'error');
+                    }
+                } catch (e) {
+                    log(`ERRORE DI RETE su: ${url}`, 'error');
+                }
+            }
+            log("Scansione terminata.");
+        }
+
+        btn.onclick = startScan;
+    </script>
+</body>
+</html>
