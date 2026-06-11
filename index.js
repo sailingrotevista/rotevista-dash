@@ -631,56 +631,58 @@ module.exports = function (app) {
    * fetchOpenMeteoForecast: Recupera le previsioni orarie accoppiate (Seamless) da Open-Meteo.
    * Utilizza il modello integrato /forecast per evitare zone d'ombra in rada, con tempo forzato in UTC.
    */
-  function fetchOpenMeteoForecast(position, current30mSlot) {
-    if (!position || position.latitude === undefined || position.longitude === undefined) return;
+    function fetchOpenMeteoForecast(position, current30mSlot) {
+        if (!position || position.latitude === undefined || position.longitude === undefined) return;
 
-    const lat = position.latitude;
-    const lon = position.longitude;
-    
-    // Modello accoppiato Seamless basato su forecast, con vento espresso in nodi e orario in UTC (GMT)
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=kn&timezone=GMT&forecast_days=2`;
+        const lat = position.latitude;
+        const lon = position.longitude;
+        
+        // Chirurgico: Aggiunto wind_gusts_10m alla chiamata per ottenere l'intensità delle raffiche previste
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=kn&timezone=GMT&forecast_days=2`;
 
-    lastForecast30mSlot = current30mSlot; // Aggiorna preventivamente lo slot per evitare chiamate simultanee in caso di rallentamento di rete
+        lastForecast30mSlot = current30mSlot; // Aggiorna preventivamente lo slot per evitare chiamate simultanee in caso di rallentamento di rete
 
-    https.get(url, (res) => {
-      if (res.statusCode !== 200) {
-        app.error(`[Open-Meteo] HTTP Error: ${res.statusCode}`);
-        res.resume();
-        lastForecast30mSlot = 0; // Reset in caso di errore per permettere un tentativo al prossimo pacchetto GPS
-        return;
-      }
-
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          if (!parsed.hourly || !parsed.hourly.time) {
-            app.error('[Open-Meteo] Invalid API response format');
-            lastForecast30mSlot = 0;
+        https.get(url, (res) => {
+          if (res.statusCode !== 200) {
+            app.error(`[Open-Meteo] HTTP Error: ${res.statusCode}`);
+            res.resume();
+            lastForecast30mSlot = 0; // Reset in caso di errore per permettere un tentativo al prossimo pacchetto GPS
             return;
           }
 
-          const times = parsed.hourly.time;
-          const speeds = parsed.hourly.wind_speed_10m;
-          const directions = parsed.hourly.wind_direction_10m;
+          let data = '';
+          res.on('data', (chunk) => { data += chunk; });
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(data);
+              if (!parsed.hourly || !parsed.hourly.time) {
+                app.error('[Open-Meteo] Invalid API response format');
+                lastForecast30mSlot = 0;
+                return;
+              }
 
-          // Costruiamo la serie storica delle previsioni in formato UTC
-          const forecastList = [];
-          for (let i = 0; i < times.length; i++) {
-            // Forziamo il parsing UTC aggiungendo la dicitura 'Z' alla stringa ISO prodotta da Open-Meteo
-            const epoch = Date.parse(times[i] + "Z");
-            if (isNaN(epoch)) continue;
+              const times = parsed.hourly.time;
+              const speeds = parsed.hourly.wind_speed_10m;
+              const directions = parsed.hourly.wind_direction_10m;
+              const gusts = parsed.hourly.wind_gusts_10m || []; // Chirurgico: Catturiamo le raffiche dal payload JSON
 
-            // Convertiamo la direzione del vento da gradi (0-360) a radianti (0-2PI)
-            const twdRad = (directions[i] * Math.PI) / 180;
+              // Costruiamo la serie storica delle previsioni in formato UTC
+              const forecastList = [];
+              for (let i = 0; i < times.length; i++) {
+                // Forziamo il parsing UTC aggiungendo la dicitura 'Z' alla stringa ISO prodotta da Open-Meteo
+                const epoch = Date.parse(times[i] + "Z");
+                if (isNaN(epoch)) continue;
 
-            forecastList.push({
-              time: epoch,
-              tws: speeds[i], // Già in nodi grazie ai parametri della chiamata
-              twd: twdRad
-            });
-          }
+                // Convertiamo la direzione del vento da gradi (0-360) a radianti (0-2PI)
+                const twdRad = (directions[i] * Math.PI) / 180;
+
+                forecastList.push({
+                  time: epoch,
+                  tws: speeds[i], // Già in nodi grazie ai parametri della chiamata
+                  twd: twdRad,
+                  gust: gusts[i] !== undefined ? gusts[i] : speeds[i] // Chirurgico: Memorizziamo la raffica oraria (con fallback sulla velocità media)
+                });
+              }
 
           // Calcola l'interpolazione per la mezz'ora futura basandosi sullo slot corrente dell'orologio
           calculateInterpolatedFuture(forecastList);
@@ -721,25 +723,29 @@ module.exports = function (app) {
       }
     }
 
-    if (s1 && s2) {
-      const ratio = (targetTime - s1.time) / (s2.time - s1.time);
+  if (s1 && s2) {
+        const ratio = (targetTime - s1.time) / (s2.time - s1.time);
 
-      // 1. Interpolazione Lineare Velocità (TWS)
-      const interpolatedTws = s1.tws + (s2.tws - s1.tws) * ratio;
+        // 1. Interpolazione Lineare Velocità (TWS)
+        const interpolatedTws = s1.tws + (s2.tws - s1.tws) * ratio;
 
-      // 2. Interpolazione Circolare Vettoriale Direzione (TWD) per evitare l'effetto sfasamento a 0/360°
-      const diff = Math.atan2(Math.sin(s2.twd - s1.twd), Math.cos(s2.twd - s1.twd));
-      const interpolatedTwd = (s1.twd + diff * ratio + Math.PI * 2) % (Math.PI * 2);
+        // 2. Interpolazione Circolare Vettoriale Direzione (TWD) per evitare l'effetto sfasamento a 0/360°
+        const diff = Math.atan2(Math.sin(s2.twd - s1.twd), Math.cos(s2.twd - s1.twd));
+        const interpolatedTwd = (s1.twd + diff * ratio + Math.PI * 2) % (Math.PI * 2);
 
-      // Salviamo le previsioni future nel server
-      futureForecast = {
-        timestamp: targetTime,
-        tws: interpolatedTws,
-        twd: interpolatedTwd
-      };
+        // 3. Interpolazione Lineare Raffiche (Gust)
+        const interpolatedGust = s1.gust + (s2.gust - s1.gust) * ratio; // Chirurgico: Calcolo interpolato della raffica futura
 
-      app.debug(`🔮 [Open-Meteo] Target forecast interpolated for ${new Date(targetTime).toLocaleTimeString()}: TWD ${Math.round(interpolatedTwd * 180 / Math.PI)}°, TWS ${interpolatedTws.toFixed(1)} kts`);
-    } else {
+        // Salviamo le previsioni future nel server
+        futureForecast = {
+          timestamp: targetTime,
+          tws: interpolatedTws,
+          twd: interpolatedTwd,
+          gust: interpolatedGust // Chirurgico: Aggiunta la raffica nel pacchetto dati della previsione
+        };
+
+        app.debug(`🔮 [Open-Meteo] Target forecast interpolated for ${new Date(targetTime).toLocaleTimeString()}: TWD ${Math.round(interpolatedTwd * 180 / Math.PI)}°, TWS ${interpolatedTws.toFixed(1)} kts (Gust: ${interpolatedGust.toFixed(1)} kts)`);
+      } else {
       app.error('[Open-Meteo] Forecast matching slots not found for target time');
     }
   }

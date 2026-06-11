@@ -350,14 +350,16 @@
                 }
 
                 const historyRes = await fetch(getApiUrl('/rotevista-history'));
-                if (historyRes.ok) {
-                    const data = await historyRes.json();
-                    if (data.windRadarSlots) windRadarSlots = data.windRadarSlots;
-                    if (data.futureForecast) {
-                        futureForecast = data.futureForecast;
-                        document.getElementById('debug-future').innerText = `TWD: ${Math.round(radToDeg(futureForecast.twd))}°, TWS: ${futureForecast.tws.toFixed(1)} kts`;
-                    }
-                    if (data['navigation.position']) {
+                                if (historyRes.ok) {
+                                    const data = await historyRes.json();
+                                    if (data.windRadarSlots) windRadarSlots = data.windRadarSlots;
+                                    if (data.futureForecast) {
+                                        futureForecast = data.futureForecast;
+                                        // Chirurgico: Formattazione testuale avanzata che estrae ed espone le raffiche (gusts) previste
+                                        const gustVal = futureForecast.gust ? futureForecast.gust.toFixed(1) : futureForecast.tws.toFixed(1);
+                                        document.getElementById('debug-future').innerText = `TWD: ${Math.round(radToDeg(futureForecast.twd))}°, TWS: ${futureForecast.tws.toFixed(1)} kts (Gusts: ${gustVal} kts)`;
+                                    }
+                                    if (data['navigation.position']) {
                         const val = data['navigation.position'];
                         document.getElementById('debug-gps').innerText = val.latitude.toFixed(4) + '; ' + val.longitude.toFixed(4);
                     }
@@ -622,15 +624,16 @@
             const radarDataList = [];
 
             // 1. ANELLO 0 (Centro - Previsione Futura Open-Meteo)
-            if (futureForecast) {
-                const twdDeg = Math.round(radToDeg(futureForecast.twd));
-                radarDataList.push({
-                    twdMin: (twdDeg - 5 + 360) % 360,
-                    twdMax: (twdDeg + 5 + 360) % 360,
-                    twsPeak: futureForecast.tws,
-                    isFuture: true
-                });
-            } else {
+                        if (futureForecast) {
+                            const twdDeg = Math.round(radToDeg(futureForecast.twd));
+                            radarDataList.push({
+                                // Chirurgico: Impostata una finta ampiezza di 40 gradi (+-20°) per rappresentare l'area di incertezza meteo
+                                twdMin: (twdDeg - 20 + 360) % 360,
+                                twdMax: (twdDeg + 20 + 360) % 360,
+                                twsPeak: futureForecast.tws,
+                                isFuture: true
+                            });
+                        } else {
                 radarDataList.push(null);
             }
 
@@ -694,25 +697,27 @@
 
                 const pathData = describeArc(200, 200, radius, data.twdMin, data.twdMax);
 
-                const borderPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                borderPath.setAttribute("d", pathData);
-                borderPath.setAttribute("fill", "none");
-                borderPath.setAttribute("stroke", "#000000");
-                borderPath.setAttribute("stroke-width", BORDER_STROKE_WIDTH);
-                borderPath.setAttribute("stroke-linecap", "round");
-                borderPath.setAttribute("opacity", opacityValue);
-                if (data.isFuture) borderPath.setAttribute("stroke-dasharray", "10, 6");
-                ringsContainer.appendChild(borderPath);
+                                // Chirurgico: Se è l'anello futuro (isFuture), non disegniamo il bordo nero per evitare artefatti "a doppia bolla"
+                                if (!data.isFuture) {
+                                    const borderPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                                    borderPath.setAttribute("d", pathData);
+                                    borderPath.setAttribute("fill", "none");
+                                    borderPath.setAttribute("stroke", "#000000");
+                                    borderPath.setAttribute("stroke-width", BORDER_STROKE_WIDTH);
+                                    borderPath.setAttribute("stroke-linecap", "round");
+                                    borderPath.setAttribute("opacity", opacityValue);
+                                    ringsContainer.appendChild(borderPath);
+                                }
 
-                const mainPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                mainPath.setAttribute("d", pathData);
-                mainPath.setAttribute("fill", "none");
-                mainPath.setAttribute("stroke", strokeColor);
-                mainPath.setAttribute("stroke-width", ARC_STROKE_WIDTH);
-                mainPath.setAttribute("stroke-linecap", "round");
-                mainPath.setAttribute("opacity", opacityValue);
-                if (data.isFuture) mainPath.setAttribute("stroke-dasharray", "10, 6");
-                ringsContainer.appendChild(mainPath);
+                                const mainPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                                mainPath.setAttribute("d", pathData);
+                                mainPath.setAttribute("fill", "none");
+                                mainPath.setAttribute("stroke", strokeColor);
+                                mainPath.setAttribute("stroke-width", ARC_STROKE_WIDTH);
+                                mainPath.setAttribute("stroke-linecap", "round");
+                                // Chirurgico: Per l'anello futuro, usiamo un'opacità morbida al 50% (0.5) continua (senza tratteggio) per un effetto "glowing" pulitissimo
+                                mainPath.setAttribute("opacity", data.isFuture ? "0.5" : opacityValue);
+                                ringsContainer.appendChild(mainPath);
             });
 
             // Aggiorna il pannello di debug ad ogni ridisegno del radar
