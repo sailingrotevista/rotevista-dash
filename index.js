@@ -559,21 +559,22 @@ module.exports = function (app) {
    * Raccoglie i 30 record da 1 minuto, estrae i picchi, unisce gli angoli
    * e applica la scrematura del percentile al 5% prima di salvare lo slot.
    */
-  function freeze30mSlot(slotTimestamp) {
-    const startTime = slotTimestamp;
-    const endTime = slotTimestamp + 1800000; // 30 minuti in millisecondi
+    function freeze30mSlot(slotTimestamp) {
+        const startTime = slotTimestamp;
+        const endTime = slotTimestamp + 1800000; // 30 minuti in millisecondi
 
-    // 1. Estrae i record storici del TWD e del TWS che ricadono in quella mezz'ora
-    const twdPoints = histories['twd'].filter(p => p.time >= startTime && p.time < endTime);
-    const twsPoints = histories['tws'].filter(p => p.time >= startTime && p.time < endTime);
+        // 1. Estrae i record storici del TWD e del TWS che ricadono in quella mezz'ora
+        const twdPoints = histories['twd'].filter(p => p.time >= startTime && p.time < endTime);
+        const twsPoints = histories['tws'].filter(p => p.time >= startTime && p.time < endTime);
 
-    if (twdPoints.length === 0) return; // Se non ci sono dati, salta lo slot
+        if (twdPoints.length === 0) return; // Se non ci sono dati, salta lo slot
 
-    // 2. Calcola il vento massimo sostenuto (in nodi) registrato nel periodo
-    const twsVals = twsPoints.map(p => p.val).filter(v => isFinite(v));
-    const maxTws = twsVals.length > 0 ? Math.max(...twsVals) : 0;
+        // 2. Calcola il vento massimo sostenuto (in nodi) registrato nel periodo
+        const twsVals = twsPoints.map(p => p.val).filter(v => isFinite(v));
+        const maxTws = twsVals.length > 0 ? Math.max(...twsVals) : 0;
+        const minTws = twsVals.length > 0 ? Math.min(...twsVals) : 0; // Chirurgico: Calcoliamo il vento minimo del periodo
 
-    // 3. Estrae tutti gli estremi angolari catturati minuto per minuto
+        // 3. Estrae tutti gli estremi angolari catturati minuto per minuto
     let allAngles = [];
     twdPoints.forEach(p => {
       allAngles.push(p.val);
@@ -611,15 +612,16 @@ module.exports = function (app) {
     const finalMin = (finalAvg + minDiff + Math.PI * 2) % (Math.PI * 2);
     const finalMax = (finalAvg + maxDiff + Math.PI * 2) % (Math.PI * 2);
 
-    // 7. Salva l'arco compresso e pulito nello store dedicato
-    windRadarSlots.push({
-      timestamp: startTime,
-      twdMin: finalMin,
-      twdMax: finalMax,
-      twsPeak: maxTws
-    });
+        // 7. Salva l'arco compresso e pulito nello store dedicato
+            windRadarSlots.push({
+              timestamp: startTime,
+              twdMin: finalMin,
+              twdMax: finalMax,
+              twsPeak: maxTws,
+              twsMin: minTws // Chirurgico: Salviamo il vento minimo per poter tracciare la variabilità (Gust Factor)
+            });
 
-    // Pruning: manteniamo in RAM solo le ultime 6 ore (12 slot)
+            // Pruning: manteniamo in RAM solo le ultime 6 ore (12 slot)
     while (windRadarSlots.length > 12) {
       windRadarSlots.shift();
     }

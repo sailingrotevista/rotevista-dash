@@ -417,21 +417,22 @@
         }
 
         // --- 4. MOTORE DI CALCOLO DELL'ANELLO 1 (Presente Mobile) ---
-        function calculateActive30mRing() {
-            const now = Date.now();
-            const start30m = now - 1800000;
+                function calculateActive30mRing() {
+                    const now = Date.now();
+                    const start30m = now - 1800000;
 
-            const twdRecent = store.twdMinuteBuffer.filter(p => p.time >= start30m);
-            const twsRecent = store.twsMinuteBuffer.filter(p => p.time >= start30m);
+                    const twdRecent = store.twdMinuteBuffer.filter(p => p.time >= start30m);
+                    const twsRecent = store.twsMinuteBuffer.filter(p => p.time >= start30m);
 
-            if (twdRecent.length === 0) return null;
+                    if (twdRecent.length === 0) return null;
 
-            const twsVals = twsRecent.map(p => p.val).filter(v => isFinite(v));
-            const maxTws = twsVals.length > 0 ? Math.max(...twsVals) : 0;
+                    const twsVals = twsRecent.map(p => p.val).filter(v => isFinite(v));
+                    const maxTws = twsVals.length > 0 ? Math.max(...twsVals) : 0;
+                    const minTws = twsVals.length > 0 ? Math.min(...twsVals) : 0; // Chirurgico: Troviamo il vento minimo reale degli ultimi 30 minuti
 
-            if (maxTws < CALM_THRESHOLD_KTS) {
-                return { twsPeak: maxTws, twdMin: 0, twdMax: 360, isCalm: true };
-            }
+                    if (maxTws < CALM_THRESHOLD_KTS) {
+                        return { twsPeak: maxTws, twsMin: minTws, twdMin: 0, twdMax: 360, isCalm: true };
+                    }
 
             let allAngles = [];
             twdRecent.forEach(p => {
@@ -459,15 +460,16 @@
             const maxDiff = Math.max(...finalDiffs);
 
             const finalMinDeg = Math.round(radToDeg((finalAvg + minDiff + Math.PI * 2) % (Math.PI * 2)));
-            const finalMaxDeg = Math.round(radToDeg((finalAvg + maxDiff + Math.PI * 2) % (Math.PI * 2)));
+                        const finalMaxDeg = Math.round(radToDeg((finalAvg + maxDiff + Math.PI * 2) % (Math.PI * 2)));
 
-            return {
-                twdMin: finalMinDeg,
-                twdMax: finalMaxDeg,
-                twsPeak: maxTws,
-                isCalm: false
-            };
-        }
+                        return {
+                            twdMin: finalMinDeg,
+                            twdMax: finalMaxDeg,
+                            twsPeak: maxTws,
+                            twsMin: minTws, // Chirurgico: Ritorniamo anche il valore minimo per abilitare la sfumatura sull'Anello 1
+                            isCalm: false
+                        };
+                    }
 
         // --- 5. MOTORE GRAFICO DI DISEGNO ---
         function drawCompassTicks() {
@@ -642,21 +644,23 @@
             radarDataList.push(activeRing);
 
             // 3. ANELLI da 2 a 7 (I 6 slot storici da 30 min passati salvati dal server, pari a 3 ore)
-            for (let i = 1; i <= 6; i++) {
-                const targetTimestamp = current30mSlot - (i * 1800000);
-                const matchedSlot = windRadarSlots.find(s => s.timestamp === targetTimestamp);
-                
-                if (matchedSlot) {
-                    radarDataList.push({
-                        twdMin: Math.round(radToDeg(matchedSlot.twdMin)),
-                        twdMax: Math.round(radToDeg(matchedSlot.twdMax)),
-                        twsPeak: matchedSlot.twsPeak,
-                        isCalm: matchedSlot.twsPeak < CALM_THRESHOLD_KTS
-                    });
-                } else {
-                    radarDataList.push(null);
-                }
-            }
+                        for (let i = 1; i <= 6; i++) {
+                            const targetTimestamp = current30mSlot - (i * 1800000);
+                            const matchedSlot = windRadarSlots.find(s => s.timestamp === targetTimestamp);
+                            
+                            if (matchedSlot) {
+                                radarDataList.push({
+                                    twdMin: Math.round(radToDeg(matchedSlot.twdMin)),
+                                    twdMax: Math.round(radToDeg(matchedSlot.twdMax)),
+                                    twsPeak: matchedSlot.twsPeak,
+                                    // Chirurgico: Estraiamo il minimo storico con protezione di compatibilità se assente
+                                    twsMin: matchedSlot.twsMin !== undefined ? matchedSlot.twsMin : matchedSlot.twsPeak,
+                                    isCalm: matchedSlot.twsPeak < CALM_THRESHOLD_KTS
+                                });
+                            } else {
+                                radarDataList.push(null);
+                            }
+                        }
 
             document.getElementById('debug-rings-count').innerText = radarDataList.filter(p => p !== null).length + "/8";
 
@@ -685,17 +689,47 @@
                 }
 
                 // Caso B: Arco Direzionale
-                const grad = getChordAlignedGradient(gradId, radius, data.twsPeak, data.twdMin, data.twdMax);
-                let strokeColor = '';
+                                let strokeColor = '';
+                                
+                                // Chirurgico: Definita la funzione di colorazione universale basata sulle soglie dei Reef di bordo
+                                const getColorForSpeed = (tws) => {
+                                    const R1 = REEF1; const R2 = REEF2; const R3 = REEF3;
+                                    if (tws < R1 * 0.4) return '#ffffff'; // Bianco (Calma)
+                                    if (tws < R1 * 0.75) return '#00C851'; // Verde (Regolare)
+                                    if (tws < R1) return '#ff9800'; // Arancio (1° Reef Alert)
+                                    if (tws < R2) return '#ffaa00'; // Dorato (Transizione)
+                                    if (tws < R2 + (R3 - R2) * 0.5) return '#ff3b30'; // Rosso (2° Reef Alert)
+                                    return '#9c27b0'; // Viola (Storm / Temporale)
+                                };
 
-                if (grad.type === 'gradient') {
-                    defsContainer.innerHTML += grad.xml;
-                    strokeColor = grad.url;
-                } else {
-                    strokeColor = grad.color;
-                }
+                                // Chirurgico: Estraiamo i limiti minimi e massimi dell'arco corrente
+                                // Se è la previsione, usiamo il vento medio e le raffiche di Open-Meteo, altrimenti i minimi e i picchi in RAM
+                                const baseTws = data.isFuture && futureForecast ? futureForecast.tws : (data.twsMin !== undefined ? data.twsMin : data.twsPeak);
+                                const peakTws = data.isFuture && futureForecast ? futureForecast.gust : data.twsPeak;
 
-                const pathData = describeArc(200, 200, radius, data.twdMin, data.twdMax);
+                                const baseColor = getColorForSpeed(baseTws);
+                                const peakColor = getColorForSpeed(peakTws);
+
+                                if (baseColor !== peakColor) {
+                                    // Se c'è variabilità d'intensità (raffica), disegnamo il gradiente termico dinamico lungo l'arco (Min -> Max -> Min)
+                                    const startPt = polarToCartesian(200, 200, radius, data.twdMax);
+                                    const endPt = polarToCartesian(200, 200, radius, data.twdMin);
+                                    
+                                    const xml = `
+                                        <linearGradient id="${gradId}" x1="${startPt.x.toFixed(1)}" y1="${startPt.y.toFixed(1)}" x2="${endPt.x.toFixed(1)}" y2="${endPt.y.toFixed(1)}" gradientUnits="userSpaceOnUse">
+                                            <stop offset="0%" stop-color="${baseColor}" />
+                                            <stop offset="50%" stop-color="${peakColor}" />
+                                            <stop offset="100%" stop-color="${baseColor}" />
+                                        </linearGradient>
+                                    `;
+                                    defsContainer.innerHTML += xml;
+                                    strokeColor = `url(#${gradId})`;
+                                } else {
+                                    // Se il vento è costante (base e picco ricadono nella stessa fascia), usiamo il colore solido puro
+                                    strokeColor = baseColor;
+                                }
+
+                                const pathData = describeArc(200, 200, radius, data.twdMin, data.twdMax);
 
                                 // Chirurgico: Se è l'anello futuro (isFuture), non disegniamo il bordo nero per evitare artefatti "a doppia bolla"
                                 if (!data.isFuture) {
