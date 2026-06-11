@@ -74,7 +74,7 @@ module.exports = function (app) {
         const responseData = {
           ...histories,
           windRadarSlots: windRadarSlots,
-          futureForecast: futureForecast
+          futureForecast: futureForecast,
           'navigation.position': raw['navigation.position'] // Chirurgico: Espone le coordinate GPS correnti per la diagnostica e il radar
         };
         res.json(responseData);
