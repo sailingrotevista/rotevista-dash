@@ -4,6 +4,7 @@
  * ==========================================================================
  * Gestisce l'aggiornamento grafico dei puntatori analogici (AWA, TWA),
  * dello scarroccio (Leeway), della rotta (Track) e dei trend della bussola.
+ * file gauge,js
  */
 
 // 1. VARIABILI DI STATO DELLE ROTAZIONI (Estratte da app.js)

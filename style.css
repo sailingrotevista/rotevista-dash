@@ -520,3 +520,40 @@ body.night-mode {
 .night-mode .graph-wrapper polygon[style*="#0088cc"] {
     fill: #33aadd !important;
 }
+
+/* ==========================================================================
+   12. INTEGRAZIONE DUAL-SVG COMPASS & RADAR
+   ========================================================================== */
+#wind-gauge, #wind-radar {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    transition: opacity 0.2s ease-in-out;
+}
+
+/* --- OVERRIDE NIGHT MODE PER IL WIND RADAR --- */
+.night-mode #wind-radar circle {
+    fill: #000000 !important;
+    stroke: #220000 !important;
+}
+.night-mode #wind-radar circle:nth-of-type(2),
+.night-mode #radar-hotspot {
+    fill: #050000 !important;
+    stroke: #330000 !important;
+}
+.night-mode #radar-tick-labels {
+    fill: #800000 !important;
+}
+.night-mode #radar-boat-icon {
+    fill: #220000 !important;
+    stroke: #ff0000 !important;
+    stroke-width: 0.8px !important;
+    opacity: 1 !important;
+}
+.night-mode #ora-orbit {
+    stroke: #330000 !important;
+}
+.night-mode #wind-radar circle[stroke="#b0bec5"] {
+    stroke: #440000 !important;
+}

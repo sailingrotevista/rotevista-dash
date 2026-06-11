@@ -7,6 +7,7 @@
  * Gestisce: Medie Vettoriali, Deviazione Standard, Trend Strategico dinamico,
  * Memoria UI persistente, Modalità Hercules, Focus Split Screen e
  * Rendering Grafico basato sul Tempo Reale (Timeline e Gap Handling).
+ *file app.js
  */
 
 // ==========================================================================
@@ -43,6 +44,7 @@ const DASH_VERSION = "6.0"; // Major Update: Server-Side History RAM Logging (Pr
 let simulationMode = false;
 let displayModeSog = 'SOG';
 let displayModeTws = 'TWS';
+let activeInstrument = 'gauge'; // Modalità di default all'avvio: 'gauge' (analogico) o 'radar' (storico)
 let socket, renderInterval, simInterval;
 let lastAvgUIUpdate = 0; // Chirurgico: Rimosse audioCtx e lastAlarmTime poiché sono già dichiarate in utils.js
 
@@ -663,13 +665,15 @@ function startDisplayLoop() {
                     }
                 }
 
-                // --- AGGIORNAMENTO DELLA BUSSOLA CENTRALE E MINI-COMPASS ---
-                updateCentralGauge(store, ui, now, isNavigating, sogKts, stwKts, rawAws, awsVal);
-                
-                // --- SLOW TIER (Salvataggio stato ogni 10 secondi) ---
-                if (lastAvgUIUpdate++ % 10 === 0) {
-                    saveDashboardState();
-                }
+        // --- AGGIORNAMENTO DELLA BUSSOLA CENTRALE (BATTERY SAVER A 1Hz) ---
+                        if (activeInstrument === 'gauge') {
+                            updateCentralGauge(store, ui, now, isNavigating, sogKts, stwKts, rawAws, awsVal);
+                        }
+                        
+                        // --- SLOW TIER (Salvataggio stato ogni 10 secondi) ---
+                        if (lastAvgUIUpdate++ % 10 === 0) {
+                            saveDashboardState();
+                        }
 
                 if (lastAvgUIUpdate % 3 === 0) {
                     let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false);
@@ -801,7 +805,7 @@ async function watchConfigChanges() {
 }
 
 /**
- * Recupera lo storico dei grafici pre-popolato dal server Signal K (Pro v6.0)
+ * Recupera lo storico dei grafici e dei radar pre-popolato dal server Signal K (Pro v6.0)
  */
 async function fetchServerHistory() {
     try {
@@ -815,6 +819,12 @@ async function fetchServerHistory() {
                     store.histories[key] = data[key];
                 }
             }
+            // Sincronizza i dati specifici del radar storici, previsionali e i buffer minuto per minuto
+            if (data.windRadarSlots) store.windRadarSlots = data.windRadarSlots;
+            if (data.futureForecast) store.futureForecast = data.futureForecast;
+            if (data.twd) store.twdMinuteBuffer = data.twd;
+            if (data.tws) store.twsMinuteBuffer = data.tws;
+            
             // --- SILLABAZIONE STRATEGICA DELLA BUSSOLA METEO (TWD) ---
             // Se il server ci invia lo storico del TWD, lo inseriamo calcolando i seni e coseni per i vettori
             if (data.twd && data.twd.length > 0) {
@@ -825,7 +835,7 @@ async function fetchServerHistory() {
                     cos: Math.cos(p.val)
                 }));
                 console.log(`📈 Memoria strategica TWD sincronizzata dal server (${data.twd.length} punti).`);
-                }
+            }
             console.log("📈 Storico dei grafici pre-popolato caricato dal server.");
         }
     } catch (err) {
@@ -1100,29 +1110,101 @@ window.addEventListener('contextmenu', e => e.preventDefault(), true);
 
 async function init() {
     loadDashboardState();
-    initCompassTicks(); // Genera i ticks sul quadrante usando il modulo gauge.js
     
+    // Disegna la grafica statica delle tacche di calibrazione di entrambi gli strumenti
+    initCompassTicks(); // Tacche del Wind Gauge analogico (gauge.js)
+    initRadarTicks();   // Tacche del Wind Radar storico (weather-radar.js)
+    
+    // 1. COMANDO TATTICO: Gestore Box TWD (Pressione prolungata -> Radar | Tocco rapido in modalità Radar -> Torna a Gauge)
+        const twdBox = document.querySelector('.box-twd');
+        if (twdBox) {
+            let twdPressTimer = null;
+            let longPressTriggered = false; // Flag di controllo della pressione prolungata
+            
+            twdBox.addEventListener('pointerdown', (e) => {
+                longPressTriggered = false;
+                if (activeInstrument === 'gauge') {
+                    twdPressTimer = setTimeout(() => {
+                        activeInstrument = 'radar';
+                        document.getElementById('wind-gauge').style.display = 'none';
+                        document.getElementById('wind-radar').style.display = 'block';
+                        renderRadar(); // Disegna immediatamente il radar all'attivazione
+                        twdPressTimer = null;
+                        longPressTriggered = true; // Segnala che la transizione al radar è avvenuta con successo
+                    }, 1000);
+                }
+            });
+            twdBox.addEventListener('pointerup', () => {
+                if (activeInstrument === 'gauge') {
+                    if (twdPressTimer) {
+                        clearTimeout(twdPressTimer);
+                        twdPressTimer = null;
+                    }
+                } else if (activeInstrument === 'radar') {
+                    if (longPressTriggered) {
+                        // Se l'evento di rilascio appartiene al tocco prolungato che ha appena attivato il radar, lo ignoriamo
+                        longPressTriggered = false;
+                    } else {
+                        // Altrimenti è un tocco rapido indipendente: torna alla bussola analogica
+                        activeInstrument = 'gauge';
+                        document.getElementById('wind-radar').style.display = 'none';
+                        document.getElementById('wind-gauge').style.display = 'block';
+                    }
+                }
+            });
+            twdBox.addEventListener('pointerleave', () => {
+                if (twdPressTimer) {
+                    clearTimeout(twdPressTimer);
+                    twdPressTimer = null;
+                }
+                longPressTriggered = false;
+            });
+        }
+
+    // 2. COMANDO TATTICO: Click in qualsiasi punto del radar per tornare all'analogico
+    const windRadarSvg = document.getElementById('wind-radar');
+    if (windRadarSvg) {
+        windRadarSvg.addEventListener('pointerup', () => {
+            if (activeInstrument === 'radar') {
+                activeInstrument = 'gauge';
+                windRadarSvg.style.display = 'none';
+                document.getElementById('wind-gauge').style.display = 'block';
+            }
+        });
+    }
+
     // Rileviamo se siamo sul Mac tramite file:// (Ambiente di sviluppo locale)
     const isLocalFile = (window.location.protocol === 'file:');
 
-    // 1. CARICAMENTO STORICO GRAFICI REALI DAL CERBO GX
+    // 3. CARICAMENTO STORICO GRAFICI E RADAR REALI DAL CERBO GX
     try {
         await fetchServerHistory();
     } catch (err) {
         console.warn("⚠️ Impossibile caricare lo storico reale dal server.");
     }
 
-    // 2. CARICAMENTO CONFIGURAZIONI REALI (Bypassato su Mac per preservare i tuoi test!)
+    // 4. CARICAMENTO CONFIGURAZIONI REALI (Bypassato su Mac per preservare i tuoi test!)
     if (!isLocalFile) {
         await fetchServerConfig();
     } else {
-        // Mantiene la CONFIG locale di app.js per farti fare le prove delle scale sul Mac
         console.log("🎮 Esecuzione locale file://: utilizzo delle calibrazioni di CONFIG locali di debug.");
     }
     
     startDisplayLoop();
     connect(); // Si collegherà in tempo reale al WebSocket reale della barca
     
+    // 5. POLL LENTO (15 secondi): aggiorna i dati radar in background e, se attivo, li ridisegna
+    setInterval(async () => {
+        try {
+            await fetchServerHistory();
+            if (activeInstrument === 'radar') {
+                renderRadar();
+            }
+        } catch (err) {
+            console.warn("⚠️ Errore aggiornamento periodico storico:", err);
+        }
+    }, 15000);
+
     // Controlla le modifiche di configurazione sul Cerbo solo se non siamo sul Mac via file://
     if (!isLocalFile) {
         setInterval(watchConfigChanges, 10000);

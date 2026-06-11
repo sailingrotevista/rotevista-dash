@@ -5,6 +5,7 @@
  * ==========================================================================
  * Gestisce l'adattamento delle scale dei grafici, l'arrotondamento dei limiti
  * (Snap a griglia) e la generazione dinamica delle curve SVG.
+ * file charts.js
  */
 
 // --- 1. MOTORE DI CALCOLO DELLE SCALE (Snap a griglia & Protezione Profondità) ---

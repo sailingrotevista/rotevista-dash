@@ -4,6 +4,7 @@
  * ==========================================================================
  * Definisce l'interfaccia di configurazione in Signal K Admin e crea
  * gli endpoint pubblici per la Dashboard, mantenendo lo storico in RAM.
+ * file index.js
  */
 const https = require('https'); // Importazione del modulo HTTPS nativo di Node.js
 
@@ -172,20 +173,23 @@ module.exports = function (app) {
       raw[path] = val; // BUG RISOLTO: Acquisizione dell'AWA mancante inserita!
     }
     else if (path === 'environment.wind.speedTrue') {
-      lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
-      manageHistory('tws', val * 1.94384);
+          lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
+          const cleanVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
+          manageHistory('tws', cleanVal * 1.94384);
     }
     // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
     else if (path === 'navigation.headingMagnetic') {
       const hasTrueHdg = raw['navigation.headingTrue'] !== undefined;
       if (!hasTrueHdg) {
         const variation = raw['navigation.magneticVariation'] || 0;
-        raw['navigation.headingTrue'] = (val + variation + 2 * Math.PI) % (2 * Math.PI);
+        const cleanVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
+        raw['navigation.headingTrue'] = (cleanVal + variation + 2 * Math.PI) % (2 * Math.PI);
       }
     }
     else if (path === 'environment.wind.directionTrue') {
       lastNativeTwdTime = now; // Rilevato TWD nativo della centralina!
-      manageHistory('twd', val);
+      const cleanVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
+      manageHistory('twd', cleanVal);
     }
 
     // 2. Calcolo combinato di FALLBACK (Si attiva solo se la centralina non invia TWS/TWD nativi)

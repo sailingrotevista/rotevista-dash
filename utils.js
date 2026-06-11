@@ -3,6 +3,7 @@
  * Sailing Dashboard Pro - Math, Conversions & Audio Utilities
  * ==========================================================================
  * Raccoglie le funzioni pure di calcolo vettoriale e sintesi sonora.
+ *file utils.js
  */
 
 // --- 1. CONVERSIONI STANDARD ---
