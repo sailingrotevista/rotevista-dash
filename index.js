@@ -75,6 +75,7 @@ module.exports = function (app) {
           ...histories,
           windRadarSlots: windRadarSlots,
           futureForecast: futureForecast
+          'navigation.position': raw['navigation.position'] // Chirurgico: Espone le coordinate GPS correnti per la diagnostica e il radar
         };
         res.json(responseData);
       });
@@ -86,6 +87,7 @@ module.exports = function (app) {
     const localSubscription = {
       context: 'vessels.self',
       subscribe: [
+        { path: 'navigation.position' }, // Chirurgico: Aggiunto l'ascolto della posizione GPS per abilitare le previsioni
         { path: 'navigation.speedThroughWater' },
         { path: 'navigation.speedOverGround' },
         { path: 'environment.depth.belowTransducer' },
@@ -191,7 +193,7 @@ module.exports = function (app) {
     const awa = raw["environment.wind.angleApparent"];
     const stw = raw["navigation.speedThroughWater"] || 0;
     const sog = raw["navigation.speedOverGround"] || 0;
-    const hdg = raw["navigation.headingTrue"] || 0;
+    const hdg = raw["navigation.headingTrue"];
     const cog = raw["navigation.courseOverGroundTrue"] || 0;
 
     if (aws !== undefined && awa !== undefined) {
@@ -358,11 +360,8 @@ module.exports = function (app) {
 
             // EMISSIONE DEL DELTA: Se abbiamo calcolato il TWD di fallback, lo trasmettiamo a Signal K
             if (now - lastNativeTwdTime > 5000) {
-              emitDelta('environment.wind.directionTrue', {
-                val: finalValue.val,
-                min: finalValue.min,
-                max: finalValue.max
-              });
+                // Standard Signal K: trasmettiamo solo il valore medio (float numerico in radianti)
+                emitDelta('environment.wind.directionTrue', finalValue.val);
             }
 
             // --- TRIGGER DI CONGELAMENTO ARCO (Ogni :00 e :30 dell'orologio) ---
@@ -646,6 +645,7 @@ module.exports = function (app) {
     https.get(url, (res) => {
       if (res.statusCode !== 200) {
         app.error(`[Open-Meteo] HTTP Error: ${res.statusCode}`);
+        res.resume();
         lastForecast30mSlot = 0; // Reset in caso di errore per permettere un tentativo al prossimo pacchetto GPS
         return;
       }

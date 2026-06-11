@@ -396,32 +396,8 @@
                         let sourceLabel = u.$source || (u.source ? (u.source.label || "N2K") : "NMEA");
                         if (u.values) {
                             u.values.forEach(v => {
+                                // Mantiene l'aggiornamento dei testi di debug istantanei a 1Hz
                                 processIncomingDelta(v.path, v.value, sourceLabel, timeMs);
-                                
-                                // Ricezione live delle emissioni delta del nostro plugin server
-                                if (v.path === 'environment.wind.directionTrue') {
-                                    let val, min, max;
-                                    if (v.value && typeof v.value === 'object' && v.value.val !== undefined) {
-                                        val = v.value.val;
-                                        min = v.value.min;
-                                        max = v.value.max;
-                                    } else {
-                                        val = v.value; min = v.value; max = v.value;
-                                    }
-                                    store.twdMinuteBuffer.push({ val: val, min: min, max: max, time: timeMs });
-                                    while(store.twdMinuteBuffer.length > 120) store.twdMinuteBuffer.shift();
-                                    renderRadar();
-                                }
-                                if (v.path === 'environment.wind.speedTrue') {
-                                    let val;
-                                    if (v.value && typeof v.value === 'object' && v.value.val !== undefined) {
-                                        val = v.value.val;
-                                    } else {
-                                        val = v.value;
-                                    }
-                                    store.twsMinuteBuffer.push({ val: val, time: timeMs });
-                                    while(store.twsMinuteBuffer.length > 120) store.twsMinuteBuffer.shift();
-                                }
                             });
                         }
                     });
@@ -747,11 +723,17 @@
         function init() {
             drawCompassTicks();
             connect();
-            // Rinfresco periodico del radar e del pannello di debug ogni 5 secondi
-            setInterval(renderRadar, 5000);
+            
+            // Sincronizzazione strategica: scarica lo storico consolidato dal server ogni 30 secondi e ridisegna
+            setInterval(async () => {
+                await fetchConfigAndHistory();
+                renderRadar();
+            }, 30000);
         }
 
-        window.onload = init;
+                window.onload = init;
+
+            window.onload = init;
     </script>
 </body>
 </html>
