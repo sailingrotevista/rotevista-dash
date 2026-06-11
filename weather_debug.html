@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sailing Dashboard - Open-Meteo Diagnostic Tool</title>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: monospace;
+            padding: 20px;
+            margin: 0;
+        }
+        h1 {
+            color: #38bdf8;
+            border-bottom: 2px solid #38bdf8;
+            padding-bottom: 10px;
+        }
+        .card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #0ea5e9;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover { background: #0284c7; }
+        pre {
+            background: #020617;
+            padding: 15px;
+            border-radius: 6px;
+            overflow: auto;
+            max-height: 250px;
+            font-size: 12px;
+            color: #34d399;
+            border: 1px solid #1e293b;
+        }
+        .success { color: #4ade80; font-weight: bold; }
+        .error { color: #f87171; font-weight: bold; }
+        .pending { color: #fbbf24; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>Diagnostic Tool: Open-Meteo & GPS</h1>
+    <p>Usa questo pannello per verificare se la barca riesce a scaricare le previsioni meteo.</p>
+
+    <!-- STEP 1: VERIFICA GPS INTERNO DI BORDO -->
+    <div class="card">
+        <h3>1. Coordinate GPS correnti dal Cerbo GX (Signal K)</h3>
+        <button onclick="checkBoatGPS()">Leggi GPS Barca</button>
+        <p>Stato: <span id="gps-status" class="pending">In attesa...</span></p>
+        <pre id="gps-data">Nessun dato letto.</pre>
+    </div>
+
+    <!-- STEP 2: TEST DI CONNESSIONE DIRETTO DAL TABLET -->
+    <div class="card">
+        <h3>2. Test connessione Open-Meteo diretto dal Tablet (Questo Browser)</h3>
+        <p>Verifica se il tuo tablet ha accesso a internet in questo momento.</p>
+        <button onclick="testTabletConnection()">Esegui Test Tablet</button>
+        <p>Risultato: <span id="tablet-status" class="pending">In attesa...</span></p>
+        <pre id="tablet-data">Nessun tentativo eseguito.</pre>
+    </div>
+
+    <!-- STEP 3: ANALISI STORICO DEL SERVER -->
+    <div class="card">
+        <h3>3. Verifica Previsione salvata sul Server (/rotevista-history)</h3>
+        <p>Verifica se il Cerbo ha memorizzato la previsione oraria.</p>
+        <button onclick="checkServerHistory()">Interroga Server</button>
+        <p>Stato Previsione: <span id="server-status" class="pending">In attesa...</span></p>
+        <pre id="server-data">Nessun tentativo eseguito.</pre>
+    </div>
+
+    <script>
+        const fallbackIp = "192.168.111.240:3000";
+        
+        function getApiUrl(path) {
+            let addr = window.location.host || fallbackIp;
+            if (window.location.protocol === 'file:') {
+                return `http://${fallbackIp}${path}`;
+            }
+            return `${window.location.protocol}//${addr}${path}`;
+        }
+
+        // 1. Legge il GPS dal server di bordo
+        async function checkBoatGPS() {
+            const status = document.getElementById('gps-status');
+            const dataPre = document.getElementById('gps-data');
+            status.innerHTML = "Interrogazione in corso...";
+            
+            try {
+                const res = await fetch(getApiUrl('/rotevista-history'));
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data['navigation.position']) {
+                        const pos = data['navigation.position'];
+                        status.className = "success";
+                        status.innerText = "GPS ATTIVO DI BORDO";
+                        dataPre.innerText = JSON.stringify(pos, null, 2);
+                    } else {
+                        status.className = "error";
+                        status.innerText = "GPS RAGGIUNGIBILE MA SENZA COORDINATE";
+                        dataPre.innerText = "La chiave 'navigation.position' non è presente nello storico del server.";
+                    }
+                } else {
+                    throw new Error(`Risposta server non OK: ${res.status}`);
+                }
+            } catch (err) {
+                status.className = "error";
+                status.innerText = "ERRORE DI RETE";
+                dataPre.innerText = err.message;
+            }
+        }
+
+        // 2. Test connessione Open-Meteo dal Tablet
+        async function testTabletConnection() {
+            const status = document.getElementById('tablet-status');
+            const dataPre = document.getElementById('tablet-data');
+            status.innerHTML = "Tentativo di connessione a Open-Meteo...";
+            
+            // Coordinate di test (La Spezia)
+            const url = "https://api.open-meteo.com/v1/forecast?latitude=44.11&longitude=9.83&hourly=wind_speed_10m&wind_speed_unit=kn&forecast_days=1";
+            
+            try {
+                const res = await fetch(url);
+                if (res.ok) {
+                    const json = await res.json();
+                    status.className = "success";
+                    status.innerText = "CONNESSIONE OK - Il Tablet ha internet";
+                    dataPre.innerText = JSON.stringify(json.hourly.time.slice(0, 3).map((t, i) => `${t}: ${json.hourly.wind_speed_10m[i]} nodi`), null, 2);
+                } else {
+                    throw new Error(`Errore API: ${res.status}`);
+                }
+            } catch (err) {
+                status.className = "error";
+                status.innerText = "ERRORE - Il tablet NON ha internet o Open-Meteo è offline";
+                dataPre.innerText = err.message + "\n\nNota: Se sei connesso al Wi-Fi locale della barca privo di SIM, è normale che il test fallisca.";
+            }
+        }
+
+        // 3. Verifica se il server ha la previsione
+        async function checkServerHistory() {
+            const status = document.getElementById('server-status');
+            const dataPre = document.getElementById('server-data');
+            status.innerHTML = "Lettura storico dal Cerbo GX...";
+            
+            try {
+                const res = await fetch(getApiUrl('/rotevista-history'));
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.futureForecast) {
+                        status.className = "success";
+                        status.innerText = "METEO PRESENTE NEL SERVER";
+                        dataPre.innerText = JSON.stringify(data.futureForecast, null, 2);
+                    } else {
+                        status.className = "error";
+                        status.innerText = "PREVISIONE ASSENTE (futureForecast è null)";
+                        dataPre.innerText = "Il server è attivo ma non ha ancora scaricato o elaborato dati di previsione da Open-Meteo.";
+                    }
+                } else {
+                    throw new Error(`Risposta server non OK: ${res.status}`);
+                }
+            } catch (err) {
+                status.className = "error";
+                status.innerText = "ERRORE LETTURA STORICO";
+                dataPre.innerText = err.message;
+            }
+        }
+    </script>
+</body>
+</html>
