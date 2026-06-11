@@ -44,11 +44,9 @@ let simulationMode = false;
 let displayModeSog = 'SOG';
 let displayModeTws = 'TWS';
 let socket, renderInterval, simInterval;
-let lastAvgUIUpdate = 0, audioCtx = null, lastAlarmTime = 0;
-let curAwaRot = 0, curTwaRot = 0, curTrackRot = 0, curTwdRoseRot = 0;
-let curBoatCompassRot = 0, curWindCompassRot = 0;
+let lastAvgUIUpdate = 0; // Chirurgico: Rimosse audioCtx e lastAlarmTime poiché sono già dichiarate in utils.js
 
-let smoothedLeeway = 0, rotationTrend = 0, meteoTrend = 0;
+let rotationTrend = 0, meteoTrend = 0;
 let lastShortAvgVal = null, lastInstantTwa = null;
 let lastTrendTime = Date.now(), lastGybeAlarmTime = 0, lastTWCompute = 0;
 let twDirty = false, isNavigating = false, reconnectDelay = 1000;
@@ -101,34 +99,8 @@ const ui = {
 };
 
 // ==========================================================================
-// 3. UTILITIES (MATEMATICA, BUFFER E MEMORIA)
+// 3. UTILITIES (MATEMATICA, BUFFER E MEMORIA) - [Esportate in utils.js]
 // ==========================================================================
-function radToDeg(rad) { return rad * (180 / Math.PI); }
-function degToRad(deg) { return deg * (Math.PI / 180); }
-function msToKts(ms) { return ms * 1.94384; }
-function ktsToMs(kts) { return kts / 1.94384; }
-
-function getShortestRotation(curr, target) {
-    let diff = (target - curr) % 360;
-    if (diff > 180) diff -= 360;
-    else if (diff < -180) diff += 360;
-    return curr + diff;
-}
-
-/**
- * Scrive il testo nel DOM/SVG solo se il valore è realmente cambiato.
- * Utilizza innerHTML perché è l'unico metodo sicuro al 100% per forzare il ridisegno dei testi negli SVG.
- */
-function safeSetText(el, text) {
-    if (!el) return;
-    // Se l'elemento è parte di un SVG, usiamo textContent, altrimenti innerHTML
-    const isSVG = el instanceof SVGElement;
-    if (isSVG) {
-        if (el.textContent !== text) el.textContent = text;
-    } else {
-        if (el.innerHTML !== text) el.innerHTML = text;
-    }
-}
 
 /**
  * Inserimento sicuro nel buffer con trigonometria precaricata e pruning automatico
@@ -153,68 +125,6 @@ function safePush(buffer, val, time) {
         buffer.shift();
     }
     if (buffer.length > 36000) buffer.shift();
-}
-
-/**
- * Media Circolare Vettoriale - Versione "Soft Outlier Rejection"
- */
-function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now) {
-    now = now || Date.now();
-    const len = bufferArray.length;
-    if (len === 0) return null;
-
-    let sSin = 0, sCos = 0, count = 0;
-    let newestTime = 0, oldestTime = 0;
-
-    let pilotSin = 0, pilotCos = 0;
-    const pilotSamples = Math.min(len, 15);
-    for (let i = len - 1; i >= len - pilotSamples; i--) {
-        pilotSin += bufferArray[i].sin;
-        pilotCos += bufferArray[i].cos;
-    }
-    const pilotRad = Math.atan2(pilotSin, pilotCos);
-    const limitRad = (CONFIG.averaging.stabilityBreakout || 15) * (Math.PI / 180);
-
-    for (let i = len - 1; i >= 0; i--) {
-        const item = bufferArray[i];
-        if ((now - item.time) > windowMs) break;
-
-        let diffRad = Math.atan2(Math.sin(item.val - pilotRad), Math.cos(item.val - pilotRad));
-        let finalSin, finalCos;
-
-        if (Math.abs(diffRad) > limitRad) {
-            const clampedDiff = Math.sign(diffRad) * limitRad;
-            const clampedRad = pilotRad + clampedDiff;
-            finalSin = Math.sin(clampedRad);
-            const relativeCos = Math.cos(clampedRad);
-            finalCos = relativeCos;
-        } else {
-            finalSin = item.sin;
-            finalCos = item.cos;
-        }
-
-        sSin += finalSin;
-        sCos += finalCos;
-
-        if (count === 0) newestTime = item.time;
-        oldestTime = item.time;
-        count++;
-    }
-
-    if (count === 0) return null;
-
-    const R = Math.hypot(sSin, sCos) / count;
-    const avgRad = Math.atan2(sSin, sCos);
-    const finalVal = signed ? avgRad : (avgRad + Math.PI * 2) % (Math.PI * 2);
-    const historyDuration = (count > 2) ? (newestTime - oldestTime) : 0;
-    const safeR = Math.max(R, 1e-9);
-
-    return {
-        val: finalVal,
-        stable: historyDuration > 10000 && R > CONFIG.averaging.stabilityThreshold,
-        dev: (R < 1) ? Math.round(Math.sqrt(-2 * Math.log(safeR)) * (180 / Math.PI)) : 0,
-        samples: count
-    };
 }
 
 function saveDashboardState() {
@@ -277,34 +187,8 @@ function loadDashboardState() {
 }
 
 // ==========================================================================
-// 4. AUDIO E ALLARMI
+// 4. AUDIO E ALLARMI - [Esportati in utils.js]
 // ==========================================================================
-function playBingBing() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const n = Date.now(); if (n - lastAlarmTime < 3000) return; lastAlarmTime = n;
-    function b(f, s) {
-        const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-        o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f;
-        g.gain.setValueAtTime(0.1, s); g.gain.exponentialRampToValueAtTime(0.01, s + 0.4);
-        o.start(s); o.stop(s + 0.5);
-    }
-    b(880, audioCtx.currentTime); b(880, audioCtx.currentTime + 0.6);
-}
-
-function playGybeAlarm() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const n = Date.now(); if (n - lastAlarmTime < 2000) return; lastAlarmTime = n;
-    function note(f, s, d) {
-        const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-        o.connect(g); g.connect(audioCtx.destination); o.type = 'square';
-        o.frequency.value = f; g.gain.setValueAtTime(0.05, s);
-        g.gain.exponentialRampToValueAtTime(0.001, s + d); o.start(s); o.stop(s + d);
-    }
-    for (let i = 0; i < 4; i++) {
-        note(1800, audioCtx.currentTime + (i * 0.15), 0.1);
-        note(1200, audioCtx.currentTime + (i * 0.15) + 0.07, 0.1);
-    }
-}
 
 function checkDepthAlarm(m) {
     ui.depth.classList.remove('alarm-warning', 'alarm-danger', 'blink-alarm');
@@ -314,12 +198,6 @@ function checkDepthAlarm(m) {
     } else if (m < CONFIG.alarms.depthWarning) {
         ui.depth.classList.add('alarm-warning');
     }
-}
-
-function updateLeewayDisplay(deg) {
-    const c = 125, px = 125/20; let w = Math.min(Math.abs(deg)*px, 125);
-    ui.leewayMask.setAttribute('x', deg >= 0 ? c : c - w); ui.leewayMask.setAttribute('width', w);
-    ui.leewayVal.textContent = `LEEWAY: ${deg.toFixed(1)}°`;
 }
 
 /**
@@ -670,22 +548,29 @@ function startDisplayLoop() {
         updateWindTrend();
 
         // --- AGGIORNAMENTO STATUS CON CONTEGGIO MINUTI REALE ---
-        const viewportMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
-        const requiredMs = viewportMinutes * 60000;
-        const oldestStw = store.histories.stw ? store.histories.stw[0] : null;
+                const isSocketOpen = socket && socket.readyState === WebSocket.OPEN;
+                
+                if (isSocketOpen) {
+                    ui.status.className = "online"; // Colore Verde
+                    const viewportMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
+                    const requiredMs = viewportMinutes * 60000;
+                    const oldestStw = store.histories.stw ? store.histories.stw[0] : null;
 
-        if (oldestStw) {
-            const availableMs = now - oldestStw.time;
-            if (availableMs >= requiredMs) {
-                ui.status.innerText = `ONLINE ${viewportMinutes}min`;
-            } else {
-                const availableMin = Math.max(1, Math.floor(availableMs / 60000));
-                ui.status.innerText = `ONLINE ${availableMin}/${viewportMinutes}min`;
-            }
-        } else {
-            ui.status.innerText = `ONLINE`;
-        }
-        ui.status.className = (socket && socket.readyState === WebSocket.OPEN) ? "online" : "offline";
+                    if (oldestStw) {
+                        const availableMs = now - oldestStw.time;
+                        if (availableMs >= requiredMs) {
+                            ui.status.innerText = `ONLINE ${viewportMinutes}min`;
+                        } else {
+                            const availableMin = Math.max(1, Math.floor(availableMs / 60000));
+                            ui.status.innerText = `ONLINE ${availableMin}/${viewportMinutes}min`;
+                        }
+                    } else {
+                        ui.status.innerText = `ONLINE`;
+                    }
+                } else {
+                    ui.status.className = "offline"; // Colore Rosso
+                    ui.status.innerText = "OFFLINE"; // Chirurgico: Forza il testo a OFFLINE se il socket è chiuso, evitando scritte verdi in rosso
+                }
 
         // --- WATCHDOG: CONTROLLO TIMEOUT ---
             const watch = {
@@ -738,131 +623,93 @@ function startDisplayLoop() {
         }
 
         // --- AGGIORNAMENTO PROFONDITÀ (DEPTH) ---
-        if (store.raw["environment.depth.belowTransducer"] !== undefined) {
-            safeSetText(ui.depth, store.raw["environment.depth.belowTransducer"].toFixed(1));
-            checkDepthAlarm(store.raw["environment.depth.belowTransducer"]);
-            manageHistory('depth', store.raw["environment.depth.belowTransducer"]);
-        }
+                if (store.raw["environment.depth.belowTransducer"] !== undefined) {
+                    safeSetText(ui.depth, store.raw["environment.depth.belowTransducer"].toFixed(1));
+                    checkDepthAlarm(store.raw["environment.depth.belowTransducer"]);
+                    manageHistory('depth', store.raw["environment.depth.belowTransducer"]);
+                }
 
-        // --- GESTIONE VENTO (TWS / AWS SWITCH & BUSSOLA) ---
+                // --- GESTIONE VENTO (TWS / AWS SWITCH & BUSSOLA) ---
+                        
+                // Estrazione dati sicura: controlliamo esplicitamente se il dato esiste, altrimenti 0
+                const rawTws = store.raw["environment.wind.speedTrue"];
+                const rawAws = store.raw["environment.wind.speedApparent"];
                 
-        // Estrazione dati sicura: controlliamo esplicitamente se il dato esiste, altrimenti 0
-        const rawTws = store.raw["environment.wind.speedTrue"];
-        const rawAws = store.raw["environment.wind.speedApparent"];
-        
-        const twsVal = (rawTws !== undefined && rawTws !== null) ? msToKts(rawTws) : 0;
-        const awsVal = (rawAws !== undefined && rawAws !== null) ? msToKts(rawAws) : 0;
-        
-        if (rawTws !== undefined && rawTws !== null) manageHistory('tws', twsVal);
-        if (rawAws !== undefined && rawAws !== null) manageHistory('aws', awsVal);
+                const twsVal = (rawTws !== undefined && rawTws !== null) ? msToKts(rawTws) : 0;
+                const awsVal = (rawAws !== undefined && rawAws !== null) ? msToKts(rawAws) : 0;
+                
+                if (rawTws !== undefined && rawTws !== null) manageHistory('tws', twsVal);
+                if (rawAws !== undefined && rawAws !== null) manageHistory('aws', awsVal);
 
-        // Disegno testo casella destra (TWS o AWS)
-        if (rawTws !== undefined || rawAws !== undefined) {
-            const labelWind = document.getElementById('tws-aws-label');
-            const currentWind = (displayModeTws === 'AWS') ? awsVal : twsVal;
-            
-            safeSetText(ui.tws, currentWind.toFixed(1));
-            if (labelWind) labelWind.textContent = displayModeTws;
+                // Disegno testo casella destra (TWS o AWS)
+                if (rawTws !== undefined || rawAws !== undefined) {
+                    const labelWind = document.getElementById('tws-aws-label');
+                    const currentWind = (displayModeTws === 'AWS') ? awsVal : twsVal;
+                    
+                    safeSetText(ui.tws, currentWind.toFixed(1));
+                    if (labelWind) labelWind.textContent = displayModeTws;
 
-            if (currentWind >= CONFIG.graphs.reef2) {
-                ui.tws.style.setProperty('color', '#ff3b30', 'important');
-            } else if (currentWind >= CONFIG.graphs.reef1) {
-                ui.tws.style.setProperty('color', '#ff9800', 'important');
-            } else {
-                if (displayModeTws === 'AWS') {
-                    ui.tws.style.setProperty('color', '#5c6bc0', 'important');
-                } else {
-                    const navyNight = isNight ? '#6c8ea0' : '#2c3e50';
-                    ui.tws.style.setProperty('color', navyNight, 'important');
-                }
-            }
-        }
-
-        // --- SBLOCCO FORZATO TESTO BUSSOLA (AWS) ---
-        if (rawAws !== undefined && rawAws !== null && !isNaN(awsVal)) {
-            const strVal = awsVal.toFixed(1);
-            // Recupero robusto dell'elemento
-            let awsSvgEl = document.getElementById('aws-val-svg');
-            
-            if (awsSvgEl) {
-                // Trucco anti-congelamento SVG: se il testo non combacia, lo forziamo usando
-                // textContent (standard SVG) invece di innerHTML (standard HTML).
-                if (awsSvgEl.textContent !== strVal) {
-                    awsSvgEl.textContent = strVal;
-                }
-            } else {
-                console.error("ERRORE: Elemento SVG bussola ('aws-val-svg') non trovato nel documento!");
-            }
-        }
-
-        // --- PUNTATORI ANALOGICI ---
-        const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, 2000, true);
-        const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, 2000, true);
-        if (smAwa) ui.awa.setAttribute('transform', `rotate(${curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val))}, 200, 200)`);
-        if (smTwa) ui.twa.setAttribute('transform', `rotate(${curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val))}, 200, 200)`);
-        
-        if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
-            let driftDeg = radToDeg((store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (2 * Math.PI) - Math.PI);
-            smoothedLeeway = (sogKts < CONFIG.averaging.minSpeed) ? 0 : (smoothedLeeway * 0.9) + (driftDeg * 0.1);
-            curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway);
-            ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
-            ui.leewayVal.style.color = (Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7) ? "#ff9800" : "";
-            updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
-        }
-        
-        // --- SLOW TIER (Salvataggio stato ogni 10 secondi) ---
-        if (lastAvgUIUpdate++ % 10 === 0) {
-            saveDashboardState();
-        }
-
-        if (lastAvgUIUpdate % 3 === 0) {
-            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false);
-            let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false);
-            let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true);
-            let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true);
-            let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false);
-
-            upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
-            upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
-            upUI(ui.awaAvg, awObj, store.raw["environment.wind.angleApparent"], false);
-            upUI(ui.twaAvg, twObj, store.raw["environment.wind.angleTrueWater"], false);
-            upUI(ui.twdAvg, twdObj, store.raw["environment.wind.directionTrue"], true);
-
-            if (hObj && twdObj) {
-                const reflectAngle = (targetRad, axisRad) => {
-                    const dS = Math.sin(axisRad - targetRad);
-                    const dC = Math.cos(axisRad - targetRad);
-                    return Math.atan2(Math.sin(axisRad) * dC + Math.cos(axisRad) * dS, Math.cos(axisRad) * dC - Math.sin(axisRad) * dS);
-                };
-                const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout;
-                if (!isNavigating) ui.tackHdg.innerHTML = "---&deg;";
-                else if (unstableH) { ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.add('unstable-data'); }
-                else {
-                    const rH = (radToDeg(reflectAngle(hObj.val, twdObj.val)) + 360) % 360;
-                    ui.tackHdg.innerHTML = `${Math.round(rH).toString().padStart(3, '0')}&deg;`;
-                    ui.tackHdg.classList.remove('unstable-data');
-                }
-                if (cObj) {
-                    const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout;
-                    if (!isNavigating) ui.tackCog.innerHTML = "---&deg;";
-                    else if (unstableC) { ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.add('unstable-data'); }
-                    else {
-                        const rC = (radToDeg(reflectAngle(cObj.val, twdObj.val)) + 360) % 360;
-                        ui.tackCog.innerHTML = `${Math.round(rC).toString().padStart(3, '0')}&deg;`;
-                        ui.tackCog.classList.remove('unstable-data');
+                    if (currentWind >= CONFIG.graphs.reef2) {
+                        ui.tws.style.setProperty('color', '#ff3b30', 'important');
+                    } else if (currentWind >= CONFIG.graphs.reef1) {
+                        ui.tws.style.setProperty('color', '#ff9800', 'important');
+                    } else {
+                        if (displayModeTws === 'AWS') {
+                            ui.tws.style.setProperty('color', '#5c6bc0', 'important');
+                        } else {
+                            const navyNight = isNight ? '#6c8ea0' : '#2c3e50';
+                            ui.tws.style.setProperty('color', navyNight, 'important');
+                        }
                     }
                 }
-            }
-            
-            const smHdgIcons = getCircularAverageFromBuffer(store.smoothBuf.hdg, 2000, false);
-            const smTwdIcons = getCircularAverageFromBuffer(store.smoothBuf.twd, 2000, false);
-            if (smHdgIcons && smTwdIcons) {
-                curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(smTwdIcons.val));
-                ui.twdArrow.setAttribute('transform', `rotate(${curWindCompassRot}, 20, 20)`);
-                curBoatCompassRot = getShortestRotation(curBoatCompassRot, radToDeg(smHdgIcons.val));
-                ui.twdBoat.setAttribute('transform', `rotate(${curBoatCompassRot}, 20, 20)`);
-            }
-        }
+
+                // --- AGGIORNAMENTO DELLA BUSSOLA CENTRALE E MINI-COMPASS ---
+                updateCentralGauge(store, ui, now, isNavigating, sogKts, stwKts, rawAws, awsVal);
+                
+                // --- SLOW TIER (Salvataggio stato ogni 10 secondi) ---
+                if (lastAvgUIUpdate++ % 10 === 0) {
+                    saveDashboardState();
+                }
+
+                if (lastAvgUIUpdate % 3 === 0) {
+                    let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false);
+                    let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false);
+                    let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true);
+                    let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true);
+                    let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false);
+
+                    upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
+                    upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
+                    upUI(ui.awaAvg, awObj, store.raw["environment.wind.angleApparent"], false);
+                    upUI(ui.twaAvg, twObj, store.raw["environment.wind.angleTrueWater"], false);
+                    upUI(ui.twdAvg, twdObj, store.raw["environment.wind.directionTrue"], true);
+
+                    if (hObj && twdObj) {
+                        const reflectAngle = (targetRad, axisRad) => {
+                            const dS = Math.sin(axisRad - targetRad);
+                            const dC = Math.cos(axisRad - targetRad);
+                            return Math.atan2(Math.sin(axisRad) * dC + Math.cos(axisRad) * dS, Math.cos(axisRad) * dC - Math.sin(axisRad) * dS);
+                        };
+                        const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout;
+                        if (!isNavigating) ui.tackHdg.innerHTML = "---&deg;";
+                        else if (unstableH) { ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.add('unstable-data'); }
+                        else {
+                            const rH = (radToDeg(reflectAngle(hObj.val, twdObj.val)) + 360) % 360;
+                            ui.tackHdg.innerHTML = `${Math.round(rH).toString().padStart(3, '0')}&deg;`;
+                            ui.tackHdg.classList.remove('unstable-data');
+                        }
+                        if (cObj) {
+                            const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout;
+                            if (!isNavigating) ui.tackCog.innerHTML = "---&deg;";
+                            else if (unstableC) { ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.add('unstable-data'); }
+                            else {
+                                const rC = (radToDeg(reflectAngle(cObj.val, twdObj.val)) + 360) % 360;
+                                ui.tackCog.innerHTML = `${Math.round(rC).toString().padStart(3, '0')}&deg;`;
+                                ui.tackCog.classList.remove('unstable-data');
+                            }
+                        }
+                    }
+                }
     }, RENDER_INTERVAL_MS);
 }
 
@@ -1085,321 +932,6 @@ function manageHistory(type, value) {
     store.lastUpdates[type] = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
 }
 
-/**
- * Gestione dinamica delle scale dei grafici (Involucro Elastico Snapped e Safety Zoom)
- * Implementa lo "Snap a Griglia" basato sull'hercSpan senza padding per tutti i sensori.
- */
-function calculateScale(type, data, mode) {
-    const s = CONFIG.scales[type];
-    const currentVal = data[data.length - 1];
-    
-    // Fallback di emergenza se il buffer è momentaneamente vuoto
-    if (currentVal === undefined || currentVal === null) {
-        return { min: 0, max: s ? s.stdMax : 10 };
-    }
-
-    // Inizializzazione della memoria delle scale nello store se non esiste
-    if (!store.herculesScales) store.herculesScales = {};
-    if (!store.herculesScales[type]) {
-        store.herculesScales[type] = { min: 0, max: s ? s.stdMax : 10 };
-    }
-    let currentScale = store.herculesScales[type];
-
-    // ==========================================================================
-    // 1. SEZIONE PROFONDITÀ (DEDICATA A 2 MINUTI DI SICUREZZA, MINIMO FISSO A 0)
-    // ==========================================================================
-    if (type === 'depth') {
-        const shallowThreshold = Math.max(s.stdMax, 10); // Es. 20m
-        if (store.depthProtectedActive === undefined) store.depthProtectedActive = false;
-
-        const now = Date.now();
-        const depthSafetyWindowMs = 120000; // 2 minuti fissi per la sicurezza
-        
-        // Estrazione dati reali degli ultimi 2 minuti con timestamp
-        const recentPoints = store.histories.depth.filter(p => (now - p.time) <= depthSafetyWindowMs);
-        const recentVals = recentPoints.map(p => p.val);
-
-        const localMax = recentVals.length > 0 ? Math.max(...recentVals) : currentVal;
-        const localMin = recentVals.length > 0 ? Math.min(...recentVals) : currentVal;
-
-        // --- 1.1 NORMALE PROFONDITÀ (CON SOGLIA STANDARD E FILTRO 2 MINUTI) ---
-        if (mode !== 'hercules') {
-            if (!store.depthProtectedActive && currentVal <= shallowThreshold) {
-                store.depthProtectedActive = true;
-            }
-            if (store.depthProtectedActive) {
-                if (localMin > shallowThreshold) {
-                    store.depthProtectedActive = false;
-                }
-            }
-            if (store.depthProtectedActive) {
-                return { min: 0, max: shallowThreshold };
-            }
-            const maxHistorico = Math.max(...data);
-            return { min: 0, max: Math.max(s.stdMax, Math.ceil(maxHistorico / s.step) * s.step) };
-        }
-
-        // --- 1.2 HERCULES PROFONDITÀ (BASE 0 IN ACQUE BASSE, FLUTTUANTE AL LARGO) ---
-        if (mode === 'hercules') {
-            const roundStep = s.hercSpan; // Passo di griglia selezionato dall'utente
-            const shallowThreshold = Math.max(s.stdMax, 10); // Es. 20m
-            
-            let targetMin = 0;
-            // Se siamo in acque profonde, lasciamo che il minimo fluttui per mostrare i micro-dettagli
-            if (localMin > shallowThreshold) {
-                targetMin = Math.max(0, Math.floor(localMin / roundStep) * roundStep);
-            }
-            
-            let targetMax = Math.ceil(localMax / roundStep) * roundStep;
-
-            // Impediamo uno span inferiore a 4 metri per evitare grafici piatti
-            if (targetMax - targetMin < 4) {
-                targetMax = targetMin + 4;
-            }
-
-            // Regola asimmetrica per il MIN e il MAX (Espansione istantanea, contrazione a 2 minuti)
-            if (currentVal < currentScale.min || currentVal > currentScale.max) {
-                currentScale.min = Math.min(currentScale.min, targetMin);
-                currentScale.max = Math.max(currentScale.max, targetMax);
-            } else {
-                const allStableInTarget = recentVals.every(val => val >= targetMin && val <= targetMax);
-                if (allStableInTarget) {
-                    currentScale.min = targetMin;
-                    currentScale.max = targetMax;
-                }
-            }
-
-            return { min: currentScale.min, max: currentScale.max };
-        }
-    }
-
-    // ==========================================================================
-    // 2. ALTRI GRAFICI (STW, SOG, TWS): COMPORTAMENTO ADATTIVO SU TERZO DEL GRAFICO
-    // ==========================================================================
-    
-    // --- 2.1 MODALITÀ NORMALE ---
-    if (mode !== 'hercules') {
-        const maxHistorico = Math.max(...data);
-        return { min: 0, max: Math.max(s.stdMax, Math.ceil(maxHistorico / s.step) * s.step) };
-    }
-
-    // --- 2.2 MODALITÀ HERCULES AD ALTO CONTRASTO (SNAP SENZA PADDING) ---
-    if (mode === 'hercules') {
-        const roundStep = s.hercSpan; // Passo di griglia (ex hercSpan)
-
-        const oneThirdCount = Math.max(1, Math.floor(data.length / 3));
-        const recentThirdData = data.slice(-oneThirdCount);
-
-        const localMin = Math.min(...recentThirdData);
-        const localMax = Math.max(...recentThirdData);
-
-        // Applichiamo lo snap diretto ai multipli della griglia
-        let targetMin = Math.max(0, Math.floor(localMin / roundStep) * roundStep);
-        let targetMax = Math.ceil(localMax / roundStep) * roundStep;
-
-        // Se lo span calcolato è nullo (es. velocità costante), forziamo lo span minimo
-        if (targetMax - targetMin === 0) {
-            targetMax = targetMin + roundStep;
-        }
-
-        // APPLICAZIONE REGOLE ASIMMETRICHE ANTI-CLIPPING
-        // A. Espansione ISTANTANEA in alto o in basso (sicurezza)
-        if (currentVal < currentScale.min || currentVal > currentScale.max) {
-            currentScale.min = Math.min(currentScale.min, targetMin);
-            currentScale.max = Math.max(currentScale.max, targetMax);
-        }
-        // B. Contrazione RITARDATA (solo se tutto il terzo recente si è assestato nel target)
-        else {
-            const allStableInTarget = recentThirdData.every(val => val >= targetMin && val <= targetMax);
-            if (allStableInTarget) {
-                currentScale.min = targetMin;
-                currentScale.max = targetMax;
-            }
-        }
-
-        return { min: currentScale.min, max: currentScale.max };
-    }
-}
-
-function updateScaleLabels(t, min, max) {
-    const el = document.getElementById(t + '-scale');
-    if (el) el.innerHTML = `<span>${Math.round(max)}</span><span>${Math.round((min+max)/2)}</span><span>${Math.round(min)}</span>`;
-}
-
-/**
- * refreshGraph: Recupero dati, switch AWS/TWS/VMG e passaggio a motore grafico.
- * Redirige e protegge i canali secondari (AWS/VMG) evitando ridisegni inutili.
- */
-function refreshGraph(t) {
-    // Redirezione di sicurezza dei canali secondari (AWS / VMG) verso i contenitori principali
-    if (t === 'aws') {
-        if (displayModeTws !== 'AWS') return; // Se non stiamo visualizzando AWS a schermo, ignora il rinfresco
-        t = 'tws';
-    }
-    if (t === 'vmg') {
-        if (displayModeSog !== 'VMG') return; // Se non stiamo visualizzando VMG a schermo, ignora il rinfresco
-        t = 'sog';
-    }
-
-    const boxType = t;
-    let rawData;
-
-    if (t === 'tws' && displayModeTws === 'AWS') {
-        rawData = store.histories['aws'];
-    } else {
-        rawData = store.histories[t];
-    }
-
-    if (!rawData || rawData.length < 2) return;
-
-    const values = rawData.map(p => p.val);
-    const mode = graphModes[boxType];
-    const cfg = calculateScale(boxType, values, mode);
-
-    const box = document.querySelector(`.box-${boxType}`);
-    if (box) box.classList.toggle('box-hercules', mode === 'hercules');
-
-    updateScaleLabels(boxType, cfg.min, cfg.max);
-    drawGraph(rawData, boxType + '-graph', cfg.min, cfg.max, t === 'tws', mode === 'hercules');
-}
-
-/**
- * drawGraph: Motore SVG con Timeline Reale e Gestione GAP
- * Risolve i conflitti di orologio (Clock Drift) tra Cerbo GX e Tablet.
- * Integra la reattività dello spessore della curva in modalità Dual Screen (Focus).
- */
-function drawGraph(d, id, min, max, isTws, isHercules) {
-    const svg = document.getElementById(id);
-    if (!svg || d.length < 2) return;
-
-    const w = 200, h = 40;
-    const range = max - min || 1;
-    const isDepth = (id === 'depth-graph');
-    
-    // --- RISOLUZIONE DISALLINEAMENTO ORARIO ---
-    // Usiamo il tempo del sensore (l'ultimo dato ricevuto) invece dell'orologio del tablet
-    const latestPoint = d[d.length - 1];
-    const now = latestPoint ? latestPoint.time : Date.now();
-
-    // --- RILEVAMENTO DINAMICO DUAL SCREEN BLINDATO ---
-    const box = svg.closest('.data-box');
-    const isFocused = isFocusActive && box && box.classList.contains('is-focused');
-
-    const visibleMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
-    const viewportMs = visibleMinutes * 60000;
-    const viewportStart = now - viewportMs;
-
-    const visibleData = d.filter(p => p.time >= viewportStart);
-    if (visibleData.length < 2) return;
-
-    const colDanger  = "#ff3b30", colWarning = "#ff9800", colTws = "#2c3e50", colAws = "#5c6bc0";
-    const colDepth   = "#0088cc", colStw = "#00C851", colStwBorder = "#007a3d", colSog = "#ffbb33", colVmg = "#00b8d4";
-
-    const getColorProps = (val) => {
-        // Se siamo in Dual Screen (focus), aumentiamo lo spessore base della curva di un filino (da 1.6 a 2.2)
-        const baseStroke = isFocused ? "4.2" : "1.6";
-        const alertStroke = isFocused ? "4.8" : "2.2";
-        const warnStroke = isFocused ? "4.4" : "1.8";
-
-        let color = colTws, opacity = "0.15", stroke = baseStroke;
-        if (isTws) {
-            const baseWind = (displayModeTws === 'AWS') ? colAws : colTws;
-            if (val >= CONFIG.graphs.reef2) { color = colDanger; opacity = "0.55"; stroke = alertStroke; }
-            else if (val >= CONFIG.graphs.reef1) { color = colWarning; opacity = "0.45"; stroke = warnStroke; }
-            else color = baseWind;
-        } else if (isDepth) {
-            if (val < CONFIG.alarms.depthDanger) { color = colDanger; opacity = "0.55"; stroke = alertStroke; }
-            else if (val < CONFIG.alarms.depthWarning) { color = colWarning; opacity = "0.45"; stroke = warnStroke; }
-            else color = colDepth;
-        } else {
-            if (id === 'stw-graph') color = colStw;
-            else if (id === 'sog-graph') color = (displayModeSog === 'VMG') ? colVmg : colSog;
-        }
-        return { color, opacity, stroke };
-    };
-
-    let grids = "";
-    // --- GRIGLIE ORIZZONTALI (Spessore fisso a 0.5px, non deformabile) ---
-    [0.25, 0.5, 0.75].forEach(p => grids += `<line x1="0" y1="${h-(p*h)}" x2="${w}" y2="${h-(p*h)}" stroke="rgba(0,0,0,0.12)" stroke-width="0.5" vector-effect="non-scaling-stroke" />`);
-
-    // --- GRIGLIE VERTICALI (Spessore fisso a 0.4px, non deformabile) ---
-    const gridInterval = (visibleMinutes <= 15) ? 1 : 5;
-    for (let m = gridInterval; m < visibleMinutes; m += gridInterval) {
-        const x = w - ((m / visibleMinutes) * w);
-        grids += `<line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="rgba(0,0,0,0.08)" stroke-width="0.4" vector-effect="non-scaling-stroke" />`;
-    }
-    
-    // --- DISEGNO LINEE DI SICUREZZA ALLARME PROFONDITÀ (DANGER & WARNING) ---
-    if (isDepth) {
-        const dangerVal = CONFIG.alarms.depthDanger;     // Es. 2.5m
-        const warningVal = CONFIG.alarms.depthWarning;   // Es. 3.5m
-        const marginX = 4; // Margine per non toccare i bordi esterni
-
-        // Spessore dinamico per gli allarmi: 4.8px in Dual Screen, 1.8px nella griglia normale
-        const alarmStrokeWidth = isFocused ? "4.8" : "1.8";
-
-        // Linea Rossa Viva (Spessore dinamico, con il tuo tratteggio alternato personalizzato)
-        if (dangerVal >= min && dangerVal <= max) {
-            const p = (dangerVal - min) / range;
-            const y = h - (p * h);
-            grids += `<line x1="${marginX}" y1="${y}" x2="${w - marginX}" y2="${y}" stroke="rgba(255, 59, 48, 0.95)" stroke-width="${alarmStrokeWidth}" stroke-dasharray="12, 6, 2, 6" vector-effect="non-scaling-stroke" />`;
-        }
-        // Linea Giallo Oro Viva (Spessore dinamico, con il tuo tratteggio alternato personalizzato)
-        if (warningVal >= min && warningVal <= max) {
-            const p = (warningVal - min) / range;
-            const y = h - (p * h);
-            grids += `<line x1="${marginX}" y1="${y}" x2="${w - marginX}" y2="${y}" stroke="rgba(255, 204, 0, 0.95)" stroke-width="${alarmStrokeWidth}" stroke-dasharray="6 , 2, 6, 12" vector-effect="non-scaling-stroke" />`;
-        }
-    }
-
-    let gradientStops = "", lines = "", areaPath = "";
-    let started = false;
-
-    for (let i = 1; i < visibleData.length; i++) {
-        const pA = visibleData[i - 1];
-        const pB = visibleData[i];
-
-        const x1 = ((pA.time - viewportStart) / viewportMs) * w;
-        const x2 = ((pB.time - viewportStart) / viewportMs) * w;
-        const y1 = h - (Math.max(0, Math.min(1, (pA.val - min) / range)) * h);
-        const y2 = h - (Math.max(0, Math.min(1, (pB.val - min) / range)) * h);
-
-        const props = getColorProps(pB.val);
-        const deltaTime = pB.time - pA.time;
-        const expectedInterval = viewportMs / CONFIG.graphs.samples;
-        const isGap = deltaTime > (expectedInterval * 2.5);
-
-        const offset1 = (x1 / w) * 100, offset2 = (x2 / w) * 100;
-        gradientStops += `<stop offset="${offset1}%" stop-color="${props.color}" stop-opacity="${props.opacity}" />`;
-        gradientStops += `<stop offset="${offset2}%" stop-color="${props.color}" stop-opacity="${props.opacity}" />`;
-
-        if (isGap) {
-            if (started) {
-                areaPath += `L ${x1} ${h} `;
-                started = false;
-            }
-        } else {
-            // Curva del grafico: spessore reattivo al focus e protezione da deformazione (non-scaling)
-            lines += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="stroke:${props.color}; stroke-width:${props.stroke}; stroke-linecap:round; shape-rendering:geometricPrecision;" vector-effect="non-scaling-stroke" />`;
-            if (!started) {
-                areaPath += `M ${Math.max(0, x1)} ${h} L ${Math.max(0, x1)} ${y1} `;
-                started = true;
-            }
-            areaPath += `L ${x2} ${y2} `;
-        }
-    }
-
-    if (started) {
-        const last = visibleData[visibleData.length - 1];
-        const lastX = ((last.time - viewportStart) / viewportMs) * w;
-        areaPath += `L ${lastX} ${h} Z`;
-    }
-
-    const gradId = `grad-${id}`;
-    const defs = `<defs><linearGradient id="${gradId}" x1="0" y1="0" x2="${w}" y2="0" gradientUnits="userSpaceOnUse">${gradientStops}</linearGradient></defs>`;
-    svg.innerHTML = `${defs}${grids}<path d="${areaPath}" fill="url(#${gradId})" stroke="none" />${lines}`;
-}
-
 // ==========================================================================
 // 9. INTERAZIONI E GESTI
 // ==========================================================================
@@ -1565,21 +1097,10 @@ function connect() {
 // 11. INIT E CICLO DI VITA
 // ==========================================================================
 window.addEventListener('contextmenu', e => e.preventDefault(), true);
-(function genTicks() {
-    const c = document.getElementById('ticks');
-    if (c) {
-        for (let i = 0; i < 360; i += 10) {
-            const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
-            const m = i % 30 === 0;
-            l.setAttribute("x1", "200"); l.setAttribute("y1", "40"); l.setAttribute("x2", "200"); l.setAttribute("y2", (m ? 60 : 50));
-            l.setAttribute("stroke", m ? "#000" : "#bbb"); l.setAttribute("stroke-width", m ? "2" : "1");
-            l.setAttribute("transform", `rotate(${i}, 200, 200)`); c.appendChild(l);
-        }
-    }
-})();
 
 async function init() {
     loadDashboardState();
+    initCompassTicks(); // Genera i ticks sul quadrante usando il modulo gauge.js
     
     // Rileviamo se siamo sul Mac tramite file:// (Ambiente di sviluppo locale)
     const isLocalFile = (window.location.protocol === 'file:');
