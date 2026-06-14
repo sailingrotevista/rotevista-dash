@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Wind Radar Live - Sailing Dashboard Pro</title>
+    <style>
+        body {
+            background-color: #ffffff;
+            color: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+
+        /* AREA GRAFICA PRINCIPALE (75% ALTEZZA SCHERMO) */
+        .radar-viewport {
+            height: 75vh;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #ffffff;
+            border-bottom: 1px solid #eee;
+        }
+
+        /* BOX STRUTTURALE DEL WIDGET REATTIVO AL 75% DI ALTEZZA */
+        .data-box-square {
+            position: relative;
+            width: 73vh;
+            height: 73vh;
+            background: #ffffff;
+            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .label-row {
+            position: absolute;
+            top: 10px;
+            left: 12px;
+            right: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .label {
+            color: #888;
+            font-size: 0.65rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .unit {
+            color: #aaa;
+            font-size: 0.6rem;
+            font-weight: bold;
+        }
+
+        svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        /* AREA TROUBLESHOOTING E DEBUG (25% ALTEZZA SCHERMO) */
+        .debug-panel {
+            height: 25vh;
+            width: 100%;
+            background: #f9f9f9;
+            border-top: 1px solid #ddd;
+            padding: 10px 15px;
+            box-sizing: border-box;
+            font-family: monospace;
+            font-size: 11px;
+            color: #333;
+            overflow-y: auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+        }
+
+        .debug-col {
+            background: #ffffff;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 8px;
+            box-sizing: border-box;
+            max-height: 100%;
+            overflow-y: auto;
+        }
+
+        .debug-title {
+            font-weight: bold;
+            color: #00C851;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 3px;
+            text-transform: uppercase;
+        }
+
+        .status-badge {
+                    display: inline-block;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                    font-weight: bold;
+                    color: #fff;
+                    text-transform: uppercase;
+                    font-size: 9px;
+                }
+                .status-online { background: #00C851; }
+                .status-offline { background: #ff3b30; }
+
+                /* Chirurgico: Animazione e stile per la punta infuocata del trend meteo */
+                @keyframes blink-trend {
+                    0%, 100% { opacity: 1; filter: drop-shadow(0 0 6px currentColor); }
+                    50% { opacity: 0.3; filter: drop-shadow(0 0 1px currentColor); }
+                }
+                .is-trending {
+                    animation: blink-trend 1.2s infinite ease-in-out !important;
+                    transform-origin: center;
+                }
+            </style>
+        </head>
+<body>
+
+    <!-- AREA SUPERIORE: BUSSOLA RADAR TATTICA -->
+    <div class="radar-viewport">
+        <div class="data-box-square">
+            <div class="label-row">
+                <span class="label">TWD (HISTORICAL)</span>
+                <span id="network-status-text" class="unit">CONNESSIONE...</span>
+            </div>
+
+            <!-- BUSSOLA RADAR SVG (Esatto ViewBox dell'originale, nativamente scalabile) -->
+            <svg id="wind-radar" viewBox="35 38 330 395" preserveAspectRatio="xMidYMid meet">
+                <defs id="radar-gradients">
+                    <clipPath id="boat-clip"><circle cx="200" cy="200" r="50" /></clipPath>
+                    <linearGradient id="axiom-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" style="stop-color:#333333;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#999999;stop-opacity:1" />
+                    </linearGradient>
+                    
+                    <filter id="center-glow" x="-20%" y="-20%" width="140%" height="140%">
+                        <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#aaaaaa" flood-opacity="0.5" />
+                    </filter>
+                </defs>
+                
+                <!-- I tre sfondi speculari originali diurni con coordinate RGB esatte -->
+                <circle cx="200" cy="200" r="160" fill="rgb(252, 252, 252)" />
+                <circle cx="200" cy="200" r="125" fill="rgb(240, 240, 240)" />
+                
+                <!-- Ticks originali generati dinamicamente -->
+                <g id="ticks"></g>
+                
+                <!-- Etichette cardinali N/S/E/W -->
+                <g id="tick-labels" fill="#000000" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-weight="bold">
+                    <text font-size="16" transform="translate(200, 74)">N</text>
+                    <text font-size="16" transform="translate(326, 200) rotate(90)">E</text>
+                    <text font-size="16" transform="translate(74, 200) rotate(-90)">W</text>
+                    <text font-size="16" transform="translate(200, 326) rotate(180)">S</text>
+                    
+                    <text font-size="11" transform="translate(262.5, 91.7) rotate(30)">30</text>
+                    <text font-size="11" transform="translate(308.3, 137.5) rotate(60)">60</text>
+                    <text font-size="11" transform="translate(308.3, 262.5) rotate(120)">120</text>
+                    <text font-size="11" transform="translate(262.5, 308.3) rotate(150)">150</text>
+                    <text font-size="11" transform="translate(137.5, 91.7) rotate(-30)">30</text>
+                    <text font-size="11" transform="translate(91.7, 137.5) rotate(-60)">60</text>
+                    <text font-size="11" transform="translate(91.7, 262.5) rotate(-120)">120</text>
+                    <text font-size="11" transform="translate(137.5, 308.3) rotate(-150)">150</text>
+                </g>
+
+                <!-- 1. ORBITA DEL PRESENTE "ORA" SUL LIVELLO DI SFONDO (Sotto gli archi) -->
+                <!-- Sintonizzata dinamicamente sul raggio dell'Anello 1 (67.2px) per evitare la doppia linea -->
+                <circle id="ora-orbit" cx="200" cy="200" r="67.2" fill="none" stroke="#cfd8dc" stroke-width="1.2" stroke-dasharray="4, 4" />
+
+                <!-- Gli anelli radar degli archi verranno stampati qui -->
+                <g id="radar-rings"></g>
+
+                <!-- Cerchio centrale interattivo originale e Barca NERA SOLIDA -->
+                <circle id="fullscreen-hotspot" cx="200" cy="200" r="55" fill="rgb(238, 238, 238)" stroke="#e0e0e0" stroke-width="1" filter="url(#center-glow)" cursor="pointer" />
+                <path id="boat-icon" d="M200,150 Q165,185 170,250 Q165,190 200,173 Q235,190 230,250 Q235,185 200,150 Z"
+                      fill="#000000" transform="translate(0, 5)" clip-path="url(#boat-clip)" style="pointer-events: none;" />
+            </svg>
+        </div>
+    </div>
+
+    <!-- AREA INFERIORE: DEBUG & TROUBLESHOOTING PANEL (Ottimizzato per lo Store) -->
+    <div class="debug-panel">
+        <!-- Colonna 1: Stato Generale e Previsioni -->
+        <div class="debug-col">
+            <div class="debug-title">System & Forecast</div>
+            <div>Status: <span id="debug-status" class="status-badge status-offline">DISCONNECTED</span></div>
+            <div>Server IP: <span id="debug-ip">---</span></div>
+            <div>Reef 1: <span id="debug-r1">--</span> kts | Reef 2: <span id="debug-r2">--</span> kts</div>
+            <div>Reef 3 (Storm): <span id="debug-r3" style="color: #9c27b0; font-weight: bold;">--</span> kts</div>
+            <div>GPS Position: <span id="debug-gps">---</span></div>
+            <div style="margin-top: 5px; border-top: 1px dashed #eee; padding-top: 5px;">
+                <strong>Future Wind (Open-Meteo):</strong>
+                <div id="debug-future" style="color: #0088cc;">In attesa di coordinate GPS...</div>
+            </div>
+        </div>
+        
+        <!-- Colonna 2: Database Storico in RAM ( windRadarSlots ) -->
+        <div class="debug-col">
+            <div class="debug-title">Bussola Radar Store (Past Slots)</div>
+            <div>Rings loaded: <span id="debug-rings-count" style="font-weight: bold; color: #ff9800;">0/8</span></div>
+            <div id="debug-slots-list" style="margin-top: 5px; font-size: 10px; line-height: 1.3;">
+                <!-- Popolato via JS -->
+            </div>
+        </div>
+
+        <!-- Colonna 3: Buffer Minuto per Minuto ( Presente Tattico ) -->
+        <div class="debug-col">
+            <div class="debug-title">Presente Mobile (Active Buffer)</div>
+            <div id="debug-buffer-list" style="font-size: 10px; line-height: 1.3;">
+                <!-- Popolato via JS -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. CONFIGURAZIONI E STATO DI DEFAULT ---
+        let CONFIG = {
+            alarms: { depthDanger: 2.5, depthWarning: 3.5 },
+            graphs: { reef1: 18, reef2: 24, historyMinutes: 10 },
+            averaging: { minSpeed: 0.5, stabilityThreshold: 0.95 }
+        };
+        let REEF1 = 18; let REEF2 = 24; let REEF3 = 30;
+        const CALM_THRESHOLD_KTS = 1.5;
+        const PRESSURE_FILTER_RATIO = 0.40;
+
+        let socket = null;
+        let reconnectDelay = 1000;
+        let futureForecast = null;
+        let windRadarSlots = [];
+        
+        const store = {
+            raw: {},
+            timestamps: {},
+            twdMinuteBuffer: [],
+            twsMinuteBuffer: []
+        };
+
+        // Raggi geometrici speculari compressi di sicurezza (Massimo raggio 116.4px)
+        const ringRadii = [59.0, 67.2, 75.4, 83.6, 91.8, 100.0, 108.2, 116.4];
+        const chronologicalMapping = [0, 1, 2, 3, 4, 5, 6, 7];
+        const ARC_STROKE_WIDTH = 5.0;
+        const BORDER_STROKE_WIDTH = ARC_STROKE_WIDTH + 2; // 7px
+
+        const radToDeg = (rad) => (rad * 180 / Math.PI);
+                const degToRad = (deg) => (deg * Math.PI / 180);
+                const msToKts = (ms) => ms * 1.94384;
+
+                // Chirurgico: Inserita la funzione vettoriale circolare con calcolo trigonometrico al volo per l'analisi dei trend meteo
+                function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now) {
+                    now = now || Date.now();
+                    const len = bufferArray.length;
+                    if (len === 0) return null;
+
+                    let sSin = 0, sCos = 0, count = 0;
+                    let newestTime = 0, oldestTime = 0;
+
+                    let pilotSin = 0, pilotCos = 0;
+                    const pilotSamples = Math.min(len, 15);
+                    for (let i = len - 1; i >= len - pilotSamples; i--) {
+                        const val = bufferArray[i].val;
+                        pilotSin += Math.sin(val);
+                        pilotCos += Math.cos(val);
+                    }
+                    const pilotRad = Math.atan2(pilotSin, pilotCos);
+                    const limitRad = (CONFIG.averaging.stabilityBreakout || 15) * (Math.PI / 180);
+
+                    for (let i = len - 1; i >= 0; i--) {
+                        const item = bufferArray[i];
+                        if ((now - item.time) > windowMs) break;
+
+                        const itemVal = item.val;
+                        const itemSin = Math.sin(itemVal);
+                        const itemCos = Math.cos(itemVal);
+
+                        let diffRad = Math.atan2(Math.sin(itemVal - pilotRad), Math.cos(itemVal - pilotRad));
+                        let finalSin, finalCos;
+
+                        if (Math.abs(diffRad) > limitRad) {
+                            const clampedDiff = Math.sign(diffRad) * limitRad;
+                            const clampedRad = pilotRad + clampedDiff;
+                            finalSin = Math.sin(clampedRad);
+                            finalCos = Math.cos(clampedRad);
+                        } else {
+                            finalSin = itemSin;
+                            finalCos = itemCos;
+                        }
+
+                        sSin += finalSin;
+                        sCos += finalCos;
+
+                        if (count === 0) newestTime = item.time;
+                        oldestTime = item.time;
+                        count++;
+                    }
+
+                    if (count === 0) return null;
+
+                    const R = Math.hypot(sSin, sCos) / count;
+                    const avgRad = Math.atan2(sSin, sCos);
+                    const finalVal = signed ? avgRad : (avgRad + Math.PI * 2) % (Math.PI * 2);
+                    const historyDuration = (count > 2) ? (newestTime - oldestTime) : 0;
+                    const safeR = Math.max(R, 1e-9);
+
+                    return {
+                        val: finalVal,
+                        stable: historyDuration > 10000 && R > (CONFIG.averaging.stabilityThreshold || 0.95),
+                        dev: (R < 1) ? Math.round(Math.sqrt(-2 * Math.log(safeR)) * (180 / Math.PI)) : 0,
+                        samples: count
+                    };
+                }
+
+                function polarToCartesian(centerX, centerY, radius, angleInDegrees) {
+            const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
+            return {
+                x: centerX + (radius * Math.cos(angleInRadians)),
+                y: centerY + (radius * Math.sin(angleInRadians))
+            };
+        }
+
+        function describeArc(centerX, centerY, radius, startAngle, endAngle) {
+            const start = polarToCartesian(centerX, centerY, radius, endAngle);
+            const end = polarToCartesian(centerX, centerY, radius, startAngle);
+
+            let arcSweep = endAngle - startAngle;
+            if (arcSweep < 0) arcSweep += 360;
+
+            const largeArcFlag = arcSweep <= 180 ? "0" : "1";
+
+            return [
+                "M", start.x, start.y,
+                "A", radius, radius, 0, largeArcFlag, 0, end.x, end.y
+            ].join(" ");
+        }
+
+        // --- 2. GESTIONE SEGNALI IN TEMPO REALE ---
+                function setDebugText(id, text) {
+                    const el = document.getElementById(id);
+                    if (el) el.innerText = text;
+                }
+
+                function processIncomingDelta(path, val, source, timeMs) {
+                    const now = timeMs || Date.now();
+                    store.timestamps[path] = now;
+                    store.raw[path] = val;
+
+                    if (path === 'navigation.speedThroughWater') setDebugText('debug-stw', msToKts(val).toFixed(1));
+                    else if (path === 'navigation.speedOverGround') setDebugText('debug-sog', msToKts(val).toFixed(1));
+                    else if (path === 'navigation.headingTrue') setDebugText('debug-hdg', Math.round(radToDeg(val)) + '°');
+                    else if (path === 'navigation.courseOverGroundTrue') setDebugText('debug-cog', Math.round(radToDeg(val)) + '°');
+                    else if (path === 'environment.wind.speedApparent') setDebugText('debug-aws', msToKts(val).toFixed(1));
+                    else if (path === 'environment.wind.angleApparent') setDebugText('debug-awa', Math.round(radToDeg(val)) + '°');
+                    else if (path === 'navigation.position') {
+                        setDebugText('debug-gps', val.latitude.toFixed(4) + '; ' + val.longitude.toFixed(4));
+                    }
+
+                    const aws = store.raw["environment.wind.speedApparent"];
+                    const awa = store.raw["environment.wind.angleApparent"];
+                    if (aws !== undefined && awa !== undefined) {
+                        const stw = store.raw["navigation.speedThroughWater"] || 0;
+                        const awsKts = msToKts(aws);
+                        const stwKts = msToKts(stw);
+
+                        const tw_water_x = awsKts * Math.cos(awa) - stwKts;
+                        const tw_water_y = awsKts * Math.sin(awa);
+                        
+                        const tws = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
+                        const twa = Math.atan2(tw_water_y, tw_water_x);
+                        const hdg = store.raw["navigation.headingTrue"] || 0;
+                        const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
+
+                        setDebugText('debug-tws', tws.toFixed(1));
+                        setDebugText('debug-twa', Math.round(radToDeg(twa)) + '°');
+                        setDebugText('debug-twd', Math.round(radToDeg(twd)) + '°');
+
+                        // --- AGGIORNAMENTO DATI ISTANTANEI PER L'ELABORAZIONE ---
+                                        // Manteniamo aggiornato lo stato raw istantaneo in memoria per i calcoli del radar...
+                                        store.raw["environment.wind.directionTrue"] = twd;
+                                        store.raw["environment.wind.speedTrue"] = tws;
+
+                                        // NOTA: Non popoliamo più i buffer locali a 1Hz. Il presente dei 30 minuti (Anello 1)
+                                        // viene gestito e sincronizzato direttamente dal server tramite fetchConfigAndHistory().
+
+                                        renderRadar(); // Rinfresco grafico istantaneo reattivo per gli indicatori/trend
+                                    }
+                                }
+
+        // --- 3. RETE E SINCRONIZZAZIONE REST ---
+        function getApiUrl(path) {
+            if (window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                return `http://192.168.111.240:3000${path}`;
+            }
+            return path;
+        }
+
+        async function fetchConfigAndHistory() {
+            try {
+                const configRes = await fetch(getApiUrl('/rotevista-config'));
+                if (configRes.ok) {
+                    const cfg = await configRes.json();
+                    if (cfg.graphs) {
+                        CONFIG.graphs = cfg.graphs;
+                        REEF1 = cfg.graphs.reef1 || 18;
+                        REEF2 = cfg.graphs.reef2 || 24;
+                        REEF3 = REEF2 + (REEF2 - REEF1);
+                        
+                        document.getElementById('debug-r1').innerText = REEF1;
+                        document.getElementById('debug-r2').innerText = REEF2;
+                        document.getElementById('debug-r3').innerText = REEF3;
+                    }
+                }
+
+                const historyRes = await fetch(getApiUrl('/rotevista-history'));
+                                if (historyRes.ok) {
+                                    const data = await historyRes.json();
+                                    if (data.windRadarSlots) windRadarSlots = data.windRadarSlots;
+                                    if (data.futureForecast) {
+                                        futureForecast = data.futureForecast;
+                                        // Chirurgico: Formattazione testuale avanzata che estrae ed espone le raffiche (gusts) previste
+                                        const gustVal = futureForecast.gust ? futureForecast.gust.toFixed(1) : futureForecast.tws.toFixed(1);
+                                        document.getElementById('debug-future').innerText = `TWD: ${Math.round(radToDeg(futureForecast.twd))}°, TWS: ${futureForecast.tws.toFixed(1)} kts (Gusts: ${gustVal} kts)`;
+                                    }
+                                    if (data['navigation.position']) {
+                        const val = data['navigation.position'];
+                        document.getElementById('debug-gps').innerText = val.latitude.toFixed(4) + '; ' + val.longitude.toFixed(4);
+                    }
+                    
+                    // Sincronizzazione automatica allineata alle chiavi REST storiche reali del server
+                    if (data.twd) store.twdMinuteBuffer = data.twd;
+                    if (data.tws) store.twsMinuteBuffer = data.tws;
+                }
+            } catch (err) {
+                console.warn("⚠️ Errore sincronizzazione storico:", err);
+            }
+        }
+
+        function connect() {
+            let addr = window.location.host || "192.168.111.240:3000";
+            document.getElementById('debug-ip').innerText = addr;
+
+            socket = new WebSocket(`ws://${addr}/signalk/v1/stream?subscribe=self`);
+
+            socket.onopen = async () => {
+                document.getElementById('network-status-text').innerText = "ONLINE";
+                const badge = document.getElementById('debug-status');
+                badge.innerText = "ONLINE";
+                badge.className = "status-badge status-online";
+                reconnectDelay = 1000;
+
+                await fetchConfigAndHistory();
+                renderRadar();
+            };
+
+            socket.onmessage = (e) => {
+                const d = JSON.parse(e.data);
+                if (d.updates) {
+                    d.updates.forEach(u => {
+                        const timeMs = u.timestamp ? new Date(u.timestamp).getTime() : Date.now();
+                        let sourceLabel = u.$source || (u.source ? (u.source.label || "N2K") : "NMEA");
+                        if (u.values) {
+                            u.values.forEach(v => {
+                                // Mantiene l'aggiornamento dei testi di debug istantanei a 1Hz
+                                processIncomingDelta(v.path, v.value, sourceLabel, timeMs);
+                            });
+                        }
+                    });
+                }
+            };
+
+            socket.onclose = () => {
+                document.getElementById('network-status-text').innerText = "DISCONNESSO";
+                const badge = document.getElementById('debug-status');
+                badge.innerText = "OFFLINE";
+                badge.className = "status-badge status-offline";
+                setTimeout(connect, reconnectDelay);
+                reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+            };
+        }
+
+        // --- 4. MOTORE DI CALCOLO DELL'ANELLO 1 (Presente Mobile) ---
+                function calculateActive30mRing() {
+                    const now = Date.now();
+                    const start30m = now - 1800000;
+
+                    const twdRecent = store.twdMinuteBuffer.filter(p => p.time >= start30m);
+                    const twsRecent = store.twsMinuteBuffer.filter(p => p.time >= start30m);
+
+                    if (twdRecent.length === 0) return null;
+
+                    const twsVals = twsRecent.map(p => p.val).filter(v => isFinite(v));
+                    const maxTws = twsVals.length > 0 ? Math.max(...twsVals) : 0;
+                    const minTws = twsVals.length > 0 ? Math.min(...twsVals) : 0; // Chirurgico: Troviamo il vento minimo reale degli ultimi 30 minuti
+
+                    if (maxTws < CALM_THRESHOLD_KTS) {
+                        return { twsPeak: maxTws, twsMin: minTws, twdMin: 0, twdMax: 360, isCalm: true };
+                    }
+
+            let allAngles = [];
+            twdRecent.forEach(p => {
+                allAngles.push(p.val);
+                allAngles.push(p.min);
+                allAngles.push(p.max);
+            });
+
+            let sumSin = 0; let sumCos = 0;
+            allAngles.forEach(a => { sumSin += Math.sin(a); sumCos += Math.cos(a); });
+            const avgAngle = Math.atan2(sumSin, sumCos);
+            const finalAvg = (avgAngle + Math.PI * 2) % (Math.PI * 2);
+
+            let diffs = allAngles.map(a => {
+                let diff = a - finalAvg;
+                return Math.atan2(Math.sin(diff), Math.cos(diff));
+            });
+
+            diffs.sort((a, b) => a - b);
+            const trimCount = Math.floor(diffs.length * 0.05);
+            const activeDiffs = diffs.slice(trimCount, diffs.length - trimCount);
+            const finalDiffs = activeDiffs.length > 0 ? activeDiffs : diffs;
+
+            const minDiff = Math.min(...finalDiffs);
+            const maxDiff = Math.max(...finalDiffs);
+
+            const finalMinDeg = Math.round(radToDeg((finalAvg + minDiff + Math.PI * 2) % (Math.PI * 2)));
+                        const finalMaxDeg = Math.round(radToDeg((finalAvg + maxDiff + Math.PI * 2) % (Math.PI * 2)));
+
+                        return {
+                            twdMin: finalMinDeg,
+                            twdMax: finalMaxDeg,
+                            twsPeak: maxTws,
+                            twsMin: minTws, // Chirurgico: Ritorniamo anche il valore minimo per abilitare la sfumatura sull'Anello 1
+                            isCalm: false
+                        };
+                    }
+
+        // --- 5. MOTORE GRAFICO DI DISEGNO ---
+        function drawCompassTicks() {
+            const ticksGroup = document.getElementById('ticks');
+            ticksGroup.innerHTML = '';
+            for (let i = 0; i < 360; i += 10) {
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                const isMajor = (i % 30 === 0);
+                
+                line.setAttribute("x1", "200");
+                line.setAttribute("y1", "40");
+                line.setAttribute("x2", "200");
+                line.setAttribute("y2", isMajor ? "60" : "50");
+                
+                line.setAttribute("stroke", isMajor ? "#000000" : "#bbbbbb");
+                line.setAttribute("stroke-width", isMajor ? "2" : "1");
+                line.setAttribute("transform", `rotate(${i}, 200, 200)`);
+                ticksGroup.appendChild(line);
+            }
+        }
+
+        // --- SCALA COLORI PROSSIMITÀ DIURNA SPECIALE (8 STEP) ---
+        function getChordAlignedGradient(id, radius, tws, startAngle, endAngle) {
+            const startPt = polarToCartesian(200, 200, radius, endAngle);
+            const endPt = polarToCartesian(200, 200, radius, startAngle);
+
+            let stops = '';
+            const R1 = REEF1; const R2 = REEF2; const R3 = REEF3;
+            const colorEdge = 'rgb(240, 240, 240)';
+
+            // 1. BIANCO SOLIDO (0 - 40% di R1)
+            if (tws < R1 * 0.4) {
+                return { type: 'solid', color: '#ffffff' };
+            }
+            // 2. TRANSIZIONE BIANCO -> VERDE (40% - 60% di R1)
+            else if (tws >= R1 * 0.4 && tws < R1 * 0.6) {
+                stops = `
+                    <stop offset="0%" stop-color="#ffffff" />
+                    <stop offset="50%" stop-color="#00C851" />
+                    <stop offset="100%" stop-color="#ffffff" />
+                `;
+            }
+            // 3. VERDE SOLIDO (60% - 75% di R1)
+            else if (tws >= R1 * 0.6 && tws < R1 * 0.75) {
+                return { type: 'solid', color: '#00C851' };
+            }
+            // 4. TRANSIZIONE VERDE -> ARANCIONE (75% R1 - R1)
+            else if (tws >= R1 * 0.75 && tws < R1) {
+                stops = `
+                    <stop offset="0%" stop-color="#00C851" />
+                    <stop offset="50%" stop-color="#ff9800" />
+                    <stop offset="100%" stop-color="#00C851" />
+                `;
+            }
+            // 5. ARANCIONE SOLIDO (R1 -> Metà di R2)
+            else if (tws >= R1 && tws < R1 + (R2 - R1) * 0.5) {
+                return { type: 'solid', color: '#ff9800' };
+            }
+            // 6. TRANSIZIONE ARANCIONE -> ROSSO (Metà R2 -> R2) (Arancio Dorato -> Cremisi)
+            else if (tws >= R1 + (R2 - R1) * 0.5 && tws < R2) {
+                stops = `
+                    <stop offset="0%" stop-color="#ffaa00" /> <!-- Arancio Dorato Brillante sui bordi -->
+                    <stop offset="50%" stop-color="#d50000" /> <!-- Rosso Cremisi Intenso e saturo al centro -->
+                    <stop offset="100%" stop-color="#ffaa00" />
+                `;
+            }
+            // 7. ROSSO SOLIDO (R2 -> Metà di R3)
+            else if (tws >= R2 && tws < R2 + (R3 - R2) * 0.5) {
+                return { type: 'solid', color: '#ff3b30' };
+            }
+            // 8. TRANSIZIONE ROSSO -> VIOLA (Metà R3 -> R3)
+            else if (tws >= R2 + (R3 - R2) * 0.5 && tws < R3) {
+                stops = `
+                    <stop offset="0%" stop-color="#ff3b30" />
+                    <stop offset="50%" stop-color="#9c27b0" />
+                    <stop offset="100%" stop-color="#ff3b30" />
+                `;
+            }
+            // 9. VIOLA SOLIDO (Oltre R3)
+            else {
+                return { type: 'solid', color: '#9c27b0' };
+            }
+
+            const xml = `
+                <linearGradient id="${id}" x1="${startPt.x.toFixed(1)}" y1="${startPt.y.toFixed(1)}" x2="${endPt.x.toFixed(1)}" y2="${endPt.y.toFixed(1)}" gradientUnits="userSpaceOnUse">
+                    ${stops}
+                </linearGradient>
+            `;
+
+            return { type: 'gradient', xml: xml, url: `url(#${id})` };
+        }
+
+        // --- SISTEMA DI AGGIORNAMENTO DEL RADAR DI DIAGNOSTICA IN TEMPO REALE ---
+        function updateDebugPanel() {
+            // 1. Aggiorna la lista degli Slot storici precalcolati dal server ( windRadarSlots )
+            const slotsCol = document.getElementById('debug-slots-list');
+            if (slotsCol) {
+                if (windRadarSlots.length === 0) {
+                    slotsCol.innerHTML = "<span style='color:#999'>RAM vuota sul server. In attesa del primo scatto orologio a :00 o :30...</span>";
+                } else {
+                    slotsCol.innerHTML = windRadarSlots.map(s => {
+                        const timeStr = new Date(s.timestamp).toLocaleTimeString();
+                        const minDeg = Math.round(radToDeg(s.twdMin));
+                        const maxDeg = Math.round(radToDeg(s.twdMax));
+                        return `<div>• ${timeStr}: TWD ${minDeg}°-${maxDeg}°, TWS Peak ${s.twsPeak.toFixed(1)}kn</div>`;
+                    }).join('');
+                }
+            }
+
+            // 2. Aggiorna lo stato dei minuti del presente accumulati in tempo reale ( per l'Anello 1 )
+            const bufferCol = document.getElementById('debug-buffer-list');
+            if (bufferCol) {
+                if (store.twdMinuteBuffer.length === 0) {
+                    bufferCol.innerHTML = "<span style='color:#999'>In attesa di dati in streaming da Signal K...</span>";
+                } else {
+                    const start30m = Date.now() - 1800000;
+                    const twdRecent = store.twdMinuteBuffer.filter(p => p.time >= start30m);
+                    
+                    bufferCol.innerHTML = `<div>Buffer size: <strong>${twdRecent.length}/30 min</strong> attivi</div>` +
+                        twdRecent.slice(-5).map(p => {
+                            const timeStr = new Date(p.time).toLocaleTimeString();
+                            const val = Math.round(radToDeg(p.val));
+                            const min = Math.round(radToDeg(p.min));
+                            const max = Math.round(radToDeg(p.max));
+                            return `<div>• ${timeStr}: Avg ${val}°, Range ${min}°-${max}°</div>`;
+                        }).join('');
+                }
+            }
+        }
+
+        function renderRadar() {
+            const ringsContainer = document.getElementById('radar-rings');
+            const defsContainer = document.getElementById('radar-gradients');
+            
+            defsContainer.innerHTML = `
+                <clipPath id="boat-clip"><circle cx="200" cy="200" r="50" /></clipPath>
+                <linearGradient id="axiom-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#333333;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#999999;stop-opacity:1" />
+                </linearGradient>
+                <filter id="center-glow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#aaaaaa" flood-opacity="0.5" />
+                </filter>
+            `;
+            ringsContainer.innerHTML = '';
+
+            // Imposta dinamicamente i raggi in base a X per renderli scalabili
+            const oraOrbit = document.getElementById('ora-orbit');
+            if (oraOrbit) oraOrbit.setAttribute("r", ringRadii[1]);
+
+            const now = Date.now();
+            const current30mSlot = Math.floor(now / 1800000) * 1800000;
+
+            const radarDataList = [];
+
+            // 1. ANELLO 0 (Centro - Previsione Futura Open-Meteo)
+                        if (futureForecast) {
+                            const twdDeg = Math.round(radToDeg(futureForecast.twd));
+                            radarDataList.push({
+                                // Chirurgico: Impostata una finta ampiezza di 40 gradi (+-20°) per rappresentare l'area di incertezza meteo
+                                twdMin: (twdDeg - 20 + 360) % 360,
+                                twdMax: (twdDeg + 20 + 360) % 360,
+                                twsPeak: futureForecast.tws,
+                                isFuture: true
+                            });
+                        } else {
+                radarDataList.push(null);
+            }
+
+            // 2. ANELLO 1 (Presente Mobile - Calcolato dal client in tempo reale)
+            const activeRing = calculateActive30mRing();
+            radarDataList.push(activeRing);
+
+            // 3. ANELLI da 2 a 7 (I 6 slot storici da 30 min passati salvati dal server, pari a 3 ore)
+                        for (let i = 1; i <= 6; i++) {
+                            const targetTimestamp = current30mSlot - (i * 1800000);
+                            const matchedSlot = windRadarSlots.find(s => s.timestamp === targetTimestamp);
+                            
+                            if (matchedSlot) {
+                                radarDataList.push({
+                                    twdMin: Math.round(radToDeg(matchedSlot.twdMin)),
+                                    twdMax: Math.round(radToDeg(matchedSlot.twdMax)),
+                                    twsPeak: matchedSlot.twsPeak,
+                                    // Chirurgico: Estraiamo il minimo storico con protezione di compatibilità se assente
+                                    twsMin: matchedSlot.twsMin !== undefined ? matchedSlot.twsMin : matchedSlot.twsPeak,
+                                    isCalm: matchedSlot.twsPeak < CALM_THRESHOLD_KTS
+                                });
+                            } else {
+                                radarDataList.push(null);
+                            }
+                        }
+
+            document.getElementById('debug-rings-count').innerText = radarDataList.filter(p => p !== null).length + "/8";
+
+            // Disegno effettivo degli archi
+            radarDataList.forEach((data, index) => {
+                if (!data) return;
+
+                const radius = ringRadii[index];
+                const gradId = `chord-gradient-${index}`;
+                
+                // Opacità sempre fissa a 1 per colore solido e brillante (BUG RISOLTO)
+                const opacityValue = 1;
+
+                // Caso A: Calma Piatta
+                if (data.isCalm || data.twsPeak < CALM_THRESHOLD_KTS) {
+                    const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    circle.setAttribute("cx", "200");
+                    circle.setAttribute("cy", "200");
+                    circle.setAttribute("r", radius);
+                    circle.setAttribute("fill", "none");
+                    circle.setAttribute("stroke", "#b0bec5");
+                    circle.setAttribute("stroke-width", "1.2");
+                    circle.setAttribute("stroke-dasharray", "4, 4");
+                    ringsContainer.appendChild(circle);
+                    return;
+                }
+
+                // Caso B: Arco Direzionale
+                                let strokeColor = '';
+                                
+                                // Chirurgico: Definita la funzione di colorazione universale basata sulle soglie dei Reef di bordo
+                                const getColorForSpeed = (tws) => {
+                                    const R1 = REEF1; const R2 = REEF2; const R3 = REEF3;
+                                    if (tws < R1 * 0.4) return '#ffffff'; // Bianco (Calma)
+                                    if (tws < R1 * 0.75) return '#00C851'; // Verde (Regolare)
+                                    if (tws < R1) return '#ff9800'; // Arancio (1° Reef Alert)
+                                    if (tws < R2) return '#ffaa00'; // Dorato (Transizione)
+                                    if (tws < R2 + (R3 - R2) * 0.5) return '#ff3b30'; // Rosso (2° Reef Alert)
+                                    return '#9c27b0'; // Viola (Storm / Temporale)
+                                };
+
+                                // Chirurgico: Estraiamo i limiti minimi e massimi dell'arco corrente
+                                // Se è la previsione, usiamo il vento medio e le raffiche di Open-Meteo, altrimenti i minimi e i picchi in RAM
+                                const baseTws = data.isFuture && futureForecast ? futureForecast.tws : (data.twsMin !== undefined ? data.twsMin : data.twsPeak);
+                                const peakTws = data.isFuture && futureForecast ? futureForecast.gust : data.twsPeak;
+
+                                const baseColor = getColorForSpeed(baseTws);
+                                const peakColor = getColorForSpeed(peakTws);
+
+                                if (baseColor !== peakColor) {
+                                    // Se c'è variabilità d'intensità (raffica), disegnamo il gradiente termico dinamico lungo l'arco (Min -> Max -> Min)
+                                    const startPt = polarToCartesian(200, 200, radius, data.twdMax);
+                                    const endPt = polarToCartesian(200, 200, radius, data.twdMin);
+                                    
+                                    const xml = `
+                                        <linearGradient id="${gradId}" x1="${startPt.x.toFixed(1)}" y1="${startPt.y.toFixed(1)}" x2="${endPt.x.toFixed(1)}" y2="${endPt.y.toFixed(1)}" gradientUnits="userSpaceOnUse">
+                                            <stop offset="0%" stop-color="${baseColor}" />
+                                            <stop offset="50%" stop-color="${peakColor}" />
+                                            <stop offset="100%" stop-color="${baseColor}" />
+                                        </linearGradient>
+                                    `;
+                                    defsContainer.innerHTML += xml;
+                                    strokeColor = `url(#${gradId})`;
+                                } else {
+                                    // Se il vento è costante (base e picco ricadono nella stessa fascia), usiamo il colore solido puro
+                                    strokeColor = baseColor;
+                                }
+
+                                const pathData = describeArc(200, 200, radius, data.twdMin, data.twdMax);
+
+                                // Chirurgico: Se è l'anello futuro (isFuture), non disegniamo il bordo nero per evitare artefatti "a doppia bolla"
+                                if (!data.isFuture) {
+                                    const borderPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                                    borderPath.setAttribute("d", pathData);
+                                    borderPath.setAttribute("fill", "none");
+                                    borderPath.setAttribute("stroke", "#000000");
+                                    borderPath.setAttribute("stroke-width", BORDER_STROKE_WIDTH);
+                                    borderPath.setAttribute("stroke-linecap", "round");
+                                    borderPath.setAttribute("opacity", opacityValue);
+                                    ringsContainer.appendChild(borderPath);
+                                }
+
+                                const mainPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                                mainPath.setAttribute("d", pathData);
+                                mainPath.setAttribute("fill", "none");
+                                mainPath.setAttribute("stroke", strokeColor);
+                                mainPath.setAttribute("stroke-width", ARC_STROKE_WIDTH);
+                                mainPath.setAttribute("stroke-linecap", "round");
+                                // Chirurgico: Per l'anello futuro, usiamo un'opacità morbida al 50% (0.5) continua (senza tratteggio) per un effetto "glowing" pulitissimo
+                                                                mainPath.setAttribute("opacity", data.isFuture ? "0.5" : opacityValue);
+                                                                mainPath.id = data.isFuture ? "" : (index === 1 ? "active-present-arc" : ""); // Identifichiamo l'Anello 1 per calcoli geometrici
+                                                                ringsContainer.appendChild(mainPath);
+                                            });
+
+                                            // --- Chirurgico: Motore di calcolo e posizionamento LED dinamici sulle punte dell'Anello 1 ---
+                                            if (activeRing && !activeRing.isCalm) {
+                                                const twdNow = getCircularAverageFromBuffer(store.twdMinuteBuffer, 60000, false, now); // 1 minuto fisso
+                                                const isNavigating = (store.raw["navigation.speedThroughWater"] || 0) > 0.25 || (store.raw["navigation.speedOverGround"] || 0) > 0.25;
+                                                const strategicWindowMs = (isNavigating ? 15 : 60) * 60000;
+                                                const twdRef = getCircularAverageFromBuffer(store.twdMinuteBuffer, strategicWindowMs, false, now);
+
+                                                if (twdNow && twdRef) {
+                                                    let deltaMeteo = radToDeg((twdNow.val - twdRef.val + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+                                                    
+                                                    if (Math.abs(deltaMeteo) > 6.0) {
+                                                        const isSouth = store.raw["navigation.position"] && store.raw["navigation.position"].latitude < 0;
+                                                        let meteoColor = (!isSouth) ? (deltaMeteo < 0 ? "#00C851" : "#ff3b30") : (deltaMeteo > 0 ? "#00C851" : "#ff3b30");
+                                                        
+                                                        // Calcoliamo la posizione geometrica esatta delle due punte dell'Anello 1 (raggio 67.2px)
+                                                        const radiusAnello1 = ringRadii[1];
+                                                        const angleTarget = deltaMeteo > 0 ? activeRing.twdMax : activeRing.twdMin; // Estremità destra (CW) o sinistra (CCW)
+                                                        const pt = polarToCartesian(200, 200, radiusAnello1, angleTarget);
+
+                                                        // Disegniamo il LED lampeggiante esattamente sulla punta dell'arco
+                                                        const led = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                                                        led.setAttribute("cx", pt.x.toFixed(1));
+                                                        led.setAttribute("cy", pt.y.toFixed(1));
+                                                        led.setAttribute("r", "5.5"); // Leggermente più spesso dell'arco per renderlo evidente
+                                                        led.setAttribute("fill", meteoColor);
+                                                        led.setAttribute("class", "is-trending"); // Attiva il lampeggio CSS
+                                                        led.setAttribute("filter", "url(#center-glow)"); // Aggiunge un leggero bagliore visivo
+                                                        ringsContainer.appendChild(led);
+                                                    }
+                                                }
+                                            }
+
+                                            // Aggiorna il pannello di debug ad ogni ridisegno del radar
+                                            updateDebugPanel();
+                                        }
+
+        // --- 6. CICLO DI VITA E AVVIO ---
+                function init() {
+                    drawCompassTicks();
+                    connect();
+                    
+                    // Sincronizzazione strategica: scarica lo storico consolidato dal server ogni 15 secondi e ridisegna
+                    setInterval(async () => {
+                        await fetchConfigAndHistory();
+                        renderRadar();
+                    }, 15000);
+                }
+            window.onload = init;
+    </script>
+</body>
+</html>
