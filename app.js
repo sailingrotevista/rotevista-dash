@@ -23,7 +23,7 @@ let CONFIG = {
         minSpeed: 0.5,
         stabilityBreakout: 15
     },
-    graphs: { reef1: 15, reef2: 20, historyMinutes: 10, samples: 60 },
+    graphs: { reef1: 5, reef2: 10, historyMinutes: 10, samples: 60 },
     scales: {
         stw: { stdMax: 4, hercSpan: 2, step: 1 },
         sog: { stdMax: 4, hercSpan: 2, step: 1 },

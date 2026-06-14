@@ -179,25 +179,30 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     const colDepth   = "#0088cc", colStw = "#00C851", colSog = "#ffbb33", colVmg = "#00b8d4";
 
     const getColorProps = (val) => {
-        const baseStroke = isFocused ? "4.2" : "1.6";
-        const alertStroke = isFocused ? "4.8" : "2.2";
-        const warnStroke = isFocused ? "4.4" : "1.8";
+    const baseStroke = isFocused ? "4.2" : "1.6";
+    const alertStroke = isFocused ? "4.8" : "2.2";
+    const warnStroke = isFocused ? "4.4" : "1.8";
 
-        let color = colTws, opacity = "0.15", stroke = baseStroke;
-        if (isTws) {
-            const baseWind = (displayModeTws === 'AWS') ? colAws : colTws;
-            if (val >= CONFIG.graphs.reef2) { color = colDanger; opacity = "0.55"; stroke = alertStroke; }
-            else if (val >= CONFIG.graphs.reef1) { color = colWarning; opacity = "0.45"; stroke = warnStroke; }
-            else color = baseWind;
-        } else if (isDepth) {
-            if (val < CONFIG.alarms.depthDanger) { color = colDanger; opacity = "0.55"; stroke = alertStroke; }
-            else if (val < CONFIG.alarms.depthWarning) { color = colWarning; opacity = "0.45"; stroke = warnStroke; }
-            else color = colDepth;
-        } else {
-            if (id === 'stw-graph') color = colStw;
-            else if (id === 'sog-graph') color = (displayModeSog === 'VMG') ? colVmg : colSog;
-        }
-        return { color, opacity, stroke };
+    let color = colTws, opacity = "0.15", stroke = baseStroke;
+    if (isTws) {
+        const baseWind = (displayModeTws === 'AWS') ? colAws : colTws;
+        const r1 = CONFIG.graphs.reef1 || 15;
+        const r2 = CONFIG.graphs.reef2 || 20;
+        const r3 = r2 + (r2 - r1); // Calcolo sintetico del 3° Terzarolo (Storm)
+
+        if (val >= r3) { color = "#9c27b0"; opacity = "0.65"; stroke = alertStroke; } // Viola (Tempesta / 3a Mano)
+        else if (val >= r2) { color = colDanger; opacity = "0.55"; stroke = alertStroke; } // Rosso (Pericolo / 2a Mano)
+        else if (val >= r1) { color = colWarning; opacity = "0.45"; stroke = warnStroke; } // Arancione (Allerta / 1a Mano)
+        else color = baseWind;
+    } else if (isDepth) {
+        if (val < CONFIG.alarms.depthDanger) { color = colDanger; opacity = "0.55"; stroke = alertStroke; }
+        else if (val < CONFIG.alarms.depthWarning) { color = colWarning; opacity = "0.45"; stroke = warnStroke; }
+        else color = colDepth;
+    } else {
+        if (id === 'stw-graph') color = colStw;
+        else if (id === 'sog-graph') color = (displayModeSog === 'VMG') ? colVmg : colSog;
+    }
+    return { color, opacity, stroke };
     };
 
     let grids = "";
