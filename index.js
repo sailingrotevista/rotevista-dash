@@ -85,24 +85,24 @@ module.exports = function (app) {
       app.debug('Public API endpoints registered at /rotevista-config and /rotevista-history');
     }
 
-    // 3. Iscrizione ai dati dei sensori di bordo tramite Signal K
-    const localSubscription = {
-      context: 'vessels.self',
-      subscribe: [
-        { path: 'navigation.position' }, // Chirurgico: Aggiunto l'ascolto della posizione GPS per abilitare le previsioni
-        { path: 'navigation.speedThroughWater' },
-        { path: 'navigation.speedOverGround' },
-        { path: 'environment.depth.belowTransducer' },
-        { path: 'environment.wind.speedApparent' },
-        { path: 'environment.wind.angleApparent' },
-        { path: 'environment.wind.speedTrue' },      // Aggiunto chirurgicamente
-        { path: 'environment.wind.directionTrue' },  // Aggiunto chirurgicamente
-        { path: 'navigation.headingTrue' },
-        { path: 'navigation.headingMagnetic' },
-        { path: 'navigation.magneticVariation' },
-        { path: 'navigation.courseOverGroundTrue' }
-      ]
-    };
+  // 3. Iscrizione ai dati dei sensori di bordo tramite Signal K (Ottimizzata a 1Hz)
+      const localSubscription = {
+        context: 'vessels.self',
+        subscribe: [
+          { path: 'navigation.position', minPeriod: 1000 },
+          { path: 'navigation.speedThroughWater', minPeriod: 1000 },
+          { path: 'navigation.speedOverGround', minPeriod: 1000 },
+          { path: 'environment.depth.belowTransducer', minPeriod: 1000 },
+          { path: 'environment.wind.speedApparent', minPeriod: 1000 },
+          { path: 'environment.wind.angleApparent', minPeriod: 1000 },
+          { path: 'environment.wind.speedTrue', minPeriod: 1000 },
+          { path: 'environment.wind.directionTrue', minPeriod: 1000 },
+          { path: 'navigation.headingTrue', minPeriod: 1000 },
+          { path: 'navigation.headingMagnetic', minPeriod: 1000 },
+          { path: 'navigation.magneticVariation', minPeriod: 1000 },
+          { path: 'navigation.courseOverGroundTrue', minPeriod: 1000 }
+        ]
+      };
 
     app.subscriptionmanager.subscribe(
       localSubscription,
@@ -145,7 +145,7 @@ module.exports = function (app) {
         if (val === null || val === undefined) return;
         
         const now = Date.now();
-        const alpha = 0.20; // Coefficiente di smoothing (Filtro passa-basso: reattività ~2 secondi)
+        const alpha = 1.0; // Passa-tutto istantaneo (i sensori di bordo ST60+ sono già calibrati con damping hardware a 12)
 
         // FILTRO PASSA-BASSO CONTINUO IN TEMPO REALE (Previene gli Spike prima della storicizzazione)
         if (path === 'navigation.position') {
