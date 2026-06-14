@@ -47,6 +47,7 @@ let displayModeTws = 'TWS';
 let activeInstrument = 'gauge'; // Modalità di default all'avvio: 'gauge' (analogico) o 'radar' (storico)
 let socket, renderInterval, simInterval;
 let lastAvgUIUpdate = 0; // Chirurgico: Rimosse audioCtx e lastAlarmTime poiché sono già dichiarate in utils.js
+const lastPathProcessTimes = {}; // Registro dei timestamp per limitazione di frequenza client-side a 1Hz
 
 let rotationTrend = 0, meteoTrend = 0;
 let lastShortAvgVal = null, lastInstantTwa = null;
@@ -320,9 +321,25 @@ function processIncomingData(path, val, source, timeMs) {
         }
     }
 
+    // Aggiorna sempre lo stato raw istantaneo all'ultimo millisecondo per massimizzare la precisione digitale
     store.timestamps[path] = now;
     store.raw[path] = val;
 
+    // Le coordinate GPS e la posizione non sono soggette alla limitazione a 1Hz
+    if (path === "navigation.position") {
+        return; // Esce subito (non richiede calcoli trigonometrici o inserimenti in smoothBuf/longBuf)
+    }
+
+    // LIMITATORE DI FREQUENZA (RATE LIMITER) CLIENT-SIDE A 1HZ PER PERCORSO ATTIVO:
+    // Evita di eseguire calcoli trigonometrici, allocare oggetti in memoria dinamica
+    // e popolare i buffer smoothBuf/longBuf decine di volte al secondo per singolo sensore.
+    if (!lastPathProcessTimes[path]) lastPathProcessTimes[path] = 0;
+    if (now - lastPathProcessTimes[path] < 1000) {
+        return; // Esce subito risparmiando cicli di calcolo del browser e batteria del tablet
+    }
+    lastPathProcessTimes[path] = now;
+
+    // Da qui in poi, l'inserimento nei buffer fisici avviene rigorosamente a 1Hz:
     if (path === "environment.wind.angleApparent") {
         safePush(store.smoothBuf.awa, val, now);
         safePush(store.longBuf.awa, val, now);
