@@ -26,76 +26,128 @@
         button.stop { background: #f44336; }
         button.secondary { background: #555; }
         button.action { background: #2196F3; } /* Tasto Copia Blu */
+        
+        button:disabled {
+            background: #2a2a2a !important;
+            color: #666 !important;
+            cursor: not-allowed !important;
+            border-color: #333 !important;
+        }
+
         #status { font-weight: bold; color: #f44336; margin-left: auto; }
         #status.online { color: #4CAF50; }
+        #status.scanning { color: #ff9800; }
         
-        /* Pannello dei filtri avanzati */
+        /* GRIGLIA WORKSPACE: AFFIANCA SELEZIONE E TABELLA VALORI */
+        .workspace-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.3fr;
+            gap: 15px;
+            flex-shrink: 0;
+            margin-bottom: 15px;
+            min-height: 0;
+        }
+
+        /* COLONNA SINISTRA: Pannello dei filtri ad albero */
         .filter-container {
             background: #1a1a1a;
             border: 1px solid #333;
             border-radius: 8px;
             padding: 15px;
-            margin-bottom: 20px;
-            flex-shrink: 0;
+            box-sizing: border-box;
+            height: 380px; /* Altezza fissa allineata alla tabella di destra */
+            display: flex;
+            flex-direction: column;
         }
         .presets {
             margin: 10px 0;
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
+            flex-shrink: 0;
         }
-        .checkbox-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-            gap: 8px;
-            margin-top: 12px;
+        
+        /* STRUTTURA AD ALBERO NIDIFICATO INTERNO */
+        .trees-container {
+            margin-top: 15px;
             border-top: 1px solid #222;
-            padding-top: 10px;
+            padding-top: 15px;
+            flex-grow: 1; /* Occupa tutto lo spazio interno rimasto nel contenitore fisso */
+            overflow-y: auto;
+            display: block;
         }
-        .checkbox-item {
+        .tree-node {
+            display: flex;
+            flex-direction: column;
+            margin-left: 18px;
+        }
+        .tree-node.root-level {
+            margin-left: 0;
+            margin-bottom: 6px;
+            background: #0d0d0d;
+            border: 1px solid #222;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .node-row {
             display: flex;
             align-items: center;
             gap: 8px;
+            padding: 6px 10px;
+            font-size: 12px;
+            user-select: none;
+        }
+        .root-level > .node-row {
+            background: #181818;
+            font-weight: bold;
+            color: #4CAF50;
+            border-bottom: 1px solid #222;
+        }
+        .node-toggle {
+            cursor: pointer;
+            color: #888;
+            font-weight: bold;
+            width: 24px;
+            text-align: center;
             font-size: 11px;
+        }
+        .node-toggle:hover {
+            color: #4CAF50;
+        }
+        .node-label {
             color: #ccc;
-            cursor: pointer;
+            font-size: 11px;
         }
-        .checkbox-item input {
-            cursor: pointer;
-        }
-
-        /* Layout a due pannelli (Sopra Tabella, Sotto Log) */
-        .panels-container {
+        .node-children {
             display: flex;
             flex-direction: column;
-            gap: 20px;
-            flex-grow: 1;
-            min-height: 0; /* Essenziale per far funzionare lo scroll nel flexbox */
+            border-left: 1px dashed #2c2c2c;
+            margin-left: 11px;
+            padding-left: 5px;
         }
 
-        /* Pannello Superiore: Tabella Valori Attuali */
+        /* COLONNA DESTRA: Pannello Tabella Valori Attuali */
         .summary-panel {
-            flex: 0 0 auto;
             background: #1a1a1a;
             border: 1px solid #333;
             border-radius: 8px;
-            padding: 10px;
-            overflow-x: auto;
-            max-height: 250px;
+            padding: 15px;
+            box-sizing: border-box;
+            height: 380px; /* Altezza fissa allineata alla selezione di sinistra */
             overflow-y: auto;
         }
         table {
             width: 100%;
             border-collapse: collapse;
             font-size: 13px;
-            table-layout: fixed; /* BLOCCO RIGIDO DELLE COLONNE (Evita ridimensionamenti continui) */
+            table-layout: fixed; /* BLOCCO RIGIDO DELLE COLONNE */
         }
         th, td {
             border: 1px solid #333;
             padding: 6px 8px;
             text-align: left;
             overflow: hidden;
-            word-wrap: break-word; /* Forza l'andamento a capo dei testi lunghi dentro le colonne fisse */
+            word-wrap: break-word; /* Forza l'andamento a capo dei testi lunghi */
         }
         th { background-color: #222; color: #aaa; text-transform: uppercase; position: sticky; top: 0; z-index: 10; }
         .val-cell { min-width: 120px; }
@@ -107,15 +159,15 @@
         .time { color: #90caf9; font-size: 11px; }
         .raw { color: #777; font-size: 10px; display: block; margin-top: 2px; }
 
-        /* Pannello Inferiore: Log Sequenziale in Formato Testo (simil-CSV) */
+        /* PANNELLO INFERIORE: Log Sequenziale in Formato Testo (Spazio flessibile rimanente) */
         .log-panel {
-            flex: 1 1 auto;
+            flex-grow: 1; /* Occupa tutto lo spazio verticale rimanente della finestra */
             background: #0a0a0a;
             border: 1px solid #333;
             border-radius: 8px;
             display: flex;
             flex-direction: column;
-            min-height: 200px;
+            min-height: 150px;
         }
         .log-header {
             background: #222;
@@ -164,36 +216,38 @@
     <div class="controls">
         <label>Server IP:</label>
         <input type="text" id="server-ip" value="192.168.111.240:3000">
-        <button id="btn-connect" onclick="toggleConnection()">Connetti</button>
+        <button id="btn-scan" onclick="startScan()">Scansiona Rete (10s)</button>
+        <button id="btn-listen" onclick="toggleListening()" class="secondary" disabled>Ascolta</button>
         <span id="status">DISCONNESSO</span>
     </div>
 
-    <!-- AREA FILTRI AVANZATA CON CHECKBOX E PRESET -->
-    <div class="filter-container">
-        <span style="font-weight: bold; color: #4CAF50; font-size: 13px;">Seleziona percorsi da scrivere nel Log CSV:</span>
-        <div class="presets">
-            <button class="secondary" onclick="applyPreset('all')">Seleziona Tutto</button>
-            <button class="secondary" style="background-color: #2c3e50;" onclick="applyPreset('twd')">Analisi Bussola Meteo (TWD/Vento/Rotta)</button>
-            <button class="secondary" style="background-color: #0088cc;" onclick="applyPreset('gps')">Solo GPS / Rotte</button>
-            <button class="secondary" onclick="applyPreset('none')">Deseleziona Tutto</button>
-        </div>
-        <div id="path-checkboxes" class="checkbox-grid">
-            <!-- Generate via JS -->
-        </div>
-    </div>
-
-    <div class="panels-container">
+    <!-- CONTENITORE PRINCIPALE DI LAVORO A DUE COLONNE -->
+    <div class="workspace-grid">
         
-        <!-- PANNELLO TABELLA RIASSUNTIVA -->
+        <!-- COLONNA SINISTRA: AREA FILTRI AVANZATA CON ALBERO GERARCHICO -->
+        <div class="filter-container">
+            <span style="font-weight: bold; color: #4CAF50; font-size: 13px;">Seleziona percorsi da scrivere nel Log CSV (Albero Gerarchico Completo):</span>
+            <div class="presets">
+                <button class="secondary" onclick="applyPreset('all')">Seleziona Tutto</button>
+                <button class="secondary" style="background-color: #2c3e50;" onclick="applyPreset('twd')">Analisi Bussola Meteo (TWD/Vento/Rotta)</button>
+                <button class="secondary" style="background-color: #0088cc;" onclick="applyPreset('gps')">Solo GPS / Rotte</button>
+                <button class="secondary" onclick="applyPreset('none')">Deseleziona Tutto</button>
+            </div>
+            <div id="path-trees-container" class="trees-container">
+                <!-- Categorie ed alberi gerarchici autogenerati dinamicamente via JS al termine della scansione -->
+            </div>
+        </div>
+
+        <!-- COLONNA DESTRA: PANNELLO TABELLA RIASSUNTIVA VALORI IN TEMPO REALE -->
         <div class="summary-panel">
             <table>
                 <thead>
                     <tr>
                         <!-- BLOCCO RIGIDO DELLE LARGHEZZE DELLE COLONNE -->
-                        <th width="25%">Path (Percorso)</th>
-                        <th width="31.5%">Valore Convertito</th>
-                        <th width="31.5%">Sorgente (Sensore - Dettagliato)</th>
-                        <th width="12%">Ultimo Ricevuto</th>
+                        <th width="30%">Path (Percorso)</th>
+                        <th width="33%">Valore Convertito</th>
+                        <th width="22%">Sorgente (Sensore - Dettagliato)</th>
+                        <th width="15%">Ultimo Ricevuto</th>
                     </tr>
                 </thead>
                 <tbody id="data-table">
@@ -202,56 +256,54 @@
             </table>
         </div>
 
-        <!-- PANNELLO LOG SEQUENZIALE (CSV) -->
-        <div class="log-panel">
-            <div class="log-header">
-                <span>Event Log CSV (Timestamp, Path, Value, Unit, Source, Spike)</span>
-                <div style="display: flex; align-items: center;">
-                    <span id="copy-notification">Copiato!</span>
-                    <button class="action" onclick="copyLogCSV()" style="padding: 4px 10px; font-size: 11px; margin-right: 10px;">Copia CSV</button>
-                    <button class="secondary" onclick="clearLog()" style="padding: 4px 10px; font-size: 11px;">Pulisci</button>
-                </div>
-            </div>
-            
-            <textarea id="log-container" readonly></textarea>
-        </div>
+    </div>
 
+    <!-- PANNELLO LOG SEQUENZIALE (CSV) - POSIZIONATO A TUTTA LARGHEZZA SUL FONDO -->
+    <div class="log-panel">
+        <div class="log-header">
+            <span>Event Log CSV (Timestamp, Path, Value, Unit, Source, Spike)</span>
+            <div style="display: flex; align-items: center;">
+                <span id="copy-notification">Copiato!</span>
+                <button class="action" onclick="copyLogCSV()" style="padding: 4px 10px; font-size: 11px; margin-right: 10px;">Copia CSV</button>
+                <button class="secondary" onclick="clearLog()" style="padding: 4px 10px; font-size: 11px;">Pulisci</button>
+            </div>
+        </div>
+        
+        <textarea id="log-container" readonly></textarea>
     </div>
 
     <script>
-        const pathsToWatch = [
-            "navigation.position",
-            "navigation.position.latitude",
-            "navigation.position.longitude",
-            "navigation.speedThroughWater",
-            "navigation.speedOverGround",
-            "navigation.headingTrue",
-            "navigation.courseOverGroundTrue",
-            "environment.wind.speedApparent",
-            "environment.wind.angleApparent",
-            "environment.wind.speedTrue",
-            "environment.wind.angleTrueWater",
-            "environment.wind.directionTrue",
-            "environment.depth.belowTransducer"
-        ];
+        // Registro dello stato dati e del database ad albero
+        const registeredPaths = new Set();
+        let pathTree = {}; // Albero gerarchico nidificato in memoria RAM
 
         let socket = null;
         let logLinesArray = [];
         const MAX_LOG_LINES = 1000;
         
+        // Stato del sistema
+        let isScanning = false;
+        let isListening = false;
+        let scanTimer = null;
+        let scanCountdown = 10;
+
         let lastValues = { "navigation.speedOverGround": 0, "navigation.courseOverGroundTrue": 0 };
 
         const radToDeg = (rad) => rad * (180 / Math.PI);
         const msToKts = (ms) => ms * 1.94384;
 
-        // Inizializza la Tabella Riassuntiva e genera le Checkbox
-        const tbody = document.getElementById('data-table');
-        const checkboxGrid = document.getElementById('path-checkboxes');
+        const csvHeader = "Timestamp,Path,Value,Unit,Source,IsSpike";
+        document.getElementById('log-container').value = csvHeader + "\n";
 
-        pathsToWatch.forEach(path => {
+        // Inserisce e mappa dinamicamente un nuovo percorso nella tabella e nella struttura ad albero logica
+        function registerNewPath(path) {
+            if (registeredPaths.has(path)) return;
+            registeredPaths.add(path);
+
             const safeId = path.replace(/\./g, '-');
 
-            // 1. Creazione righe Tabella
+            // 1. Creazione dinamica della riga nella tabella riassuntiva
+            const tbody = document.getElementById('data-table');
             const tr = document.createElement('tr');
             tr.id = `row-${safeId}`;
             tr.innerHTML = `
@@ -262,24 +314,157 @@
             `;
             tbody.appendChild(tr);
 
-            // 2. Creazione Checkbox
-            const label = document.createElement('label');
-            label.className = 'checkbox-item';
-            label.innerHTML = `
-                <input type="checkbox" id="chk-${safeId}" checked>
-                <span>${path}</span>
-            `;
-            checkboxGrid.appendChild(label);
+            // 2. Costruzione della struttura gerarchica in memoria (RAM) per la generazione successiva
+            const parts = path.split('.');
+            let current = pathTree;
+            parts.forEach((part, index) => {
+                if (!current[part]) {
+                    current[part] = {
+                        _name: part,
+                        _fullPath: parts.slice(0, index + 1).join('.'),
+                        _isLeaf: (index === parts.length - 1),
+                        _children: {}
+                    };
+                }
+                current = current[part]._children;
+            });
+        }
+
+        // Disegna ricorsivamente l'albero gerarchico nel DOM (Lazy Rendering)
+        function renderTreeDOM(node, container, isRoot = false) {
+            const keys = Object.keys(node).sort();
+            
+            keys.forEach(key => {
+                const item = node[key];
+                const hasChildren = Object.keys(item._children).length > 0;
+                
+                const nodeDiv = document.createElement('div');
+                nodeDiv.className = `tree-node ${isRoot ? 'root-level' : ''} ${hasChildren ? 'tree-branch' : 'tree-leaf'}`;
+                
+                const rowDiv = document.createElement('div');
+                rowDiv.className = 'node-row';
+                
+                // 1. Pulsante Espandi/Collassa per i rami dotati di figli
+                if (hasChildren) {
+                    const toggleSpan = document.createElement('span');
+                    toggleSpan.className = 'node-toggle';
+                    toggleSpan.innerText = '[-]';
+                    toggleSpan.onclick = (e) => {
+                        e.stopPropagation();
+                        const childContainer = nodeDiv.querySelector(':scope > .node-children');
+                        if (childContainer.style.display === 'none') {
+                            childContainer.style.display = 'flex';
+                            toggleSpan.innerText = '[-]';
+                        } else {
+                            childContainer.style.display = 'none';
+                            toggleSpan.innerText = '[+]';
+                        }
+                    };
+                    rowDiv.appendChild(toggleSpan);
+                } else {
+                    const spacer = document.createElement('span');
+                    spacer.className = 'node-toggle';
+                    rowDiv.appendChild(spacer);
+                }
+                
+                // 2. Checkbox di selezione
+                const chk = document.createElement('input');
+                chk.type = 'checkbox';
+                chk.checked = true;
+                chk.className = 'node-checkbox';
+                
+                if (!hasChildren) {
+                    const safeId = item._fullPath.replace(/\./g, '-');
+                    chk.id = `chk-${safeId}`;
+                    chk.dataset.path = item._fullPath;
+                } else {
+                    const category = item._fullPath;
+                    chk.id = `master-chk-${category.replace(/\./g, '-')}`;
+                    chk.dataset.branchCategory = category;
+                }
+                
+                rowDiv.appendChild(chk);
+                
+                // 3. Etichetta del Nodo
+                const labelSpan = document.createElement('span');
+                labelSpan.className = 'node-label';
+                labelSpan.innerText = key;
+                rowDiv.appendChild(labelSpan);
+                
+                nodeDiv.appendChild(rowDiv);
+                
+                // 4. Creazione ricorsiva dei nodi figli (Sotto-Albero)
+                if (hasChildren) {
+                    const childrenDiv = document.createElement('div');
+                    childrenDiv.className = 'node-children';
+                    renderTreeDOM(item._children, childrenDiv, false);
+                    nodeDiv.appendChild(childrenDiv);
+                }
+                
+                container.appendChild(nodeDiv);
+            });
+        }
+
+        // DELEGAZIONE DEGLI EVENTI SUL CONTENITORE: Gestisce lo scorrimento e la propagazione degli stati
+        document.getElementById('path-trees-container').addEventListener('change', (e) => {
+            const chk = e.target;
+            if (!chk || chk.type !== 'checkbox') return;
+
+            // 1. PROPAGAZIONE VERSO IL BASSO: Se clicchi un nodo padre, spunta/disattiva tutti i suoi discendenti
+            const nodeDiv = chk.closest('.tree-node');
+            if (nodeDiv) {
+                const childCheckboxes = nodeDiv.querySelectorAll('.node-checkbox');
+                childCheckboxes.forEach(c => {
+                    c.checked = chk.checked;
+                });
+            }
+
+            // 2. CASCATA VERSO L'ALTO: Ricalcola gli stati dei padri (incluso lo stato indeterminato "-")
+            updateAllTreeMasterCheckboxes();
+
+            // 3. FILTRAGGIO DINAMICO DELLA TABELLA: Aggiorna istantaneamente la visibilità dei valori
+            updateTableVisibility();
         });
 
-        const csvHeader = "Timestamp,Path,Value,Unit,Source,IsSpike";
-        document.getElementById('log-container').value = csvHeader + "\n";
+        // Aggiorna istantaneamente la visibilità dei valori della tabella in base alle spunte
+        function updateTableVisibility() {
+            registeredPaths.forEach(path => {
+                const safeId = path.replace(/\./g, '-');
+                const chk = document.getElementById(`chk-${safeId}`);
+                const row = document.getElementById(`row-${safeId}`);
+                
+                if (row) {
+                    // Durante la scansione mostriamo tutto. Fuori scansione mostriamo solo se la spunta corrispondente è attiva.
+                    if (isScanning || !chk || chk.checked) {
+                        row.style.display = ''; // Mostra (table-row)
+                    } else {
+                        row.style.display = 'none'; // Nasconde
+                    }
+                }
+            });
+        }
+
+        // Ricalcola ricorsivamente gli stati (Checked, Unchecked, Indeterminate) dal basso verso l'alto
+        function updateAllTreeMasterCheckboxes() {
+            const branchNodes = Array.from(document.querySelectorAll('.tree-branch')).reverse();
+            
+            branchNodes.forEach(branchNode => {
+                const masterCheckbox = branchNode.querySelector(':scope > .node-row > .node-checkbox');
+                if (!masterCheckbox) return;
+
+                const childCheckboxes = branchNode.querySelectorAll('.tree-leaf input[type="checkbox"]');
+                const checkedCount = Array.from(childCheckboxes).filter(c => c.checked).length;
+
+                masterCheckbox.checked = (checkedCount === childCheckboxes.length);
+                masterCheckbox.indeterminate = (checkedCount > 0 && checkedCount < childCheckboxes.length);
+            });
+        }
 
         // =========================================================
-        // PRESET RAPIDI DI SELEZIONE
+        // PRESET RAPIDI DI SELEZIONE (Mappati sulle foglie attive)
         // =========================================================
         function applyPreset(preset) {
-            pathsToWatch.forEach(path => {
+            registeredPaths.forEach(path => {
                 const safeId = path.replace(/\./g, '-');
                 const chk = document.getElementById(`chk-${safeId}`);
                 if (!chk) return;
@@ -289,15 +474,15 @@
                 } else if (preset === 'none') {
                     chk.checked = false;
                 } else if (preset === 'gps') {
-                    // Solo GPS, SOG e COG
                     const isGps = path.includes('position') || path === 'navigation.speedOverGround' || path === 'navigation.courseOverGroundTrue';
                     chk.checked = isGps;
                 } else if (preset === 'twd') {
-                    // Analisi strategica bussola vento ( Heading, COG, AWA, TWA, TWD, TWS, AWS )
-                    const isTwd = path.includes('wind') || path === 'navigation.headingTrue' || path === 'navigation.courseOverGroundTrue';
+                    const isTwd = path.includes('wind') || path === 'navigation.headingTrue' || path === 'navigation.courseOverGroundTrue' || path === 'navigation.headingMagnetic';
                     chk.checked = isTwd;
                 }
             });
+            updateAllTreeMasterCheckboxes();
+            updateTableVisibility(); // Sincronizza la tabella visiva al cambio di preset
         }
 
         // =========================================================
@@ -318,41 +503,74 @@
         }
 
         // =========================================================
-        // GESTIONE CONNESSIONE WEBSOCKET
+        // FASE 1: AVVIO SCANSIONE DI SCOPERTA (DISCOVERY - 10s)
         // =========================================================
-        function toggleConnection() {
-            const btn = document.getElementById('btn-connect');
+        function startScan() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+
+            // Pulisce l'albero logico e l'interfaccia prima del nuovo avvio
+            registeredPaths.clear();
+            pathTree = {};
+            document.getElementById('path-trees-container').innerHTML = '';
+            document.getElementById('data-table').innerHTML = '';
+
+            const btnScan = document.getElementById('btn-scan');
+            const btnListen = document.getElementById('btn-listen');
             const status = document.getElementById('status');
             const ip = document.getElementById('server-ip').value;
 
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.close();
-                btn.innerText = "Connetti";
-                btn.className = "";
-                status.innerText = "DISCONNESSO";
-                status.className = "";
-                return;
-            }
+            isScanning = true;
+            isListening = false;
+            scanCountdown = 10;
 
-            btn.innerText = "Disconnetti";
-            btn.className = "stop";
-            status.innerText = "CONNESSIONE IN CORSO...";
-            status.className = "";
+            btnScan.disabled = true;
+            btnScan.innerText = `Scansione... ${scanCountdown}s`;
+            btnListen.disabled = true;
+            btnListen.className = "secondary";
+            btnListen.innerText = "Ascolta";
 
-            lastValues = { "navigation.speedOverGround": 0, "navigation.courseOverGroundTrue": 0 };
+            status.innerText = "SCANSIONE IN CORSO";
+            status.className = "scanning";
 
             socket = new WebSocket(`ws://${ip}/signalk/v1/stream?subscribe=self`);
 
             socket.onopen = () => {
-                status.innerText = "CONNESSO (In ascolto...)";
-                status.className = "online";
-                addLogEntry(new Date().toISOString(), "SYSTEM", "Connected", "-", ip, false);
+                addLogEntry(new Date().toISOString(), "SYSTEM", "Scan Phase Started", "-", ip, false);
             };
+
+            scanTimer = setInterval(() => {
+                scanCountdown--;
+                if (scanCountdown > 0) {
+                    btnScan.innerText = `Scansione... ${scanCountdown}s`;
+                } else {
+                    // Scansione terminata! Generazione ricorsiva dell'albero gerarchico reale
+                    clearInterval(scanTimer);
+                    scanTimer = null;
+                    socket.close();
+
+                    const treeContainer = document.getElementById('path-trees-container');
+                    renderTreeDOM(pathTree, treeContainer, true); // Genera ricorsivamente l'albero
+                    updateAllTreeMasterCheckboxes();             // Allinea gli stati dei padri
+                    updateTableVisibility();                     // Inizializza i filtri della tabella
+
+                    isScanning = false;
+                    btnScan.disabled = false;
+                    btnScan.innerText = "Scansiona Rete (10s)";
+                    
+                    btnListen.disabled = false;
+                    btnListen.className = "";
+                    
+                    status.innerText = "SCANSIONE COMPLETATA";
+                    status.className = "online";
+                    addLogEntry(new Date().toISOString(), "SYSTEM", "Scan Phase Finished", "-", "-", false);
+                }
+            }, 1000);
 
             socket.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    
                     if (data.updates) {
                         data.updates.forEach(update => {
                             const sourceName = extractSourceIdentifier(update);
@@ -361,36 +579,121 @@
 
                             if (update.values) {
                                 update.values.forEach(v => {
-                                    if (pathsToWatch.includes(v.path)) {
-                                        processData(v.path, v.value, sourceName, timeISO, timeUI);
+                                    // Popola e accumula i percorsi in memoria ad albero
+                                    registerNewPath(v.path);
+                                    processData(v.path, v.value, sourceName, timeISO, timeUI, false); // Nessun log scritto
+                                });
+                            }
+                        });
+                    }
+                } catch (err) {
+                    console.error("Errore scansione:", err);
+                }
+            };
+
+            socket.onclose = () => {
+                if (isScanning) {
+                    clearInterval(scanTimer);
+                    isScanning = false;
+                    btnScan.disabled = false;
+                    btnScan.innerText = "Scansiona Rete (10s)";
+                    status.innerText = "SCANSIONE FALLITA";
+                    status.className = "";
+                }
+            };
+        }
+
+        // =========================================================
+        // FASE 2: ASCOLTO SELETTIVO (LOG ATTIVI SOLO SE SPUNTATI)
+        // =========================================================
+        function toggleListening() {
+            const btnListen = document.getElementById('btn-listen');
+            const btnScan = document.getElementById('btn-scan');
+            const status = document.getElementById('status');
+            const ip = document.getElementById('server-ip').value;
+
+            if (isListening) {
+                if (socket) socket.close();
+                isListening = false;
+                btnListen.innerText = "Ascolta";
+                btnListen.className = "";
+                btnScan.disabled = false;
+                status.innerText = "ASCOLTO INTERROTTO";
+                status.className = "online";
+                addLogEntry(new Date().toISOString(), "SYSTEM", "Listening Stopped", "-", "-", false);
+                return;
+            }
+
+            isListening = true;
+            btnScan.disabled = true;
+            btnListen.innerText = "Stop Ascolto";
+            btnListen.className = "stop";
+
+            status.innerText = "IN ASCOLTO SELETTIVO...";
+            status.className = "online";
+
+            lastValues = { "navigation.speedOverGround": 0, "navigation.courseOverGroundTrue": 0 };
+
+            socket = new WebSocket(`ws://${ip}/signalk/v1/stream?subscribe=self`);
+
+            socket.onopen = () => {
+                addLogEntry(new Date().toISOString(), "SYSTEM", "Selective Listening Started", "-", ip, false);
+            };
+
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.updates) {
+                        data.updates.forEach(update => {
+                            const sourceName = extractSourceIdentifier(update);
+                            const timeISO = new Date(update.timestamp).toISOString();
+                            const timeUI = new Date(update.timestamp).toLocaleTimeString() + '.' + new Date(update.timestamp).getMilliseconds().toString().padStart(3, '0');
+
+                            if (update.values) {
+                                update.values.forEach(v => {
+                                    const safeId = v.path.replace(/\./g, '-');
+                                    const chk = document.getElementById(`chk-${safeId}`);
+                                    
+                                    if (chk && chk.checked) {
+                                        // Scrive e logga nel CSV solo se la checkbox corrispondente è spuntata!
+                                        processData(v.path, v.value, sourceName, timeISO, timeUI, true);
+                                    } else {
+                                        // Se non è spuntata, aggiorna passivamente la tabella silenziando i log
+                                        if (registeredPaths.has(v.path)) {
+                                            processData(v.path, v.value, sourceName, timeISO, timeUI, false);
+                                        }
                                     }
                                 });
                             }
                         });
                     }
                 } catch (err) {
-                    console.error("Errore elaborazione messaggio: ", err);
+                    console.error("Errore ascolto:", err);
                 }
             };
 
             socket.onclose = () => {
-                btn.innerText = "Connetti";
-                btn.className = "";
-                status.innerText = "DISCONNESSO";
-                status.className = "";
-                addLogEntry(new Date().toISOString(), "SYSTEM", "Disconnected", "-", "-", false);
+                if (isListening) {
+                    isListening = false;
+                    btnListen.innerText = "Ascolta";
+                    btnListen.className = "";
+                    btnScan.disabled = false;
+                    status.innerText = "DISCONNESSO";
+                    status.className = "";
+                    addLogEntry(new Date().toISOString(), "SYSTEM", "Connection Closed", "-", "-", false);
+                }
             };
-            
-            socket.onerror = (error) => {
-                status.innerText = "ERRORE";
-                addLogEntry(new Date().toISOString(), "SYSTEM", "Error", "-", "-", true);
+
+            socket.onerror = () => {
+                status.innerText = "ERRORE CONNESSIONE";
+                addLogEntry(new Date().toISOString(), "SYSTEM", "Connection Error", "-", "-", true);
             };
         }
 
         // =========================================================
         // ELABORAZIONE DATI E SPIKE DETECTION
         // =========================================================
-        function processData(path, rawValue, source, timeISO, timeUI) {
+        function processData(path, rawValue, source, timeISO, timeUI, writeToCsv) {
             let formattedVal = "---";
             let unit = "";
             let isSpike = false;
@@ -398,7 +701,7 @@
             if (rawValue !== null && rawValue !== undefined) {
                 if (path === "navigation.position") {
                     if (typeof rawValue === 'object' && rawValue.latitude !== undefined && rawValue.longitude !== undefined) {
-                        formattedVal = `${rawValue.latitude.toFixed(6)};${rawValue.longitude.toFixed(6)}`;
+                        formattedVal = `${rawValue.latitude.toFixed(6)}`;
                         unit = "lat;lon";
                     } else {
                         formattedVal = "Invalid Position";
@@ -439,10 +742,8 @@
             // 1. Aggiorna la Tabella in alto
             updateTableRow(path, formattedVal, unit, rawValue, source, timeUI);
 
-            // 2. Aggiungi riga al Log CSV (Solo ed esclusivamente se la checkbox di questo percorso è spuntata!)
-            const safeId = path.replace(/\./g, '-');
-            const chk = document.getElementById(`chk-${safeId}`);
-            if (chk && chk.checked) {
+            // 2. Aggiungi riga al Log CSV
+            if (writeToCsv) {
                 addLogEntry(timeISO, path, formattedVal, unit, source, isSpike);
             }
         }
@@ -471,7 +772,7 @@
                 srcCell.innerHTML = `<span class="source">${source}</span>`;
             }
 
-            const timeCell = document.getElementById(`time-${safeId}`);
+            const timeCell = document.getElementById('time-' + safeId);
             if (timeCell) {
                 timeCell.innerHTML = `<span class="time">${timeUI}</span>`;
             }
@@ -508,11 +809,13 @@
             textArea.scrollTop = textArea.scrollHeight;
         }
 
+        // Pulisce l'area di testo dei log sequenziali
         function clearLog() {
             logLinesArray = [];
             renderLogTextArea();
         }
 
+        // Copia negli appunti il testo del log CSV
         function copyLogCSV() {
             const textArea = document.getElementById('log-container');
             textArea.select();
@@ -531,6 +834,7 @@
             }
         }
         
+        // Mostra e sfuma la notifica di copia riuscita
         function showCopyNotif() {
             const notif = document.getElementById('copy-notification');
             notif.style.opacity = 1;
