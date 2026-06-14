@@ -30,7 +30,7 @@ let CONFIG = {
         tws: { stdMax: 15, hercSpan: 2, step: 1 },
         depth: { stdMax: 5, hercSpan: 2, step: 1 }
     },
-    server: { fallbackIp: "192.168.111.240:3000" }
+    server: { fallbackIp: "venus.local:3000" }
 };
 
 const RENDER_INTERVAL_MS = 1000;

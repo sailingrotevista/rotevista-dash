@@ -24,11 +24,12 @@ module.exports = function (app) {
   const CALM_THRESHOLD_KTS = 1.5;      // Soglia di calma piatta (anello a 360°)
   const PRESSURE_FILTER_RATIO = 0.40;  // Filtro di pressione dinamico (40% del picco per ignorare i cali)
 
-  // Database dello storico in RAM sul server (Sintonizzato Pro v6.0)
+ // Database dello storico in RAM sul server (Sintonizzato Pro v6.0)
   let histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
   let graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
   let lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0, twd: 0 };
   let raw = {};
+  let lastPathProcessTimes = {}; // Registro dei timestamp per limitazione di frequenza a 1Hz
   
   // Nuovo database dedicato per gli archi storici della bussola (6 ore = 12 slot)
   let windRadarSlots = [];
@@ -136,96 +137,125 @@ module.exports = function (app) {
     app.debug(msg);
   };
 
-  /**
-   * processIncomingDelta: Decodifica i dati dei sensori in Knots/Meters ed esegue l'aggregazione
-   * Gestisce l'architettura "Nativo Prima, Fallback Dopo" per il vento reale.
-   */
-  function processIncomingDelta(path, val) {
-    if (val === null || val === undefined) return;
-    raw[path] = val;
+    /**
+       * processIncomingDelta: Decodifica i dati dei sensori in Knots/Meters ed esegue l'aggregazione
+       * Applica un filtro passa-basso continuo a ogni pacchetto e storicizza a 1Hz con dati stabilizzati.
+       */
+      function processIncomingDelta(path, val) {
+        if (val === null || val === undefined) return;
+        
+        const now = Date.now();
+        const alpha = 0.20; // Coefficiente di smoothing (Filtro passa-basso: reattività ~2 secondi)
 
-    const now = Date.now();
+        // FILTRO PASSA-BASSO CONTINUO IN TEMPO REALE (Previene gli Spike prima della storicizzazione)
+        if (path === 'navigation.position') {
+          raw[path] = val; // Le coordinate GPS non sono soggette a filtri di smorzamento o ritardo
+          
+          // Chiamata periodica Open-Meteo
+          if (val.latitude !== undefined && val.longitude !== undefined) {
+            const current30mSlot = Math.floor(now / 1800000) * 1800000;
+            if (current30mSlot > lastForecast30mSlot) {
+              fetchOpenMeteoForecast(val, current30mSlot);
+            }
+          }
+          return; // Esce subito
+        }
 
-    // 1. Cattura dei dati nativi (Se presenti, li scrive direttamente nello storico)
-    if (path === 'navigation.position') {
-      // Trigger allineato all'orologio: calcoliamo il confine della mezz'ora corrente dell'orologio
-      if (val && val.latitude !== undefined && val.longitude !== undefined) {
-        const current30mSlot = Math.floor(Date.now() / 1800000) * 1800000;
-        // Se siamo entrati in una nuova mezz'ora di orologio dall'ultimo download, avviamo il fetch
-        if (current30mSlot > lastForecast30mSlot) {
-          fetchOpenMeteoForecast(val, current30mSlot);
+        if (path.includes('angle') || path.includes('heading') || path.includes('course') || path.includes('direction') || path.includes('twd')) {
+          // 1. Caso Angolare (Radianti): Calcolo differenziale circolare per gestire l'oltrepasso dello 0/360 gradi
+          if (raw[path] !== undefined) {
+            let diff = Math.atan2(Math.sin(val - raw[path]), Math.cos(val - raw[path]));
+            raw[path] = (raw[path] + diff * alpha + Math.PI * 2) % (Math.PI * 2);
+          } else {
+            raw[path] = val;
+          }
+        } else {
+          // 2. Caso Lineare (Velocità e Profondità): Smorzamento continuo
+          if (raw[path] !== undefined) {
+            raw[path] = (val * alpha) + (raw[path] * (1 - alpha));
+          } else {
+            raw[path] = val;
+          }
+        }
+
+        // LIMITATORE DI FREQUENZA (RATE LIMITER) A 1HZ PER PERCORSO ATTIVO:
+        // La scrittura nello storico e i calcoli derivati vengono eseguiti al massimo una volta al secondo,
+        // leggendo il valore "raw[path]" stabilizzato continuamente dal filtro passa-basso superiore.
+        if (!lastPathProcessTimes[path]) lastPathProcessTimes[path] = 0;
+        if (now - lastPathProcessTimes[path] < 1000) {
+          return; // Esce subito risparmiando la CPU se il sensore ha già aggiornato nell'ultimo secondo
+        }
+        lastPathProcessTimes[path] = now;
+
+        // Da qui in poi, l'esecuzione della storia e del vento reale avviene rigorosamente a 1Hz con dati puliti:
+        const smoothedVal = raw[path];
+
+        if (path === 'navigation.speedThroughWater') {
+          manageHistory('stw', smoothedVal * 1.94384);
+        }
+        else if (path === 'navigation.speedOverGround') {
+          manageHistory('sog', smoothedVal * 1.94384);
+        }
+        else if (path === 'environment.depth.belowTransducer') {
+          manageHistory('depth', smoothedVal);
+        }
+        else if (path === 'environment.wind.speedApparent') {
+          manageHistory('aws', smoothedVal * 1.94384);
+        }
+        else if (path === 'environment.wind.angleApparent') {
+          // Già gestito e normalizzato dal filtro passa-basso superiore
+        }
+        else if (path === 'environment.wind.speedTrue') {
+          lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
+          manageHistory('tws', smoothedVal * 1.94384);
+        }
+        // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
+        else if (path === 'navigation.headingMagnetic') {
+          const hasTrueHdg = raw['navigation.headingTrue'] !== undefined;
+          if (!hasTrueHdg) {
+            const variation = raw['navigation.magneticVariation'] || 0;
+            raw['navigation.headingTrue'] = (smoothedVal + variation + 2 * Math.PI) % (2 * Math.PI);
+          }
+        }
+        else if (path === 'environment.wind.directionTrue') {
+          lastNativeTwdTime = now; // Rilevato TWD nativo della centralina!
+          manageHistory('twd', smoothedVal);
+        }
+
+        // 2. Calcolo combinato di FALLBACK (Si attiva solo se la centralina non invia TWS/TWD nativi)
+        const aws = raw["environment.wind.speedApparent"];
+        const awa = raw["environment.wind.angleApparent"];
+        const stw = raw["navigation.speedThroughWater"] || 0;
+        const sog = raw["navigation.speedOverGround"] || 0;
+        const hdg = raw["navigation.headingTrue"];
+        const cog = raw["navigation.courseOverGroundTrue"] || 0;
+
+        if (aws !== undefined && awa !== undefined) {
+          const awsKts = aws * 1.94384;
+          const stwKts = stw * 1.94384;
+          const tw_water_x = awsKts * Math.cos(awa) - stwKts;
+          const tw_water_y = awsKts * Math.sin(awa);
+
+          // Calcoliamo il TWS di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
+          if (now - lastNativeTwsTime > 5000) {
+            const tws = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
+            manageHistory('tws', tws);
+          }
+
+          const twa = Math.atan2(tw_water_y, tw_water_x);
+          
+          // La VMG viene sempre calcolata a livello server poiché raramente è nativa
+          const vmg = Math.abs(stwKts * Math.cos(twa));
+          manageHistory('vmg', vmg);
+
+          // Calcoliamo il TWD di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
+          if (hdg !== undefined && (now - lastNativeTwdTime > 5000)) {
+            const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
+            manageHistory('twd', twd);
+          }
         }
       }
-    }
-    else if (path === 'navigation.speedThroughWater') {
-      manageHistory('stw', val * 1.94384);
-    }
-    else if (path === 'navigation.speedOverGround') {
-      manageHistory('sog', val * 1.94384);
-    }
-    else if (path === 'environment.depth.belowTransducer') {
-      manageHistory('depth', val);
-    }
-    else if (path === 'environment.wind.speedApparent') {
-      manageHistory('aws', val * 1.94384);
-    }
-    else if (path === 'environment.wind.angleApparent') {
-      raw[path] = val; // BUG RISOLTO: Acquisizione dell'AWA mancante inserita!
-    }
-    else if (path === 'environment.wind.speedTrue') {
-          lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
-          const cleanVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
-          manageHistory('tws', cleanVal * 1.94384);
-    }
-    // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
-    else if (path === 'navigation.headingMagnetic') {
-      const hasTrueHdg = raw['navigation.headingTrue'] !== undefined;
-      if (!hasTrueHdg) {
-        const variation = raw['navigation.magneticVariation'] || 0;
-        const cleanVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
-        raw['navigation.headingTrue'] = (cleanVal + variation + 2 * Math.PI) % (2 * Math.PI);
-      }
-    }
-    else if (path === 'environment.wind.directionTrue') {
-      lastNativeTwdTime = now; // Rilevato TWD nativo della centralina!
-      const cleanVal = (val && typeof val === 'object' && val.value !== undefined) ? val.value : val;
-      manageHistory('twd', cleanVal);
-    }
-
-    // 2. Calcolo combinato di FALLBACK (Si attiva solo se la centralina non invia TWS/TWD nativi)
-    const aws = raw["environment.wind.speedApparent"];
-    const awa = raw["environment.wind.angleApparent"];
-    const stw = raw["navigation.speedThroughWater"] || 0;
-    const sog = raw["navigation.speedOverGround"] || 0;
-    const hdg = raw["navigation.headingTrue"];
-    const cog = raw["navigation.courseOverGroundTrue"] || 0;
-
-    if (aws !== undefined && awa !== undefined) {
-      const awsKts = aws * 1.94384;
-      const stwKts = stw * 1.94384;
-      const tw_water_x = awsKts * Math.cos(awa) - stwKts;
-      const tw_water_y = awsKts * Math.sin(awa);
-
-      // Calcoliamo il TWS di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
-      if (now - lastNativeTwsTime > 5000) {
-        const tws = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
-        manageHistory('tws', tws);
-      }
-
-      const twa = Math.atan2(tw_water_y, tw_water_x);
-      
-      // La VMG viene sempre calcolata a livello server poiché raramente è nativa
-      const vmg = Math.abs(stwKts * Math.cos(twa));
-      manageHistory('vmg', vmg);
-
-        // Calcoliamo il TWD di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
-              if (hdg !== undefined && (now - lastNativeTwdTime > 5000)) {
-                const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
-                manageHistory('twd', twd); // BUG RISOLTO: Rimossa la riassegnazione di "const" che mandava in crash il server
-              }
-    }
-  }
-
+    
   /**
    * manageHistory: Versione Server-side dell'aggregatore matematico tattico
    */
