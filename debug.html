@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SignalK Data Debugger & Logger CSV (Pro v6.0)</title>
+    <title>SignalK Data Debugger & CSV Dumper (Pro v6.0)</title>
     <style>
         body {
             background-color: #121212;
@@ -40,12 +40,12 @@
         
         /* GRIGLIA WORKSPACE: AFFIANCA SELEZIONE E TABELLA VALORI */
         .workspace-grid {
-            display: grid;
-            grid-template-columns: 1fr 1.3fr;
-            gap: 15px;
+            display: flex;
+            flex-direction: row;
             flex-shrink: 0;
             margin-bottom: 15px;
             min-height: 0;
+            height: 380px; /* Altezza fissa dei pannelli superiori */
         }
 
         /* COLONNA SINISTRA: Pannello dei filtri ad albero */
@@ -55,9 +55,13 @@
             border-radius: 8px;
             padding: 15px;
             box-sizing: border-box;
-            height: 380px; /* Altezza fissa allineata alla tabella di destra */
+            width: 45%; /* Larghezza iniziale di default */
+            min-width: 200px;
+            max-width: 80%;
             display: flex;
             flex-direction: column;
+            overflow: hidden; /* Forza lo scorrimento dei figli all'interno dell'altezza fissa */
+            flex: none; /* Impedisce a Flexbox di sovrascrivere la larghezza impostata via JS durante il drag */
         }
         .presets {
             margin: 10px 0;
@@ -67,6 +71,53 @@
             flex-shrink: 0;
         }
         
+        /* INPUT BARRA DI RICERCA VELOCE */
+        .search-input {
+            width: 100%;
+            padding: 8px 12px;
+            background: #111;
+            color: #fff;
+            border: 1px solid #333;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-family: monospace;
+            font-size: 11px;
+            margin-top: 10px;
+            outline: none;
+            transition: border-color 0.2s;
+            flex-shrink: 0;
+        }
+        .search-input:focus {
+            border-color: #4CAF50;
+        }
+        
+        /* DIVISIONE ORIZZONTALE RIDIMENSIONABILE A PIACIMENTO (SPLITTER DRAG BAR) */
+        .splitter {
+            width: 6px;
+            background: #222;
+            cursor: col-resize;
+            flex-shrink: 0;
+            transition: background 0.15s ease;
+            border-radius: 3px;
+            margin: 0 5px;
+            touch-action: none; /* Impedisce lo scorrimento della pagina web su tablet durante il drag */
+        }
+        .splitter:hover, .splitter.dragging {
+            background: #4CAF50;
+        }
+
+        /* COLONNA DESTRA: Pannello Tabella Valori Attuali */
+        .summary-panel {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            box-sizing: border-box;
+            flex-grow: 1; /* Occupa tutto lo spazio a destra dello splitter */
+            min-width: 200px;
+            overflow-y: auto;
+        }
+        
         /* STRUTTURA AD ALBERO NIDIFICATO INTERNO */
         .trees-container {
             margin-top: 15px;
@@ -74,7 +125,7 @@
             padding-top: 15px;
             flex-grow: 1; /* Occupa tutto lo spazio interno rimasto nel contenitore fisso */
             overflow-y: auto;
-            display: block;
+            display: block; /* Cambiato a block per garantire il ricalcolo dello scroll interno */
         }
         .tree-node {
             display: flex;
@@ -126,16 +177,6 @@
             padding-left: 5px;
         }
 
-        /* COLONNA DESTRA: Pannello Tabella Valori Attuali */
-        .summary-panel {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 8px;
-            padding: 15px;
-            box-sizing: border-box;
-            height: 380px; /* Altezza fissa allineata alla selezione di sinistra */
-            overflow-y: auto;
-        }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -211,43 +252,50 @@
 </head>
 <body>
 
-    <h1>SignalK Data Debugger & Logger CSV (Pro v6.0)</h1>
+    <h1>SignalK Data Debugger & CSV Dumper (Pro v6.0)</h1>
     
     <div class="controls">
         <label>Server IP:</label>
-        <input type="text" id="server-ip" value="192.168.111.240:3000">
-        <button id="btn-scan" onclick="startScan()">Scansiona Rete (10s)</button>
-        <button id="btn-listen" onclick="toggleListening()" class="secondary" disabled>Ascolta</button>
-        <span id="status">DISCONNESSO</span>
+        <input type="text" id="server-ip" value="venus.local:3000">
+        <button id="btn-scan" onclick="startScan()">Scan Network (10s)</button>
+        <button id="btn-listen" onclick="toggleListening()" class="secondary" disabled>Listen</button>
+        <span id="status">DISCONNECTED</span>
     </div>
 
-    <!-- CONTENITORE PRINCIPALE DI LAVORO A DUE COLONNE -->
-    <div class="workspace-grid">
+    <!-- CONTENITORE PRINCIPALE DI LAVORO CON STRUTTURA FLUIDA ED ELEMENTI INTERATTIVI -->
+    <div class="workspace-grid" id="grid-container">
         
         <!-- COLONNA SINISTRA: AREA FILTRI AVANZATA CON ALBERO GERARCHICO -->
-        <div class="filter-container">
-            <span style="font-weight: bold; color: #4CAF50; font-size: 13px;">Seleziona percorsi da scrivere nel Log CSV (Albero Gerarchico Completo):</span>
+        <div class="filter-container" id="pane-left">
+            <span style="font-weight: bold; color: #4CAF50; font-size: 13px;">Select paths to write to CSV Dump (Complete Hierarchical Tree):</span>
             <div class="presets">
-                <button class="secondary" onclick="applyPreset('all')">Seleziona Tutto</button>
-                <button class="secondary" style="background-color: #2c3e50;" onclick="applyPreset('twd')">Analisi Bussola Meteo (TWD/Vento/Rotta)</button>
-                <button class="secondary" style="background-color: #0088cc;" onclick="applyPreset('gps')">Solo GPS / Rotte</button>
-                <button class="secondary" onclick="applyPreset('none')">Deseleziona Tutto</button>
+                <button class="secondary" onclick="applyPreset('all')">Select All</button>
+                <button class="secondary" style="background-color: #2c3e50;" onclick="applyPreset('twd')">Weather Compass Analysis (TWD/Wind/Course)</button>
+                <button class="secondary" style="background-color: #0088cc;" onclick="applyPreset('gps')">GPS / Course Only</button>
+                <button class="secondary" onclick="applyPreset('none')">Deselect All</button>
             </div>
+            
+            <!-- INPUT BARRA DI RICERCA VELOCE -->
+            <input type="text" id="tree-search" class="search-input" placeholder="Search path... (e.g. solar, temp, gps, batteries)" oninput="filterTree(this.value)">
+
             <div id="path-trees-container" class="trees-container">
                 <!-- Categorie ed alberi gerarchici autogenerati dinamicamente via JS al termine della scansione -->
             </div>
         </div>
 
+        <!-- DIVISIONE ORIZZONTALE RIDIMENSIONABILE A PIACIMENTO (SPLITTER DRAG BAR) -->
+        <div class="splitter" id="drag-splitter"></div>
+
         <!-- COLONNA DESTRA: PANNELLO TABELLA RIASSUNTIVA VALORI IN TEMPO REALE -->
-        <div class="summary-panel">
+        <div class="summary-panel" id="pane-right">
             <table>
                 <thead>
                     <tr>
                         <!-- BLOCCO RIGIDO DELLE LARGHEZZE DELLE COLONNE -->
-                        <th width="30%">Path (Percorso)</th>
-                        <th width="33%">Valore Convertito</th>
-                        <th width="22%">Sorgente (Sensore - Dettagliato)</th>
-                        <th width="15%">Ultimo Ricevuto</th>
+                        <th width="30%">Path</th>
+                        <th width="33%">Converted Value</th>
+                        <th width="22%">Source (Detailed Sensor)</th>
+                        <th width="15%">Last Received</th>
                     </tr>
                 </thead>
                 <tbody id="data-table">
@@ -261,11 +309,11 @@
     <!-- PANNELLO LOG SEQUENZIALE (CSV) - POSIZIONATO A TUTTA LARGHEZZA SUL FONDO -->
     <div class="log-panel">
         <div class="log-header">
-            <span>Event Log CSV (Timestamp, Path, Value, Unit, Source, Spike)</span>
+            <span>CSV Event Dump (Timestamp, Path, Value, Unit, Source, Spike)</span>
             <div style="display: flex; align-items: center;">
-                <span id="copy-notification">Copiato!</span>
-                <button class="action" onclick="copyLogCSV()" style="padding: 4px 10px; font-size: 11px; margin-right: 10px;">Copia CSV</button>
-                <button class="secondary" onclick="clearLog()" style="padding: 4px 10px; font-size: 11px;">Pulisci</button>
+                <span id="copy-notification">Copied!</span>
+                <button class="action" onclick="copyLogCSV()" style="padding: 4px 10px; font-size: 11px; margin-right: 10px;">Copy Dump</button>
+                <button class="secondary" onclick="clearLog()" style="padding: 4px 10px; font-size: 11px;">Clear</button>
             </div>
         </div>
         
@@ -348,7 +396,7 @@
                 if (hasChildren) {
                     const toggleSpan = document.createElement('span');
                     toggleSpan.className = 'node-toggle';
-                    toggleSpan.innerText = '[-]';
+                    toggleSpan.innerText = '[+]'; // Compresso di default all'avvio
                     toggleSpan.onclick = (e) => {
                         e.stopPropagation();
                         const childContainer = nodeDiv.querySelector(':scope > .node-children');
@@ -370,7 +418,7 @@
                 // 2. Checkbox di selezione
                 const chk = document.createElement('input');
                 chk.type = 'checkbox';
-                chk.checked = true;
+                chk.checked = false; // Deselezionato di default per focalizzare lo spazio
                 chk.className = 'node-checkbox';
                 
                 if (!hasChildren) {
@@ -393,10 +441,11 @@
                 
                 nodeDiv.appendChild(rowDiv);
                 
-                // 4. Creazione ricorsiva dei nodi figli (Sotto-Albero)
+                // 4. Creazione ricorsiva dei nodi figli (Sotto-Albero nascosto di default all'avvio)
                 if (hasChildren) {
                     const childrenDiv = document.createElement('div');
                     childrenDiv.className = 'node-children';
+                    childrenDiv.style.display = 'none'; // Chiuso di default all'avvio
                     renderTreeDOM(item._children, childrenDiv, false);
                     nodeDiv.appendChild(childrenDiv);
                 }
@@ -424,21 +473,103 @@
 
             // 3. FILTRAGGIO DINAMICO DELLA TABELLA: Aggiorna istantaneamente la visibilità dei valori
             updateTableVisibility();
+
+            // 4. FILTRAGGIO DINAMICO DEL DUMP CSV: Aggiorna lo schermo dei log al cambio di selezione
+            renderLogTextArea();
         });
 
-        // Aggiorna istantaneamente la visibilità dei valori della tabella in base alle spunte
+        // Filtra l'albero gerarchico visivo in tempo reale con espansione automatica dei rami corrispondenti
+        function filterTree(query) {
+            const q = query.toLowerCase().trim();
+            const leaves = document.querySelectorAll('.tree-leaf');
+            const branches = Array.from(document.querySelectorAll('.tree-branch')).reverse(); // Scansione invertita per propagare lo stato ai nonni
+
+            if (q === "") {
+                // Ripristina la visibilità totale e richiude i rami se la query viene cancellata
+                leaves.forEach(leaf => {
+                    leaf.style.display = '';
+                });
+                branches.forEach(branch => {
+                    branch.style.display = '';
+                    const childContainer = branch.querySelector(':scope > .node-children');
+                    const toggleSpan = branch.querySelector(':scope > .node-row > .node-toggle');
+                    if (childContainer && toggleSpan) {
+                        childContainer.style.display = 'none';
+                        toggleSpan.innerText = '[+]';
+                    }
+                });
+                updateTableVisibility();
+                renderLogTextArea();
+                return;
+            }
+
+            // 1. Filtra tutte le foglie (Parametri finali) e AUTO-SELEZIONA quelle corrispondenti
+            leaves.forEach(leaf => {
+                const labelEl = leaf.querySelector('.node-label');
+                const chk = leaf.querySelector('input');
+                if (!labelEl || !chk) return;
+
+                const label = labelEl.innerText.toLowerCase();
+                const path = (chk.dataset.path || "").toLowerCase();
+                
+                if (label.includes(q) || path.includes(q)) {
+                    leaf.style.display = ''; // Corrispondenza trovata
+                    chk.checked = true;      // AUTO-SELEZIONE dei parametri corrispondenti!
+                } else {
+                    leaf.style.display = 'none'; // Nasconde se non corrisponde
+                }
+            });
+
+            // 2. Filtra e auto-espande i rami genitori dal basso verso l'alto
+            branches.forEach(branch => {
+                const childContainer = branch.querySelector(':scope > .node-children');
+                const toggleSpan = branch.querySelector(':scope > .node-row > .node-toggle');
+                if (!childContainer) return;
+                
+                // Conta quanti sotto-nodi (sia rami che foglie) sono rimasti visibili
+                const visibleChildren = childContainer.querySelectorAll('.tree-node:not([style*="display: none"])');
+                
+                if (visibleChildren.length > 0) {
+                    branch.style.display = ''; // Mostra il ramo genitore poiché contiene elementi corrispondenti
+                    if (toggleSpan) {
+                        childContainer.style.display = 'flex'; // Auto-espande la cartella per mostrare il match
+                        toggleSpan.innerText = '[-]';
+                    }
+                } else {
+                    branch.style.display = 'none'; // Nasconde l'intera cartella se nessun figlio corrisponde alla ricerca
+                }
+            });
+
+            // 3. Ricalcola gli stati indeterminati dei genitori e aggiorna la tabella in tempo reale
+            updateAllTreeMasterCheckboxes();
+            updateTableVisibility();
+            renderLogTextArea(); // Filtra il Dump CSV sullo schermo ad ogni input della ricerca!
+        }
+
+        // Aggiorna istantaneamente la visibilità dei valori della tabella in base alle spunte e alla barra di ricerca
         function updateTableVisibility() {
+            const queryInput = document.getElementById('tree-search');
+            const q = queryInput ? queryInput.value.toLowerCase().trim() : "";
+
             registeredPaths.forEach(path => {
                 const safeId = path.replace(/\./g, '-');
                 const chk = document.getElementById(`chk-${safeId}`);
                 const row = document.getElementById(`row-${safeId}`);
                 
                 if (row) {
-                    // Durante la scansione mostriamo tutto. Fuori scansione mostriamo solo se la spunta corrispondente è attiva.
-                    if (isScanning || !chk || chk.checked) {
-                        row.style.display = ''; // Mostra (table-row)
+                    if (isScanning) {
+                        // Durante la scansione mostriamo tutte le righe scoperte in tempo reale
+                        row.style.display = '';
                     } else {
-                        row.style.display = 'none'; // Nasconde
+                        // Fuori scansione la riga è visibile solo se è spuntata E se il percorso corrisponde alla ricerca attiva (se presente)
+                        const matchesQuery = q === "" || path.toLowerCase().includes(q);
+                        const isChecked = chk && chk.checked;
+
+                        if (isChecked && matchesQuery) {
+                            row.style.display = ''; // Mostra
+                        } else {
+                            row.style.display = 'none'; // Nasconde
+                        }
                     }
                 }
             });
@@ -483,6 +614,7 @@
             });
             updateAllTreeMasterCheckboxes();
             updateTableVisibility(); // Sincronizza la tabella visiva al cambio di preset
+            renderLogTextArea();     // Filtra dinamicamente anche i log CSV in base al preset!
         }
 
         // =========================================================
@@ -515,6 +647,7 @@
             pathTree = {};
             document.getElementById('path-trees-container').innerHTML = '';
             document.getElementById('data-table').innerHTML = '';
+            document.getElementById('tree-search').value = ''; // Resetta il testo della barra di ricerca
 
             const btnScan = document.getElementById('btn-scan');
             const btnListen = document.getElementById('btn-listen');
@@ -526,12 +659,12 @@
             scanCountdown = 10;
 
             btnScan.disabled = true;
-            btnScan.innerText = `Scansione... ${scanCountdown}s`;
+            btnScan.innerText = `Scanning... ${scanCountdown}s`;
             btnListen.disabled = true;
             btnListen.className = "secondary";
-            btnListen.innerText = "Ascolta";
+            btnListen.innerText = "Listen";
 
-            status.innerText = "SCANSIONE IN CORSO";
+            status.innerText = "SCAN IN PROGRESS";
             status.className = "scanning";
 
             socket = new WebSocket(`ws://${ip}/signalk/v1/stream?subscribe=self`);
@@ -543,26 +676,27 @@
             scanTimer = setInterval(() => {
                 scanCountdown--;
                 if (scanCountdown > 0) {
-                    btnScan.innerText = `Scansione... ${scanCountdown}s`;
+                    btnScan.innerText = `Scanning... ${scanCountdown}s`;
                 } else {
                     // Scansione terminata! Generazione ricorsiva dell'albero gerarchico reale
                     clearInterval(scanTimer);
                     scanTimer = null;
-                    socket.close();
+                    
+                    isScanning = false; // 1. Imposta lo stato a false PRIMA di chiudere la connessione
+                    socket.close();     // 2. Scatena l'evento onclose (che ora ignorerà l'interruzione di scansione)
 
                     const treeContainer = document.getElementById('path-trees-container');
                     renderTreeDOM(pathTree, treeContainer, true); // Genera ricorsivamente l'albero
                     updateAllTreeMasterCheckboxes();             // Allinea gli stati dei padri
-                    updateTableVisibility();                     // Inizializza i filtri della tabella
+                    updateTableVisibility();                     // Inizializza i filtri della tabella (Nasconde tutto all'avvio)
 
-                    isScanning = false;
                     btnScan.disabled = false;
-                    btnScan.innerText = "Scansiona Rete (10s)";
+                    btnScan.innerText = "Scan Network (10s)";
                     
                     btnListen.disabled = false;
                     btnListen.className = "";
                     
-                    status.innerText = "SCANSIONE COMPLETATA";
+                    status.innerText = "SCAN COMPLETED";
                     status.className = "online";
                     addLogEntry(new Date().toISOString(), "SYSTEM", "Scan Phase Finished", "-", "-", false);
                 }
@@ -596,8 +730,8 @@
                     clearInterval(scanTimer);
                     isScanning = false;
                     btnScan.disabled = false;
-                    btnScan.innerText = "Scansiona Rete (10s)";
-                    status.innerText = "SCANSIONE FALLITA";
+                    btnScan.innerText = "Scan Network (10s)";
+                    status.innerText = "SCAN FAILED";
                     status.className = "";
                 }
             };
@@ -615,10 +749,10 @@
             if (isListening) {
                 if (socket) socket.close();
                 isListening = false;
-                btnListen.innerText = "Ascolta";
+                btnListen.innerText = "Listen";
                 btnListen.className = "";
                 btnScan.disabled = false;
-                status.innerText = "ASCOLTO INTERROTTO";
+                status.innerText = "LISTENING STOPPED";
                 status.className = "online";
                 addLogEntry(new Date().toISOString(), "SYSTEM", "Listening Stopped", "-", "-", false);
                 return;
@@ -626,10 +760,10 @@
 
             isListening = true;
             btnScan.disabled = true;
-            btnListen.innerText = "Stop Ascolto";
+            btnListen.innerText = "Stop Dump";
             btnListen.className = "stop";
 
-            status.innerText = "IN ASCOLTO SELETTIVO...";
+            status.innerText = "DUMPING VALUES...";
             status.className = "online";
 
             lastValues = { "navigation.speedOverGround": 0, "navigation.courseOverGroundTrue": 0 };
@@ -654,11 +788,20 @@
                                     const safeId = v.path.replace(/\./g, '-');
                                     const chk = document.getElementById(`chk-${safeId}`);
                                     
+                                    // Verifica sia la spunta sia l'effettiva visibilità a schermo (non nascosto da ricerca!)
+                                    let isLogged = false;
                                     if (chk && chk.checked) {
-                                        // Scrive e logga nel CSV solo se la checkbox corrispondente è spuntata!
+                                        const leaf = chk.closest('.tree-leaf');
+                                        if (leaf && leaf.style.display !== 'none') {
+                                            isLogged = true;
+                                        }
+                                    }
+
+                                    if (isLogged) {
+                                        // Scrive e logga nel CSV solo se la checkbox corrispondente è spuntata e visibile!
                                         processData(v.path, v.value, sourceName, timeISO, timeUI, true);
                                     } else {
-                                        // Se non è spuntata, aggiorna passivamente la tabella silenziando i log
+                                        // Se non è spuntata o è nascosta, aggiorna passivamente la tabella silenziando i log
                                         if (registeredPaths.has(v.path)) {
                                             processData(v.path, v.value, sourceName, timeISO, timeUI, false);
                                         }
@@ -675,7 +818,7 @@
             socket.onclose = () => {
                 if (isListening) {
                     isListening = false;
-                    btnListen.innerText = "Ascolta";
+                    btnListen.innerText = "Listen";
                     btnListen.className = "";
                     btnScan.disabled = false;
                     status.innerText = "DISCONNESSO";
@@ -685,7 +828,7 @@
             };
 
             socket.onerror = () => {
-                status.innerText = "ERRORE CONNESSIONE";
+                status.innerText = "CONNECTION ERROR";
                 addLogEntry(new Date().toISOString(), "SYSTEM", "Connection Error", "-", "-", true);
             };
         }
@@ -803,19 +946,36 @@
             renderLogTextArea();
         }
 
+        // Filtra ricorsivamente i log visualizzati nel Dump CSV in tempo reale in base alla selezione attiva e visibile
         function renderLogTextArea() {
             const textArea = document.getElementById('log-container');
-            textArea.value = csvHeader + "\n" + logLinesArray.join("\n");
+            if (!textArea) return;
+
+            const filteredLines = logLinesArray.filter(line => {
+                const parts = line.split(',');
+                const path = parts[1]; // L'indice 1 corrisponde al percorso dati del pacchetto
+                if (!path || path === "Path" || path === "SYSTEM") return true; // Preserva le intestazioni e i messaggi di connessione di sistema
+
+                const safeId = path.replace(/\./g, '-');
+                const chk = document.getElementById(`chk-${safeId}`);
+                
+                // Filtro integrato: la linea viene visualizzata solo se spuntata E visibile (non esclusa dalla ricerca)
+                if (chk && chk.checked) {
+                    const leaf = chk.closest('.tree-leaf');
+                    return leaf && leaf.style.display !== 'none';
+                }
+                return false;
+            });
+
+            textArea.value = csvHeader + "\n" + filteredLines.join("\n");
             textArea.scrollTop = textArea.scrollHeight;
         }
 
-        // Pulisce l'area di testo dei log sequenziali
         function clearLog() {
             logLinesArray = [];
             renderLogTextArea();
         }
 
-        // Copia negli appunti il testo del log CSV
         function copyLogCSV() {
             const textArea = document.getElementById('log-container');
             textArea.select();
@@ -830,17 +990,48 @@
                 }
             } catch (err) {
                 console.error("Copia fallita: ", err);
-                alert("Errore nella copia degli appunti. Usa CTRL+C / CMD+C manualmente.");
+                alert("Error copying to clipboard. Please use CTRL+C / CMD+C manually.");
             }
         }
         
-        // Mostra e sfuma la notifica di copia riuscita
         function showCopyNotif() {
             const notif = document.getElementById('copy-notification');
             notif.style.opacity = 1;
             setTimeout(() => notif.style.opacity = 0, 2000);
             window.getSelection().removeAllRanges();
         }
+
+        // =========================================================
+        // LOGICA DI GESTIONE DELLO SPLITTER ORIZZONTALE (DRAG BAR)
+        // =========================================================
+        const splitter = document.getElementById('drag-splitter');
+        const leftPane = document.getElementById('pane-left');
+        const gridContainer = document.getElementById('grid-container');
+
+        splitter.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            splitter.classList.add('dragging');
+            
+            const startX = e.clientX;
+            const startWidth = leftPane.getBoundingClientRect().width;
+            const containerWidth = gridContainer.getBoundingClientRect().width;
+
+            const onPointerMove = (moveEvent) => {
+                const deltaX = moveEvent.clientX - startX;
+                // Limita il ridimensionamento tra 200px e l'80% dello schermo per sicurezza
+                const newWidth = Math.max(200, Math.min(containerWidth * 0.8, startWidth + deltaX));
+                leftPane.style.width = `${(newWidth / containerWidth) * 100}%`;
+            };
+
+            const onPointerUp = () => {
+                splitter.classList.remove('dragging');
+                document.removeEventListener('pointermove', onPointerMove);
+                document.removeEventListener('pointerup', onPointerUp);
+            };
+
+            document.addEventListener('pointermove', onPointerMove);
+            document.addEventListener('pointerup', onPointerUp);
+        });
     </script>
 </body>
 </html>
