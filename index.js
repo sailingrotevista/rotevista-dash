@@ -45,26 +45,19 @@ module.exports = function (app) {
   let futureForecast = null;       // Memorizza la previsione futura { timestamp, tws, twd }
   let lastForecast30mSlot = 0;    // Orario dell'ultimo blocco orologio scaricato con successo (es. 15:30)
 
-  /**
-   * plugin.start: Inizializza il plugin.
-   * Viene chiamato all'avvio e OGNI VOLTA che si salva nella configurazione.
-   */
-  plugin.start = function (options) {
-    // 1. Aggiorna la configurazione in memoria
-    currentConfig = options;
-    app.debug(`${plugin.name} started/updated with new options`);
+    /**
+       * plugin.start: Inizializza il plugin.
+       * Viene chiamato all'avvio e OGNI VOLTA che si salva nella configurazione.
+       */
+      plugin.start = function (options) {
+        // 1. Aggiorna la configurazione in memoria
+        currentConfig = options;
+        app.debug(`${plugin.name} started/updated with new options`);
 
-    // Reset dello storico al riavvio del plugin per evitare incoerenze (Sintonizzato Pro v6.0)
-    histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
-    graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
-    lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0, twd: 0 };
-    raw = {};
-    windRadarSlots = [];        // Reset degli archi storici della bussola
-    lastFrozen30mSlot = 0;      // Reset del monitor temporale della bussola
-    futureForecast = null;      // Reset della previsione meteo futura
-    lastForecast30mSlot = 0;    // Reset del monitor temporale di scaricamento meteo
-      
-    // 2. Registra le rotte API solo la prima volta (Abilitate per CORS remoto)
+        // Rimosso il reset distruttivo per garantire la conservazione dei dati in RAM
+        // durante il salvataggio dei parametri o il cambio delle calibrazioni delle scale.
+          
+        // 2. Registra le rotte API solo la prima volta (Abilitate per CORS remoto)
     if (!routeRegistered) {
       app.get('/rotevista-config', (req, res) => {
         res.header("Access-Control-Allow-Origin", "*"); // Sblocca la Dashboard locale su Mac
