@@ -1,14 +1,14 @@
 /**
- * ==========================================================================
- * Signal K Wind Dashboard - Pro Version 6.0 (Dynamic Envelope Architecture)
- * ==========================================================================
- * Autore: Sailing Rotevista
- * Motore di calcolo tattico per navigazione e crociera.
- * Gestisce: Medie Vettoriali, Deviazione Standard, Trend Strategico dinamico,
- * Memoria UI persistente, Modalità Hercules, Focus Split Screen e
- * Rendering Grafico basato sul Tempo Reale (Timeline e Gap Handling).
- *file app.js
- */
+    * ==========================================================================
+    * Signal K Wind Dashboard - Pro Version 6.0 (Dynamic Envelope Architecture)
+    * ==========================================================================
+    * Autore: Sailing Rotevista
+    * Motore di calcolo tattico per navigazione e crociera.
+    * Gestisce: Medie Vettoriali, Deviazione Standard, Trend Strategico dinamico,
+    * Memoria UI persistente, Modalità Hercules, Focus Split Screen e
+    * Rendering Grafico basato sul Tempo Reale (Timeline e Gap Handling).
+    * file app.js
+    */
 
 // ==========================================================================
 // 1. CONFIGURAZIONE E DEFAULT
@@ -106,9 +106,9 @@ const ui = {
 // ==========================================================================
 
 /**
- * Inserimento sicuro nel buffer con trigonometria precaricata e pruning automatico
- * Mantiene sempre almeno 60 minuti di memoria locale per il calcolo della bussola meteo.
- */
+    * Inserimento sicuro nel buffer con trigonometria precaricata e pruning automatico
+    * Mantiene sempre almeno 60 minuti di memoria locale per il calcolo della bussola meteo.
+    */
 function safePush(buffer, val, time) {
     if (val === null || val === undefined || isNaN(val)) return;
 
@@ -197,16 +197,19 @@ function checkDepthAlarm(m) {
     ui.depth.classList.remove('alarm-warning', 'alarm-danger', 'blink-alarm');
     if (m < CONFIG.alarms.depthDanger) {
         ui.depth.classList.add('alarm-danger', 'blink-alarm');
-        playBingBing();
+        // Suona solo se siamo attivamente in navigazione (Harbor Silence acustico quando fermi)
+        if (isNavigating) {
+            playBingBing();
+        }
     } else if (m < CONFIG.alarms.depthWarning) {
         ui.depth.classList.add('alarm-warning');
     }
 }
 
 /**
- * computeTrueWind: Calcola TWS, TWA e TWD strategico.
- * Gestisce il fallback separato (Split-Fallback) in caso di dati parzialmente nativi di bordo.
- */
+    * computeTrueWind: Calcola TWS, TWA e TWD strategico.
+    * Gestisce il fallback separato (Split-Fallback) in caso di dati parzialmente nativi di bordo.
+    */
 function computeTrueWind() {
     const aws = store.raw["environment.wind.speedApparent"], awa = store.raw["environment.wind.angleApparent"];
     const stw = store.raw["navigation.speedThroughWater"] || 0, sog = store.raw["navigation.speedOverGround"] || 0;
@@ -267,9 +270,9 @@ function computeTrueWind() {
 // ==========================================================================
 
 /**
- * Assegna un punteggio di qualità statico alla sorgente basato sull'hardware.
- * Più alto è il punteggio, maggiore è la priorità del sensore.
- */
+    * Assegna un punteggio di qualità statico alla sorgente basato sull'hardware.
+    * Più alto è il punteggio, maggiore è la priorità del sensore.
+    */
 function getSourcePriorityScore(sourceName) {
     if (!sourceName) return 0;
     const name = sourceName.toLowerCase();
@@ -293,6 +296,20 @@ function getSourcePriorityScore(sourceName) {
 }
 
 function processIncomingData(path, val, source, timeMs) {
+    // 1. Filtro anti-spike vento (> 100 nodi / 51.44 m/s)
+    if ((path === "environment.wind.speedApparent" || path === "environment.wind.speedTrue") && val > 51.44) {
+        return;
+    }
+
+    // 2. Filtro anti-spike velocità barca STW/SOG (> 50 nodi / 25.72 m/s)
+    if ((path === "navigation.speedThroughWater" || path === "navigation.speedOverGround") && val > 25.72) {
+        return;
+    }
+
+    // 3. Filtro validità profondità (ignora errori negativi e letture > 500m per lost-echo)
+    if (path === "environment.depth.belowTransducer" && (val < -2.0 || val > 500)) {
+        return;
+    }
     // Usiamo il tempo reale del pacchetto del server per eliminare lo sfasamento
     const now = timeMs || Date.now();
     const score = getSourcePriorityScore(source);
@@ -380,6 +397,16 @@ function processIncomingData(path, val, source, timeMs) {
     if (path === "navigation.courseOverGroundTrue") {
         safePush(store.smoothBuf.cog, val, now);
         safePush(store.longBuf.cog, val, now);
+
+        // Se non è installata alcuna bussola fisica sulla rete e la barca è in movimento stabile (> 1.5 nodi),
+        // emuliamo la Prua usando il COG per attivare il TWD, il mini-compass e la bussola radar.
+        const hasCompass = store.raw["navigation.headingTrue"] !== undefined || store.raw["navigation.headingMagnetic"] !== undefined;
+        const sog = store.raw["navigation.speedOverGround"] || 0;
+        if (!hasCompass && sog > 0.77) { // 0.77 m/s = 1.5 nodi
+            store.raw["navigation.headingTrue"] = val;
+            safePush(store.smoothBuf.hdg, val, now);
+            safePush(store.longBuf.hdg, val, now);
+        }
     }
 
     const twPaths = [
@@ -532,12 +559,12 @@ function updateWindTrend() {
 // ==========================================================================
 
 /**
- * upUI: Aggiornamento valori digitali
- */
+    * upUI: Aggiornamento valori digitali
+    */
 const upUI = (el, obj, instantRaw, isCompass = false) => {
     if (!obj || obj.val === null || isNaN(obj.val) || instantRaw === undefined) {
-            el.innerHTML = "---&deg;";
-            el.classList.remove('unstable-data');
+        el.innerHTML = "---&deg;";
+        el.classList.remove('unstable-data');
     } else {
         let valDeg = Math.round(radToDeg(obj.val));
         let mainVal = (isCompass ? ((valDeg + 360) % 360).toString().padStart(3, '0') : valDeg) + "&deg;";
@@ -551,8 +578,8 @@ const upUI = (el, obj, instantRaw, isCompass = false) => {
 };
 
 /**
- * Loop principale di aggiornamento interfaccia (1Hz)
- */
+    * Loop principale di aggiornamento interfaccia (1Hz)
+    */
 function startDisplayLoop() {
     renderInterval = setInterval(() => {
         const now = Date.now();
@@ -567,43 +594,54 @@ function startDisplayLoop() {
         updateWindTrend();
 
         // --- AGGIORNAMENTO STATUS CON CONTEGGIO MINUTI REALE ---
-                const isSocketOpen = socket && socket.readyState === WebSocket.OPEN;
-                
-                if (isSocketOpen) {
-                    ui.status.className = "online"; // Colore Verde
-                    const viewportMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
-                    const requiredMs = viewportMinutes * 60000;
-                    const oldestStw = store.histories.stw ? store.histories.stw[0] : null;
+        const isSocketOpen = socket && socket.readyState === WebSocket.OPEN;
+        
+        if (isSocketOpen) {
+            ui.status.className = "online"; // Colore Verde
+            const viewportMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
+            const requiredMs = viewportMinutes * 60000;
+            const oldestStw = store.histories.stw ? store.histories.stw[0] : null;
 
-                    if (oldestStw) {
-                        const availableMs = now - oldestStw.time;
-                        if (availableMs >= requiredMs) {
-                            ui.status.innerText = `ONLINE ${viewportMinutes}min`;
-                        } else {
-                            const availableMin = Math.max(1, Math.floor(availableMs / 60000));
-                            ui.status.innerText = `ONLINE ${availableMin}/${viewportMinutes}min`;
-                        }
-                    } else {
-                        ui.status.innerText = `ONLINE`;
-                    }
+            if (oldestStw) {
+                const availableMs = now - oldestStw.time;
+                if (availableMs >= requiredMs) {
+                    ui.status.innerText = `ONLINE ${viewportMinutes}min`;
                 } else {
-                    ui.status.className = "offline"; // Colore Rosso
-                    ui.status.innerText = "OFFLINE"; // Chirurgico: Forza il testo a OFFLINE se il socket è chiuso, evitando scritte verdi in rosso
+                    const availableMin = Math.max(1, Math.floor(availableMs / 60000));
+                    ui.status.innerText = `ONLINE ${availableMin}/${viewportMinutes}min`;
                 }
+            } else {
+                ui.status.innerText = `ONLINE`;
+            }
+        } else {
+            ui.status.className = "offline"; // Colore Rosso
+            ui.status.innerText = "OFFLINE"; // Chirurgico: Forza il testo a OFFLINE se il socket è chiuso, evitando scritte verdi in rosso
+        }
 
         // --- WATCHDOG: CONTROLLO TIMEOUT ---
-            const watch = {
-                "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog,
-                "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog,
-                "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth,
-                "environment.wind.speedTrue": ui.tws
-            };
-            for (let p in watch) {
-                if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) {
-                    safeSetText(watch[p], "---"); // Sostituito innerText con la funzione protetta!
-                    delete store.raw[p];
+        const watch = {
+            "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog,
+            "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog,
+            "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth,
+            "environment.wind.speedTrue": ui.tws
+        };
+        for (let p in watch) {
+            if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) {
+                safeSetText(watch[p], "---"); // Sostituito innerText con la funzione protetta!
+                delete store.raw[p];
+
+                // Forza lo scorrimento dei dati fuori dallo schermo per i sensori in timeout
+                if (p === "navigation.speedThroughWater") {
+                    refreshGraph('stw');
+                } else if (p === "navigation.speedOverGround") {
+                    refreshGraph('sog');
+                } else if (p === "environment.depth.belowTransducer") {
+                    refreshGraph('depth');
+                } else if (p === "environment.wind.speedApparent" || p === "environment.wind.speedTrue") {
+                    refreshGraph('tws');
                 }
             }
+        }
 
         // --- AGGIORNAMENTO VELOCITÀ SULL'ACQUA (STW) ---
         if (store.raw["navigation.speedThroughWater"] !== undefined) {
@@ -642,95 +680,95 @@ function startDisplayLoop() {
         }
 
         // --- AGGIORNAMENTO PROFONDITÀ (DEPTH) ---
-                if (store.raw["environment.depth.belowTransducer"] !== undefined) {
-                    safeSetText(ui.depth, store.raw["environment.depth.belowTransducer"].toFixed(1));
-                    checkDepthAlarm(store.raw["environment.depth.belowTransducer"]);
-                    manageHistory('depth', store.raw["environment.depth.belowTransducer"]);
-                }
+        if (store.raw["environment.depth.belowTransducer"] !== undefined) {
+            safeSetText(ui.depth, store.raw["environment.depth.belowTransducer"].toFixed(1));
+            checkDepthAlarm(store.raw["environment.depth.belowTransducer"]);
+            manageHistory('depth', store.raw["environment.depth.belowTransducer"]);
+        }
 
-                // --- GESTIONE VENTO (TWS / AWS SWITCH & BUSSOLA) ---
-                        
-                // Estrazione dati sicura: controlliamo esplicitamente se il dato esiste, altrimenti 0
-                const rawTws = store.raw["environment.wind.speedTrue"];
-                const rawAws = store.raw["environment.wind.speedApparent"];
+        // --- GESTIONE VENTO (TWS / AWS SWITCH & BUSSOLA) ---
                 
-                const twsVal = (rawTws !== undefined && rawTws !== null) ? msToKts(rawTws) : 0;
-                const awsVal = (rawAws !== undefined && rawAws !== null) ? msToKts(rawAws) : 0;
-                
-                if (rawTws !== undefined && rawTws !== null) manageHistory('tws', twsVal);
-                if (rawAws !== undefined && rawAws !== null) manageHistory('aws', awsVal);
+        // Estrazione dati sicura: controlliamo esplicitamente se il dato esiste, altrimenti 0
+        const rawTws = store.raw["environment.wind.speedTrue"];
+        const rawAws = store.raw["environment.wind.speedApparent"];
+        
+        const twsVal = (rawTws !== undefined && rawTws !== null) ? msToKts(rawTws) : 0;
+        const awsVal = (rawAws !== undefined && rawAws !== null) ? msToKts(rawAws) : 0;
+        
+        if (rawTws !== undefined && rawTws !== null) manageHistory('tws', twsVal);
+        if (rawAws !== undefined && rawAws !== null) manageHistory('aws', awsVal);
 
-                // Disegno testo casella destra (TWS o AWS)
-                if (rawTws !== undefined || rawAws !== undefined) {
-                    const labelWind = document.getElementById('tws-aws-label');
-                    const currentWind = (displayModeTws === 'AWS') ? awsVal : twsVal;
-                    
-                    safeSetText(ui.tws, currentWind.toFixed(1));
-                    if (labelWind) labelWind.textContent = displayModeTws;
+        // Disegno testo casella destra (TWS o AWS)
+        if (rawTws !== undefined || rawAws !== undefined) {
+            const labelWind = document.getElementById('tws-aws-label');
+            const currentWind = (displayModeTws === 'AWS') ? awsVal : twsVal;
+            
+            safeSetText(ui.tws, currentWind.toFixed(1));
+            if (labelWind) labelWind.textContent = displayModeTws;
 
-                    if (currentWind >= CONFIG.graphs.reef2) {
-                        ui.tws.style.setProperty('color', '#ff3b30', 'important');
-                    } else if (currentWind >= CONFIG.graphs.reef1) {
-                        ui.tws.style.setProperty('color', '#ff9800', 'important');
-                    } else {
-                        if (displayModeTws === 'AWS') {
-                            ui.tws.style.setProperty('color', '#5c6bc0', 'important');
-                        } else {
-                            const navyNight = isNight ? '#6c8ea0' : '#2c3e50';
-                            ui.tws.style.setProperty('color', navyNight, 'important');
-                        }
-                    }
+            if (currentWind >= CONFIG.graphs.reef2) {
+                ui.tws.style.setProperty('color', '#ff3b30', 'important');
+            } else if (currentWind >= CONFIG.graphs.reef1) {
+                ui.tws.style.setProperty('color', '#ff9800', 'important');
+            } else {
+                if (displayModeTws === 'AWS') {
+                    ui.tws.style.setProperty('color', '#5c6bc0', 'important');
+                } else {
+                    const navyNight = isNight ? '#6c8ea0' : '#2c3e50';
+                    ui.tws.style.setProperty('color', navyNight, 'important');
                 }
+            }
+        }
 
         // --- AGGIORNAMENTO DELLA BUSSOLA CENTRALE (BATTERY SAVER A 1Hz) ---
-                        if (activeInstrument === 'gauge') {
-                            updateCentralGauge(store, ui, now, isNavigating, sogKts, stwKts, rawAws, awsVal);
-                        }
-                        
-                        // --- SLOW TIER (Salvataggio stato ogni 10 secondi) ---
-                        if (lastAvgUIUpdate++ % 10 === 0) {
-                            saveDashboardState();
-                        }
+        if (activeInstrument === 'gauge') {
+            updateCentralGauge(store, ui, now, isNavigating, sogKts, stwKts, rawAws, awsVal);
+        }
+        
+        // --- SLOW TIER (Salvataggio stato ogni 10 secondi) ---
+        if (lastAvgUIUpdate++ % 10 === 0) {
+            saveDashboardState();
+        }
 
-                if (lastAvgUIUpdate % 3 === 0) {
-                    let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false);
-                    let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false);
-                    let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true);
-                    let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true);
-                    let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false);
+        if (lastAvgUIUpdate % 3 === 0) {
+            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false);
+            let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false);
+            let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true);
+            let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true);
+            let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false);
 
-                    upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
-                    upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
-                    upUI(ui.awaAvg, awObj, store.raw["environment.wind.angleApparent"], false);
-                    upUI(ui.twaAvg, twObj, store.raw["environment.wind.angleTrueWater"], false);
-                    upUI(ui.twdAvg, twdObj, store.raw["environment.wind.directionTrue"], true);
+            upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
+            upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
+            upUI(ui.awaAvg, awObj, store.raw["environment.wind.angleApparent"], false);
+            upUI(ui.twaAvg, twObj, store.raw["environment.wind.angleTrueWater"], false);
+            upUI(ui.twdAvg, twdObj, store.raw["environment.wind.directionTrue"], true);
 
-                    if (hObj && twdObj) {
-                        const reflectAngle = (targetRad, axisRad) => {
-                            const dS = Math.sin(axisRad - targetRad);
-                            const dC = Math.cos(axisRad - targetRad);
-                            return Math.atan2(Math.sin(axisRad) * dC + Math.cos(axisRad) * dS, Math.cos(axisRad) * dC - Math.sin(axisRad) * dS);
-                        };
-                        const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout;
-                        if (!isNavigating) ui.tackHdg.innerHTML = "---&deg;";
-                        else if (unstableH) { ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.add('unstable-data'); }
-                        else {
-                            const rH = (radToDeg(reflectAngle(hObj.val, twdObj.val)) + 360) % 360;
-                            ui.tackHdg.innerHTML = `${Math.round(rH).toString().padStart(3, '0')}&deg;`;
-                            ui.tackHdg.classList.remove('unstable-data');
-                        }
-                        if (cObj) {
-                            const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout;
-                            if (!isNavigating) ui.tackCog.innerHTML = "---&deg;";
-                            else if (unstableC) { ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.add('unstable-data'); }
-                            else {
-                                const rC = (radToDeg(reflectAngle(cObj.val, twdObj.val)) + 360) % 360;
-                                ui.tackCog.innerHTML = `${Math.round(rC).toString().padStart(3, '0')}&deg;`;
-                                ui.tackCog.classList.remove('unstable-data');
-                            }
-                        }
+            if (hObj && twdObj) {
+                const reflectAngle = (targetRad, axisRad) => {
+                    const dS = Math.sin(axisRad - targetRad);
+                    const dC = Math.cos(axisRad - targetRad);
+                    return Math.atan2(Math.sin(axisRad) * dC + Math.cos(axisRad) * dS, Math.cos(axisRad) * dC - Math.sin(axisRad) * dS);
+                };
+                const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout;
+                if (!isNavigating) ui.tackHdg.innerHTML = "---&deg;";
+                else if (unstableH) { ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.add('unstable-data'); }
+                else {
+                    const rH = (radToDeg(reflectAngle(hObj.val, twdObj.val)) + 360) % 360;
+                    ui.tackHdg.innerHTML = `${Math.round(rH).toString().padStart(3, '0')}&deg;`;
+                    ui.tackHdg.classList.remove('unstable-data');
+                }
+                if (cObj) {
+                    const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout;
+                    if (!isNavigating) ui.tackCog.innerHTML = "---&deg;";
+                    else if (unstableC) { ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.add('unstable-data'); }
+                    else {
+                        const rC = (radToDeg(reflectAngle(cObj.val, twdObj.val)) + 360) % 360;
+                        ui.tackCog.innerHTML = `${Math.round(rC).toString().padStart(3, '0')}&deg;`;
+                        ui.tackCog.classList.remove('unstable-data');
                     }
                 }
+            }
+        }
     }, RENDER_INTERVAL_MS);
 }
 
@@ -741,8 +779,8 @@ function startDisplayLoop() {
 let currentConfigString = ""; // Memoria per rilevare cambiamenti nei settings
 
 /**
- * Risolve dinamicamente l'URL dell'API del Cerbo GX se siamo in locale su Mac/PC
- */
+    * Risolve dinamicamente l'URL dell'API del Cerbo GX se siamo in locale su Mac/PC
+    */
 function getApiUrl(path) {
     if (window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
         return `http://${CONFIG.server.fallbackIp}${path}`;
@@ -751,8 +789,8 @@ function getApiUrl(path) {
 }
 
 /**
- * Funzione Helper: Applica fisicamente i dati JSON all'oggetto CONFIG globale
- */
+    * Funzione Helper: Applica fisicamente i dati JSON all'oggetto CONFIG globale
+    */
 function applyConfigData(data) {
     Object.assign(CONFIG.alarms, data.alarms || {});
     Object.assign(CONFIG.graphs, data.graphs || {});
@@ -772,8 +810,8 @@ function applyConfigData(data) {
 }
 
 /**
- * Recupera la configurazione iniziale al caricamento della pagina
- */
+    * Recupera la configurazione iniziale al caricamento della pagina
+    */
 async function fetchServerConfig() {
     try {
         const response = await fetch(getApiUrl('/rotevista-config'));
@@ -791,8 +829,8 @@ async function fetchServerConfig() {
 }
 
 /**
- * Watchdog: Controlla in background se le impostazioni sul server sono cambiate
- */
+    * Watchdog: Controlla in background se le impostazioni sul server sono cambiate
+    */
 async function watchConfigChanges() {
     try {
         const response = await fetch(getApiUrl('/rotevista-config'));
@@ -822,8 +860,8 @@ async function watchConfigChanges() {
 }
 
 /**
- * Recupera lo storico dei grafici e dei radar pre-popolato dal server Signal K (Pro v6.0)
- */
+    * Recupera lo storico dei grafici e dei radar pre-popolato dal server Signal K (Pro v6.0)
+    */
 async function fetchServerHistory() {
     try {
         const response = await fetch(getApiUrl('/rotevista-history'));
@@ -862,12 +900,12 @@ async function fetchServerHistory() {
 }
 
 /**
- * manageHistory v3.7 - Aggregazione semantica "Pro-Grade"
- * Integrazioni:
- * 1. Strict undefined check per lastUpdates.
- * 2. Anti-dropout dinamico tarato sul 50% del Reef 1.
- * 3. Clamping di sicurezza (no negativi, no Infinity).
- */
+    * manageHistory v3.7 - Aggregazione semantica "Pro-Grade"
+    * Integrazioni:
+    * 1. Strict undefined check per lastUpdates.
+    * 2. Anti-dropout dinamico tarato sul 50% del Reef 1.
+    * 3. Clamping di sicurezza (no negativi, no Infinity).
+    */
 function manageHistory(type, value) {
     // --- 1. VALIDAZIONE INPUT RIGOROSA ---
     if (value === undefined || value === null || !isFinite(value)) return;
@@ -1133,50 +1171,50 @@ async function init() {
     initRadarTicks();   // Tacche del Wind Radar storico (weather-radar.js)
     
     // 1. COMANDO TATTICO: Gestore Box TWD (Pressione prolungata -> Radar | Tocco rapido in modalità Radar -> Torna a Gauge)
-        const twdBox = document.querySelector('.box-twd');
-        if (twdBox) {
-            let twdPressTimer = null;
-            let longPressTriggered = false; // Flag di controllo della pressione prolungata
-            
-            twdBox.addEventListener('pointerdown', (e) => {
-                longPressTriggered = false;
-                if (activeInstrument === 'gauge') {
-                    twdPressTimer = setTimeout(() => {
-                        activeInstrument = 'radar';
-                        document.getElementById('wind-gauge').style.display = 'none';
-                        document.getElementById('wind-radar').style.display = 'block';
-                        renderRadar(); // Disegna immediatamente il radar all'attivazione
-                        twdPressTimer = null;
-                        longPressTriggered = true; // Segnala che la transizione al radar è avvenuta con successo
-                    }, 1000);
-                }
-            });
-            twdBox.addEventListener('pointerup', () => {
-                if (activeInstrument === 'gauge') {
-                    if (twdPressTimer) {
-                        clearTimeout(twdPressTimer);
-                        twdPressTimer = null;
-                    }
-                } else if (activeInstrument === 'radar') {
-                    if (longPressTriggered) {
-                        // Se l'evento di rilascio appartiene al tocco prolungato che ha appena attivato il radar, lo ignoriamo
-                        longPressTriggered = false;
-                    } else {
-                        // Altrimenti è un tocco rapido indipendente: torna alla bussola analogica
-                        activeInstrument = 'gauge';
-                        document.getElementById('wind-radar').style.display = 'none';
-                        document.getElementById('wind-gauge').style.display = 'block';
-                    }
-                }
-            });
-            twdBox.addEventListener('pointerleave', () => {
+    const twdBox = document.querySelector('.box-twd');
+    if (twdBox) {
+        let twdPressTimer = null;
+        let longPressTriggered = false; // Flag di controllo della pressione prolungata
+        
+        twdBox.addEventListener('pointerdown', (e) => {
+            longPressTriggered = false;
+            if (activeInstrument === 'gauge') {
+                twdPressTimer = setTimeout(() => {
+                    activeInstrument = 'radar';
+                    document.getElementById('wind-gauge').style.display = 'none';
+                    document.getElementById('wind-radar').style.display = 'block';
+                    renderRadar(); // Disegna immediatamente il radar all'attivazione
+                    twdPressTimer = null;
+                    longPressTriggered = true; // Segnala che la transizione al radar è avvenuta con successo
+                }, 1000);
+            }
+        });
+        twdBox.addEventListener('pointerup', () => {
+            if (activeInstrument === 'gauge') {
                 if (twdPressTimer) {
                     clearTimeout(twdPressTimer);
                     twdPressTimer = null;
                 }
-                longPressTriggered = false;
-            });
-        }
+            } else if (activeInstrument === 'radar') {
+                if (longPressTriggered) {
+                    // Se l'evento di rilascio appartiene al tocco prolungato che ha appena attivato il radar, lo ignoriamo
+                    longPressTriggered = false;
+                } else {
+                    // Altrimenti è un tocco rapido indipendente: torna alla bussola analogica
+                    activeInstrument = 'gauge';
+                    document.getElementById('wind-radar').style.display = 'none';
+                    document.getElementById('wind-gauge').style.display = 'block';
+                }
+            }
+        });
+        twdBox.addEventListener('pointerleave', () => {
+            if (twdPressTimer) {
+                clearTimeout(twdPressTimer);
+                twdPressTimer = null;
+            }
+            longPressTriggered = false;
+        });
+    }
 
     // 2. COMANDO TATTICO: Click in qualsiasi punto del radar per tornare all'analogico
     const windRadarSvg = document.getElementById('wind-radar');

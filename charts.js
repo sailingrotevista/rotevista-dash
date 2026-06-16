@@ -156,14 +156,14 @@ function refreshGraph(t) {
 // Genera fisicamente le curve e le aree SVG
 function drawGraph(d, id, min, max, isTws, isHercules) {
     const svg = document.getElementById(id);
-    if (!svg || d.length < 2) return;
+    if (!svg) return;
 
     const w = 200, h = 40;
     const range = max - min || 1;
     const isDepth = (id === 'depth-graph');
     
-    const latestPoint = d[d.length - 1];
-    const now = latestPoint ? latestPoint.time : Date.now();
+    // Utilizza sempre il tempo reale corrente per permettere lo scorrimento continuo dei dati
+    const now = Date.now();
 
     const box = svg.closest('.data-box');
     const isFocused = isFocusActive && box && box.classList.contains('is-focused');
@@ -173,7 +173,10 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
     const viewportStart = now - viewportMs;
 
     const visibleData = d.filter(p => p.time >= viewportStart);
-    if (visibleData.length < 2) return;
+    if (visibleData.length < 2) {
+        svg.innerHTML = ""; // Svuota completamente l'SVG se il sensore è spento e i dati sono scivolati fuori scala
+        return;
+    }
 
     const colDanger  = "#ff3b30", colWarning = "#ff9800", colTws = "#2c3e50", colAws = "#5c6bc0";
     const colDepth   = "#0088cc", colStw = "#00C851", colSog = "#ffbb33", colVmg = "#00b8d4";
