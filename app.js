@@ -98,8 +98,11 @@ const ui = {
     twdChevron: document.getElementById('twd-wind-chevron'),
     leewayMask: document.getElementById('leeway-mask-rect'), leewayVal: document.getElementById('leeway-val'),
     tackHdg: document.getElementById('tack-hdg'), tackCog: document.getElementById('tack-cog'),
-    status: document.getElementById('status'), hotspot: document.getElementById('fullscreen-hotspot')
+    status: document.getElementById('status'), hotspot: document.getElementById('fullscreen-hotspot'),
+    tackLabel: document.getElementById('tack-label')
 };
+
+let currentTackLabelMode = 'TACK'; // Stato dell'etichetta tattica ('TACK' o 'GYBE') con isteresi
 
 // ==========================================================================
 // 3. UTILITIES (MATEMATICA, BUFFER E MEMORIA) - [Esportate in utils.js]
@@ -238,8 +241,13 @@ function computeTrueWind() {
     if (tws_water > 0.05) {
         const twa = Math.atan2(aws * Math.sin(awa), aws * Math.cos(awa) - stw);
         store.raw["environment.wind.angleTrueWater"] = twa;
+        
+        // Inserimento atomico e sincronizzato di TWA e AWA nei relativi buffer mobili
+        // per garantire che le medie vettoriali siano perfettamente allineate in fase
         safePush(store.smoothBuf.twa, twa, now);
         safePush(store.longBuf.twa, twa, now);
+        safePush(store.smoothBuf.awa, awa, now);
+        safePush(store.longBuf.awa, awa, now);
     }
 
     // ==========================================================================
@@ -351,16 +359,16 @@ function processIncomingData(path, val, source, timeMs) {
     // Evita di eseguire calcoli trigonometrici, allocare oggetti in memoria dinamica
     // e popolare i buffer smoothBuf/longBuf decine di volte al secondo per singolo sensore.
     if (!lastPathProcessTimes[path]) lastPathProcessTimes[path] = 0;
-    if (now - lastPathProcessTimes[path] < 1000) {
+    if (now - lastPathProcessTimes[path] < 800) {
         return; // Esce subito risparmiando cicli di calcolo del browser e batteria del tablet
     }
     lastPathProcessTimes[path] = now;
 
     // Da qui in poi, l'inserimento nei buffer fisici avviene rigorosamente a 1Hz:
-    if (path === "environment.wind.angleApparent") {
-        safePush(store.smoothBuf.awa, val, now);
-        safePush(store.longBuf.awa, val, now);
-    }
+    //if (path === "environment.wind.angleApparent") {
+    //  safePush(store.smoothBuf.awa, val, now);
+    //  safePush(store.longBuf.awa, val, now);
+    //}
 
     // BUG RISOLTO: Intercetta il TWD nativo e lo spinge nei buffer della bussola radar
     if (path === "environment.wind.directionTrue") {
@@ -462,7 +470,7 @@ function updateWindTrend() {
         // Allarme VISIVO: Se siamo in zona di pericolo poppa profonda (> 155°), accendi entrambi i LED di rosso pulsante
         if (absTwaDeg > 155) {
             if (gaugeDots.cw) { gaugeDots.cw.classList.add('is-gybing'); gaugeDots.cw.setAttribute('fill', '#ff3b30'); }
-            if (gaugeDots.ccw) { gaugeDots.ccw.classList.add('is-gybing'); gaugeDots.ccw.setAttribute('fill', '#ff3b30'); }
+            if (gaugeDots.ccw) { gaugeDots.ccw.classList.remove('is-gybing'); }
 
             // LOGICA MACCHINA A STATI CON ISTERESI:
             // Rileviamo le mure solo se siamo fuori dalla zona cieca di poppa secca (> 170°).
@@ -537,7 +545,7 @@ function updateWindTrend() {
     const compassDots = { cw: document.getElementById('trend-dot-cw'), ccw: document.getElementById('trend-dot-ccw') };
 
     if (twdNow && twdRef) {
-        let deltaMeteo = radToDeg((twdNow.val - twdRef.val + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+        let deltaMeteo = radToDeg((twdNow.val - twdRef.val + Math.PI * 3) % (2 * Math.PI) - Math.PI);
         if (Math.abs(deltaMeteo) > 6.0) {
             const isSouth = store.raw["navigation.position"]?.latitude < 0;
             let meteoColor = (!isSouth) ? (deltaMeteo < 0 ? "#27ae60" : "#c0392b") : (deltaMeteo > 0 ? "#27ae60" : "#c0392b");
@@ -736,6 +744,17 @@ function startDisplayLoop() {
             let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true);
             let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true);
             let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false);
+
+            // --- GESTIONE DINAMICA ETICHETTA TACK/GYBE CON ISTERESI DI 10 GRADI ---
+            if (ui.tackLabel) {
+                const absTwa = Math.abs(radToDeg(store.raw["environment.wind.angleTrueWater"] || 0));
+                if (currentTackLabelMode === 'TACK' && absTwa > 95) {
+                    currentTackLabelMode = 'GYBE';
+                } else if (currentTackLabelMode === 'GYBE' && absTwa < 85) {
+                    currentTackLabelMode = 'TACK';
+                }
+                safeSetText(ui.tackLabel, currentTackLabelMode);
+            }
 
             upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
             upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
@@ -1277,7 +1296,7 @@ document.addEventListener('visibilitychange', () => {
                 // Se era già chiuso o in errore, proviamo a riconnettere subito
                 connect();
             } else {
-                // Se risulta "OPEN" ma potrebbe essere una connessione fantasma,
+                // Se resulta "OPEN" ma potrebbe essere una connessione fantasma,
                 // la chiudiamo forzatamente per scatenare la riconnessione pulita e il download della cronologia
                 console.log("🔌 [Watchdog] Riavvio precauzionale del WebSocket per evitare connessioni fantasma.");
                 socket.close();

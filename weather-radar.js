@@ -138,12 +138,13 @@ function renderRadar() {
         radarDataList.push({
             twdMin: (twdDeg - 20 + 360) % 360,
             twdMax: (twdDeg + 20 + 360) % 360,
-            twsPeak: store.futureForecast.tws,
+            twsPeak: store.futureForecast.gust, // Chirurgico: Usiamo il Gust come picco per visualizzare l'arco delle raffiche future
             isFuture: true
         });
     } else {
         radarDataList.push(null);
     }
+
 
     // 2. ANELLO 1: Presente Mobile (Real-Time Client-Side)
     const activeRing = calculateActive30mRing();
