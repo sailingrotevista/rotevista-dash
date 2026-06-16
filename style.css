@@ -463,8 +463,31 @@ body.night-mode {
 .night-mode .is-focused .scale-labels { color: #ff3333 !important; }
 
 /* --- 10.4 WIND GAUGE (STRUMENTO CENTRALE) --- */
-.night-mode #wind-gauge circle { fill: #000 !important; stroke: #220000 !important; }
-.night-mode #wind-gauge circle:nth-of-type(2), .night-mode #fullscreen-hotspot { fill: #050000 !important; stroke: #330000 !important; }
+.night-mode #wind-gauge circle:not(#trend-gauge-cw):not(#trend-gauge-ccw) {
+    fill: #000000 !important;
+    stroke: #220000 !important;
+}
+.night-mode #wind-gauge circle:nth-of-type(2), .night-mode #fullscreen-hotspot {
+    fill: #050000 !important;
+    stroke: #330000 !important;
+}
+
+/* Stile notturno dedicato per i pallini di tendenza della bussola centrale */
+.night-mode #trend-gauge-cw,
+.night-mode #trend-gauge-ccw {
+    fill: #440000 !important; /* Rosso scurissimo a riposo per preservare la vista notturna */
+    stroke: none !important;
+    transition: fill 0.2s ease, filter 0.2s ease;
+}
+
+/* Accensione brillante con effetto alone (glow) quando lampeggiano (attivi) o in allarme strambata */
+.night-mode #trend-gauge-cw.is-trending,
+.night-mode #trend-gauge-ccw.is-trending,
+.night-mode #trend-gauge-cw.is-gybing,
+.night-mode #trend-gauge-ccw.is-gybing {
+    fill: #ff0000 !important;
+    filter: drop-shadow(0 0 4px #ff0000) !important;
+}
 .night-mode #center-glow feDropShadow { flood-color: #ff0000 !important; flood-opacity: 0.6 !important; }
 .night-mode #boat-icon { fill: #220000 !important; stroke: #ff0000 !important; stroke-width: 0.8px !important; opacity: 1 !important; }
 .night-mode #aws-display-group text { fill: #800000 !important; }
@@ -533,11 +556,11 @@ body.night-mode {
 }
 
 /* --- OVERRIDE NIGHT MODE PER IL WIND RADAR --- */
-.night-mode #wind-radar circle {
+.night-mode #wind-radar circle:not(.is-trending) {
     fill: #000000 !important;
     stroke: #220000 !important;
 }
-.night-mode #wind-radar circle:nth-of-type(2),
+.night-mode #wind-radar circle:nth-of-type(2):not(.is-trending),
 .night-mode #radar-hotspot {
     fill: #050000 !important;
     stroke: #330000 !important;

@@ -238,6 +238,16 @@ function renderRadar() {
             borderPath.setAttribute("stroke-linecap", "round");
             borderPath.setAttribute("opacity", opacityValue);
             ringsContainer.appendChild(borderPath);
+        } else {
+            const borderPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            borderPath.setAttribute("d", pathData);
+            borderPath.setAttribute("fill", "none");
+            const isNight = document.body.classList.contains('night-mode');
+            borderPath.setAttribute("stroke", isNight ? "#220000" : "#90a4ae");
+            borderPath.setAttribute("stroke-width", BORDER_STROKE_WIDTH);
+            borderPath.setAttribute("stroke-linecap", "round");
+            borderPath.setAttribute("opacity", "0.6");
+            ringsContainer.appendChild(borderPath);
         }
 
         const mainPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -246,7 +256,7 @@ function renderRadar() {
         mainPath.setAttribute("stroke", strokeColor);
         mainPath.setAttribute("stroke-width", ARC_STROKE_WIDTH);
         mainPath.setAttribute("stroke-linecap", "round");
-        mainPath.setAttribute("opacity", data.isFuture ? "0.5" : opacityValue);
+        mainPath.setAttribute("opacity", data.isFuture ? "0.7" : opacityValue);
         mainPath.id = data.isFuture ? "" : (index === 1 ? "active-present-arc" : "");
         ringsContainer.appendChild(mainPath);
     });
