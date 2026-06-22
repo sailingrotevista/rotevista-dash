@@ -385,7 +385,7 @@ body.night-mode .alarm-danger {
 
 /* ==========================================================================
    9. WIDGETS E OVERRIDE SVG (GIORNO)
-   ========================================================================== */
+   ========================================================================= */
 #status {
     position: absolute;
     top: 15px; right: 15px;
@@ -467,27 +467,42 @@ body.night-mode {
     fill: #000000 !important;
     stroke: #220000 !important;
 }
-.night-mode #wind-gauge circle:nth-of-type(2), .night-mode #fullscreen-hotspot {
+.night-mode #wind-gauge > circle:nth-of-type(2), .night-mode #fullscreen-hotspot {
     fill: #050000 !important;
     stroke: #330000 !important;
 }
 
-/* Stile notturno dedicato per i pallini di tendenza della bussola centrale */
-.night-mode #trend-gauge-cw,
-.night-mode #trend-gauge-ccw {
-    fill: #440000 !important; /* Rosso scurissimo a riposo per preservare la vista notturna */
+/* 1. STATO SPENTO/RIPOSO: Attivo solo se l'attributo fill originario è grigio (#bbb o #bbbbbb) */
+.night-mode #trend-gauge-cw[fill="#bbb"],
+.night-mode #trend-gauge-ccw[fill="#bbb"],
+.night-mode #trend-gauge-cw[fill="#bbbbbb"],
+.night-mode #trend-gauge-ccw[fill="#bbbbbb"] {
+    fill: #440000 !important; /* Rosso scurissimo soffuso */
     stroke: none !important;
-    transition: fill 0.2s ease, filter 0.2s ease;
+    filter: none !important;
+    opacity: 0.3 !important;
 }
 
-/* Accensione brillante con effetto alone (glow) quando lampeggiano (attivi) o in allarme strambata */
-.night-mode #trend-gauge-cw.is-trending,
-.night-mode #trend-gauge-ccw.is-trending,
+/* 2. STATO ATTIVO VERDE (Buono/Sotto-vento): Attivo solo se JS imposta il colore di lift (#27ae60) */
+.night-mode #trend-gauge-cw[fill="#27ae60"],
+.night-mode #trend-gauge-ccw[fill="#27ae60"] {
+    fill: #00C851 !important; /* Verde smeraldo brillante */
+    stroke: none !important;
+    filter: drop-shadow(0 0 5px #00C851) !important;
+    opacity: 1 !important;
+}
+
+/* 3. STATO ATTIVO ROSSO (Scarso/Sopra-vento o strambata): Attivo se JS imposta il colore di header (#c0392b) o se in allarme strambata */
+.night-mode #trend-gauge-cw[fill="#c0392b"],
+.night-mode #trend-gauge-ccw[fill="#c0392b"],
 .night-mode #trend-gauge-cw.is-gybing,
 .night-mode #trend-gauge-ccw.is-gybing {
-    fill: #ff0000 !important;
-    filter: drop-shadow(0 0 4px #ff0000) !important;
+    fill: #ff3b30 !important; /* Rosso brillante */
+    stroke: none !important;
+    filter: drop-shadow(0 0 5px #ff3b30) !important;
+    opacity: 1 !important;
 }
+
 .night-mode #center-glow feDropShadow { flood-color: #ff0000 !important; flood-opacity: 0.6 !important; }
 .night-mode #boat-icon { fill: #220000 !important; stroke: #ff0000 !important; stroke-width: 0.8px !important; opacity: 1 !important; }
 .night-mode #aws-display-group text { fill: #800000 !important; }
@@ -513,10 +528,16 @@ body.night-mode {
 .night-mode #twd-boat-wrap path { fill: #ff3333 !important; opacity: 0.4 !important; }
 .night-mode #twd-arrow #twd-wind-chevron { stroke: #ff3333 !important; }
 
-/* --- 10.6 LOGICA RED-SHIFT TREND --- */
-.night-mode circle[fill="#bbb"], .night-mode circle[fill="#bbbbbb"] { fill: #440000 !important; }
-.night-mode circle[fill="#27ae60"] { fill: #ff0000 !important; }
-.night-mode circle[fill="#c0392b"] { fill: #800000 !important; }
+/* --- 10.6 LOGICA RED-SHIFT TREND (PULITA) --- */
+.night-mode circle[fill="#bbb"]:not(#trend-gauge-cw):not(#trend-gauge-ccw), .night-mode circle[fill="#bbbbbb"]:not(#trend-gauge-cw):not(#trend-gauge-ccw) {
+    fill: #440000 !important;
+}
+.night-mode circle[fill="#27ae60"]:not(#trend-gauge-cw):not(#trend-gauge-ccw) {
+    fill: #ff0000 !important;
+}
+.night-mode circle[fill="#c0392b"]:not(#trend-gauge-cw):not(#trend-gauge-ccw) {
+    fill: #800000 !important;
+}
 
 /* ==========================================================================
    11. TREND E ANIMAZIONI

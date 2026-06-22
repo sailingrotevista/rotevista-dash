@@ -252,15 +252,20 @@ module.exports = function (app) {
         // 2. Calcolo combinato di FALLBACK (Si attiva solo se la centralina non invia TWS/TWD nativi)
         const aws = raw["environment.wind.speedApparent"];
         const awa = raw["environment.wind.angleApparent"];
-        const stw = raw["navigation.speedThroughWater"] || 0;
+        const stw = raw["navigation.speedThroughWater"];
         const sog = raw["navigation.speedOverGround"] || 0;
         const hdg = raw["navigation.headingTrue"];
         const cog = raw["navigation.courseOverGroundTrue"] || 0;
 
         if (aws !== undefined && awa !== undefined) {
             const awsKts = aws * 1.94384;
-            const stwKts = stw * 1.94384;
-            const tw_water_x = awsKts * Math.cos(awa) - stwKts;
+            
+            // Verifica se lo STW fisicamente attivo ha trasmesso dati negli ultimi 15 secondi
+            const hasStw = lastPathProcessTimes["navigation.speedThroughWater"] && (now - lastPathProcessTimes["navigation.speedThroughWater"] < 15000);
+            // Se lo STW non è disponibile, usa automaticamente la velocità del GPS (SOG) come riferimento
+            const speedKtsRef = hasStw && stw !== undefined ? (stw * 1.94384) : (sog * 1.94384);
+
+            const tw_water_x = awsKts * Math.cos(awa) - speedKtsRef;
             const tw_water_y = awsKts * Math.sin(awa);
 
             // Calcoliamo il TWS di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
@@ -271,8 +276,8 @@ module.exports = function (app) {
 
             const twa = Math.atan2(tw_water_y, tw_water_x);
             
-            // La VMG viene sempre calcolata a livello server poiché raramente è nativa
-            const vmg = Math.abs(stwKts * Math.cos(twa));
+            // La VMG viene calcolata usando la velocità di riferimento (STW reale o SOG di fallback)
+            const vmg = Math.abs(speedKtsRef * Math.cos(twa));
             manageHistory('vmg', vmg);
 
             // Calcoliamo il TWD di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi

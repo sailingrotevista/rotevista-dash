@@ -210,17 +210,22 @@ function checkDepthAlarm(m) {
 }
 
 /**
-    * computeTrueWind: Calcola TWS, TWA e TWD strategico.
-    * Gestisce il fallback separato (Split-Fallback) in caso di dati parzialmente nativi di bordo.
-    */
+ * computeTrueWind: Calcola TWS, TWA e TWD strategico.
+ * Gestisce il fallback separato (Split-Fallback) in caso di dati parzialmente nativi di bordo.
+ */
 function computeTrueWind() {
     const aws = store.raw["environment.wind.speedApparent"], awa = store.raw["environment.wind.angleApparent"];
-    const stw = store.raw["navigation.speedThroughWater"] || 0, sog = store.raw["navigation.speedOverGround"] || 0;
+    const stw = store.raw["navigation.speedThroughWater"], sog = store.raw["navigation.speedOverGround"] || 0;
     const hdg = store.raw["navigation.headingTrue"] || 0, cog = store.raw["navigation.courseOverGroundTrue"] || 0;
     if (aws === undefined || awa === undefined) return;
 
     // Usiamo il tempo esatto di arrivo del pacchetto del vento per la coerenza dei buffer
     const now = store.timestamps["environment.wind.speedApparent"] || Date.now();
+
+    // Verifica se lo STW fisicamente attivo ha trasmesso dati negli ultimi 15 secondi
+    const hasStw = store.timestamps["navigation.speedThroughWater"] && (now - store.timestamps["navigation.speedThroughWater"] < 15000);
+    // Se lo STW non è disponibile, usa automaticamente la velocità del GPS (SOG) come riferimento
+    const speedRef = hasStw && stw !== undefined ? stw : sog;
 
     // ==========================================================================
     // 1. GESTIONE TWS (NATIVO vs FALLBACK)
@@ -232,14 +237,14 @@ function computeTrueWind() {
         // Se la barca invia il TWS nativo, usiamo direttamente quello
         tws_water = store.raw["environment.wind.speedTrue"] ? msToKts(store.raw["environment.wind.speedTrue"]) : 0;
     } else {
-        // Altrimenti eseguiamo il calcolo vettoriale tattico sull'acqua
-        tws_water = Math.sqrt(aws * aws + stw * stw - 2 * aws * stw * Math.cos(awa));
+        // Altrimenti eseguiamo il calcolo vettoriale tattico utilizzando la velocità di riferimento (STW o SOG)
+        tws_water = Math.sqrt(aws * aws + speedRef * speedRef - 2 * aws * speedRef * Math.cos(awa));
         store.raw["environment.wind.speedTrue"] = tws_water;
     }
     
     // BUG RISOLTO: Calcoliamo il TWA sempre, indipendentemente dal TWS nativo!
     if (tws_water > 0.05) {
-        const twa = Math.atan2(aws * Math.sin(awa), aws * Math.cos(awa) - stw);
+        const twa = Math.atan2(aws * Math.sin(awa), aws * Math.cos(awa) - speedRef);
         store.raw["environment.wind.angleTrueWater"] = twa;
         
         // Inserimento atomico e sincronizzato di TWA e AWA nei relativi buffer mobili
@@ -523,10 +528,10 @@ function updateWindTrend() {
             }
             if (deltaTac > 0) {
                 if (gaugeDots.cw) { gaugeDots.cw.classList.add('is-trending'); gaugeDots.cw.setAttribute('fill', tacticColor); }
-                if (gaugeDots.ccw) { gaugeDots.ccw.classList.remove('is-trending'); }
+                if (gaugeDots.ccw) { gaugeDots.ccw.classList.remove('is-trending'); gaugeDots.ccw.setAttribute('fill', '#bbb'); } // Resetta l'attributo di riempimento del pallino inattivo
             } else {
                 if (gaugeDots.ccw) { gaugeDots.ccw.classList.add('is-trending'); gaugeDots.ccw.setAttribute('fill', tacticColor); }
-                if (gaugeDots.cw) { gaugeDots.cw.classList.remove('is-trending'); }
+                if (gaugeDots.cw) { gaugeDots.cw.classList.remove('is-trending'); gaugeDots.cw.setAttribute('fill', '#bbb'); } // Resetta l'attributo di riempimento del pallino inattivo
             }
         } else {
             [gaugeDots.cw, gaugeDots.ccw].forEach(el => { if(el){ el.classList.remove('is-trending'); el.setAttribute('fill', '#bbb'); }});
