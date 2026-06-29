@@ -1128,12 +1128,41 @@ function connect() {
     if (simulationMode) return;
     let addr = window.location.host || CONFIG.server.fallbackIp;
     try {
-        socket = new WebSocket(`ws://${addr}/signalk/v1/stream?subscribe=self`);
+        // Connessione con subscribe=none per impedire a Signal K l'invio automatico di tutto lo stream di bordo
+        socket = new WebSocket(`ws://${addr}/signalk/v1/stream?subscribe=none`);
         
         socket.onopen = async () => {
             ui.status.className = "online";
             ui.status.innerText = "ONLINE";
             reconnectDelay = 1000;
+            
+            // Sottoscrizione selettiva bilanciata: applichiamo un filtro a 3 Hz (333ms) per i dati rapidi,
+            // garantendo fluidità matematica senza ritardi e ottimizzando profondità (1s) e GPS (10s)
+            const subscriptionPayload = {
+                context: "vessels.self",
+                subscribe: [
+                    { path: "navigation.position", minPeriod: 60000 },             // Posizione GPS lenta (60s)
+                    { path: "navigation.magneticVariation", minPeriod: 60000 },    // Declinazione lenta (60s)
+                    { path: "environment.depth.belowTransducer", minPeriod: 1000 }, // Profondità di sicurezza (1s)
+                    { path: "navigation.speedThroughWater", minPeriod: 333 },       // Velocità barca a 3 Hz (333ms)
+                    { path: "navigation.speedOverGround", minPeriod: 333 },          // Velocità GPS a 3 Hz
+                    { path: "navigation.courseOverGroundTrue", minPeriod: 333 },    // COG a 3 Hz
+                    { path: "navigation.headingTrue", minPeriod: 333 },             // Heading True a 3 Hz
+                    { path: "navigation.headingMagnetic", minPeriod: 333 },         // Heading Fallback a 3 Hz
+                    { path: "environment.wind.speedApparent", minPeriod: 333 },     // AWS a 3 Hz
+                    { path: "environment.wind.angleApparent", minPeriod: 333 },     // AWA a 3 Hz
+                    { path: "environment.wind.speedTrue", minPeriod: 333 },         // TWS (Nativo) a 3 Hz
+                    { path: "environment.wind.directionTrue", minPeriod: 333 }      // TWD (Nativo) a 3 Hz
+                ]
+            };
+            
+            // Invio del payload per configurare lo streaming selettivo a 3 Hz
+            try {
+                socket.send(JSON.stringify(subscriptionPayload));
+                console.log("🔌 [WebSocket] Sottoscrizione selettiva a 3 Hz inviata con successo (Latenza azzerata).");
+            } catch (err) {
+                console.error("❌ [WebSocket] Impossibile inviare il payload di sottoscrizione:", err);
+            }
             
             // SINCRONIZZAZIONE AUTOMATICA: Ogni volta che la connessione si apre o si riapre,
             // scarichiamo lo storico fresco dal server e ridisegnamo i grafici

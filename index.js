@@ -83,7 +83,7 @@ module.exports = function (app) {
         const localSubscription = {
             context: 'vessels.self',
             subscribe: [
-                { path: 'navigation.position', minPeriod: 1000 },
+                { path: 'navigation.position', minPeriod: 60000 },
                 { path: 'navigation.speedThroughWater', minPeriod: 1000 },
                 { path: 'navigation.speedOverGround', minPeriod: 1000 },
                 { path: 'environment.depth.belowTransducer', minPeriod: 1000 },
@@ -93,7 +93,7 @@ module.exports = function (app) {
                 { path: 'environment.wind.directionTrue', minPeriod: 1000 },
                 { path: 'navigation.headingTrue', minPeriod: 1000 },
                 { path: 'navigation.headingMagnetic', minPeriod: 1000 },
-                { path: 'navigation.magneticVariation', minPeriod: 1000 },
+                { path: 'navigation.magneticVariation', minPeriod: 60000 },
                 { path: 'navigation.courseOverGroundTrue', minPeriod: 1000 }
             ]
         };
@@ -141,12 +141,33 @@ module.exports = function (app) {
         app.debug(msg);
     };
 
+    // Helper per verificare se due valori sono identici (supporta anche oggetti complessi come la posizione lat/lon)
+    function isValueEqual(a, b) {
+        if (a === b) return true;
+        if (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null) {
+            return a.latitude === b.latitude && a.longitude === b.longitude;
+        }
+        return false;
+    }
+
     /**
         * processIncomingDelta: Decodifica i dati dei sensori in Knots/Meters ed esegue l'aggregazione
         * Applica un filtro passa-basso continuo a ogni pacchetto e storicizza a 1Hz con dati stabilizzati.
         */
     function processIncomingDelta(path, val) {
         if (val === null || val === undefined) return;
+
+        const now = Date.now();
+        const lastVal = raw[path];
+        const lastTime = lastPathProcessTimes[path] || 0;
+
+        // FILTRO DEDUPLICAZIONE CON HEARTBEAT DI SICUREZZA A 10 SECONDI:
+        // Se il nuovo dato è identico al precedente e sono passati meno di 10 secondi dall'ultimo invio,
+        // scartiamo subito l'elaborazione risparmiando cicli di CPU sul server.
+        // La soglia dei 10s garantisce la compatibilità con il Gap Detection dei grafici client.
+        if (lastVal !== undefined && isValueEqual(val, lastVal) && (now - lastTime < 10000)) {
+            return;
+        }
         
         // 1. Filtro anti-spike vento (> 100 nodi / 51.44 m/s)
         if ((path === 'environment.wind.speedApparent' || path === 'environment.wind.speedTrue') && val > 51.44) {
