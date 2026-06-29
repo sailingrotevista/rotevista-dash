@@ -183,7 +183,8 @@ module.exports = function (app) {
         if (path === 'environment.depth.belowTransducer' && (val < -2.0 || val > 500)) {
             return;
         }
-        const now = Date.now();
+        
+        // Rimosso la seconda dichiarazione duplicata di 'now' poiché già dichiarata in cima alla funzione
         const alpha = 1.0; // Passa-tutto istantaneo (i sensori di bordo ST60+ sono già calibrati con damping hardware a 12)
 
         // FILTRO PASSA-BASSO CONTINUO IN TEMPO REALE (Previene gli Spike prima della storicizzazione)
