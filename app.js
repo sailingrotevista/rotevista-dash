@@ -1201,9 +1201,15 @@ function connect() {
         socket.onclose = () => {
             if (!simulationMode) {
                 ui.status.className = "offline";
-                ui.status.innerText = "RECONNECTING...";
-                setTimeout(connect, reconnectDelay);
-                reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+                ui.status.innerText = "OFFLINE";
+                
+                // Tentiamo la riconnessione automatica solo se lo schermo è attivo e visibile,
+                // evitando cicli di loop di rete infiniti in background mentre il tablet dorme
+                if (document.visibilityState === "visible") {
+                    ui.status.innerText = "RECONNECTING...";
+                    setTimeout(connect, reconnectDelay);
+                    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+                }
             }
         };
     } catch (e) {
@@ -1319,24 +1325,17 @@ async function init() {
     }
 }
 
-// Watchdog per il risveglio dallo stato di sospensione / cambio scheda
+// Watchdog attivo per la gestione intelligente dello standby e il massimo risparmio energetico
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-        console.log("🔌 [Watchdog] Tab ritornato visibile. Verifica connessione...");
-        
-        // Se il socket esiste ma non è attivo o se vogliamo forzare la pulizia delle connessioni fantasma:
+        console.log("🔌 [Watchdog] Schermo sbloccato / Tab visibile. Riconnessione immediata e allineamento storico...");
+        // Al risveglio stabiliamo una nuova connessione pulita che scaricherà lo storico accumulato in background dal server
+        connect();
+    } else if (document.visibilityState === 'hidden') {
+        console.log("🔌 [Watchdog] Schermo bloccato / Tab in background. Chiusura WebSocket preventiva per salvaguardare la batteria.");
+        // Tagliamo attivamente la connessione per congelare all'istante l'attività di rete ed i consumi del browser
         if (socket) {
-            if (socket.readyState !== WebSocket.OPEN) {
-                // Se era già chiuso o in errore, proviamo a riconnettere subito
-                connect();
-            } else {
-                // Se resulta "OPEN" ma potrebbe essere una connessione fantasma,
-                // la chiudiamo forzatamente per scatenare la riconnessione pulita e il download della cronologia
-                console.log("🔌 [Watchdog] Riavvio precauzionale del WebSocket per evitare connessioni fantasma.");
-                socket.close();
-            }
-        } else {
-            connect();
+            socket.close();
         }
     }
 });
