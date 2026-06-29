@@ -23,7 +23,7 @@ let CONFIG = {
         minSpeed: 0.5,
         stabilityBreakout: 15
     },
-    graphs: { reef1: 10, reef2: 15, historyMinutes: 10, samples: 60 },
+    graphs: { reef1: 10, reef2: 15, historyMinutes: 5, samples: 60 },
     scales: {
         stw: { stdMax: 4, hercSpan: 2, step: 1 },
         sog: { stdMax: 4, hercSpan: 2, step: 1 },
@@ -964,11 +964,11 @@ function manageHistory(type, value) {
     const bucketReady = (now - store.lastUpdates[type] > bucketIntervalMs) || store.histories[type].length === 0;
     if (!bucketReady) return;
 
-    // --- 5. AGGREGAZIONE SEMANTICA ---
+    // --- 5. AGGREGAZIONE SEMANTICA (Ottimizzata a zero-allocazioni di array intermedi) ---
     let finalValue = value;
 
     if (tempBuf.length > 0) {
-        // A. VENTO -> SUSTAINED PEAK (EMA Time-Aware)
+        // A. VENTO -> SUSTAINED PEAK (EMA Time-Aware) (0 allocazioni)
         if (type === 'tws' || type === 'aws') {
             const tauMs = 2500;
             let ema = tempBuf[0].val;
@@ -982,17 +982,32 @@ function manageHistory(type, value) {
             }
             finalValue = maxSustained;
         }
-        // B. PROFONDITÀ -> MINIMO
+        // B. PROFONDITÀ -> MINIMO (In-place loop, 0 allocazioni)
         else if (type === 'depth') {
-            const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
-            if (vals.length > 0) finalValue = Math.min(...vals);
+            let minVal = Infinity;
+            for (let i = 0; i < tempBuf.length; i++) {
+                const v = tempBuf[i].val;
+                if (isFinite(v) && v < minVal) {
+                    minVal = v;
+                }
+            }
+            if (minVal !== Infinity) {
+                finalValue = minVal;
+            }
         }
-        // C. VELOCITÀ -> MEDIA
+        // C. VELOCITÀ -> MEDIA (In-place loop, 0 allocazioni)
         else {
-            const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
-            if (vals.length > 0) {
-                const sum = vals.reduce((a, b) => a + b, 0);
-                finalValue = sum / tempBuf.length;
+            let sum = 0;
+            let count = 0;
+            for (let i = 0; i < tempBuf.length; i++) {
+                const v = tempBuf[i].val;
+                if (isFinite(v)) {
+                    sum += v;
+                    count++;
+                }
+            }
+            if (count > 0) {
+                finalValue = sum / count;
             }
         }
     }

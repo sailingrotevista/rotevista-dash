@@ -351,81 +351,111 @@ module.exports = function (app) {
         let isTwdType = (type === 'twd');
 
         if (tempBuf.length > 0) {
-            // ==========================================================================
-            // CASO PARTICOLARE: DIREZIONE VENTO (TWD) -> MEDIA PESATA E LIMITI MIN/MAX
-            // ==========================================================================
-            if (isTwdType) {
-                // 1. Identifica il vento massimo del minuto (in m/s)
-                const twsVals = tempBuf.map(p => p.tws || 0);
-                const maxTwsInMinute = Math.max(...twsVals, 0);
-
-                // 2. Calcola la soglia dinamica di pressione: max tra 40% del picco e soglia di calma piatta (in m/s)
-                const calmThresholdMs = CALM_THRESHOLD_KTS / 1.94384;
-                const pressureThreshold = Math.max(maxTwsInMinute * PRESSURE_FILTER_RATIO, calmThresholdMs);
-
-                // 3. Esclude le direzioni registrate quando il vento era debole (sotto la soglia di pressione)
-                const activePoints = tempBuf.filter(p => (p.tws || 0) >= pressureThreshold);
-                const pointsToUse = activePoints.length > 0 ? activePoints : tempBuf; // Fallback se tutto è calma piatta
-
-                // 4. Media Vettoriale Pesata (TWS * sin, TWS * cos)
-                let sumSin = 0;
-                let sumCos = 0;
-                let totalWeight = 0;
-                pointsToUse.forEach(p => {
-                    const weight = Math.max(p.tws || 0.1, 0.05); // Evita pesi a zero
-                    sumSin += weight * Math.sin(p.val);
-                    sumCos += weight * Math.cos(p.val);
-                    totalWeight += weight;
-                });
-                const avgAngle = Math.atan2(sumSin, sumCos);
-                const finalAvg = (avgAngle + Math.PI * 2) % (Math.PI * 2);
-
-                // 5. Calcolo di Min e Max angolare del minuto (rispetto alla media per gestire l'oltrepasso di 0/360°)
-                let diffs = pointsToUse.map(p => {
-                    let diff = p.val - finalAvg;
-                    return Math.atan2(Math.sin(diff), Math.cos(diff)); // Srotolamento tra -PI e +PI
-                });
-
-                const minDiff = Math.min(...diffs);
-                const maxDiff = Math.max(...diffs);
-
-                const finalMin = (finalAvg + minDiff + Math.PI * 2) % (Math.PI * 2);
-                const finalMax = (finalAvg + maxDiff + Math.PI * 2) % (Math.PI * 2);
-
-                finalValue = {
-                    val: finalAvg,
-                    min: finalMin,
-                    max: finalMax
-                };
+        // ==========================================================================
+        // CASO PARTICOLARE: DIREZIONE VENTO (TWD) -> MEDIA PESATA E LIMITI MIN/MAX
+        // ==========================================================================
+        if (isTwdType) {
+            // 1. Identifica il vento massimo del minuto (in m/s) - Loop in-place (0 allocazioni)
+            let maxTwsInMinute = 0;
+            for (let i = 0; i < tempBuf.length; i++) {
+                const tws = tempBuf[i].tws || 0;
+                if (tws > maxTwsInMinute) maxTwsInMinute = tws;
             }
-            // A. VENTO VELOCITÀ -> SUSTAINED PEAK (EMA Time-Aware)
-            else if (type === 'tws' || type === 'aws') {
-                const tauMs = 2500;
-                let ema = tempBuf[0].val;
-                let maxSustained = ema;
 
-                for (let i = 1; i < tempBuf.length; i++) {
-                    const dt = Math.max(1, tempBuf[i].time - tempBuf[i-1].time);
-                    const alpha = 1 - Math.exp(-dt / tauMs);
-                    ema = (tempBuf[i].val * alpha) + (ema * (1 - alpha));
-                    if (isFinite(ema) && ema > maxSustained) maxSustained = ema;
-                }
-                finalValue = maxSustained;
-            }
-            // B. PROFONDITÀ -> MINIMO
-            else if (type === 'depth') {
-                const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
-                if (vals.length > 0) finalValue = Math.min(...vals);
-            }
-            // C. VELOCITÀ BARCA / ALTRO -> MEDIA
-            else {
-                const vals = tempBuf.map(p => p.val).filter(v => isFinite(v));
-                if (vals.length > 0) {
-                    const sum = vals.reduce((a, b) => a + b, 0);
-                    finalValue = sum / tempBuf.length;
+            // 2. Calcola la soglia dinamica di pressione
+            const calmThresholdMs = CALM_THRESHOLD_KTS / 1.94384;
+            const pressureThreshold = Math.max(maxTwsInMinute * PRESSURE_FILTER_RATIO, calmThresholdMs);
+
+            // 3. Determina in un unico passaggio se ci sono punti attivi sopra la soglia (0 allocazioni)
+            let hasActivePoints = false;
+            for (let i = 0; i < tempBuf.length; i++) {
+                if ((tempBuf[i].tws || 0) >= pressureThreshold) {
+                    hasActivePoints = true;
+                    break;
                 }
             }
+
+            // 4. Media Vettoriale Pesata (0 allocazioni di array)
+            let sumSin = 0;
+            let sumCos = 0;
+            let totalWeight = 0;
+            for (let i = 0; i < tempBuf.length; i++) {
+                const p = tempBuf[i];
+                if (hasActivePoints && (p.tws || 0) < pressureThreshold) continue;
+
+                const weight = Math.max(p.tws || 0.1, 0.05);
+                sumSin += weight * Math.sin(p.val);
+                sumCos += weight * Math.cos(p.val);
+                totalWeight += weight;
+            }
+            const avgAngle = Math.atan2(sumSin, sumCos);
+            const finalAvg = (avgAngle + Math.PI * 2) % (Math.PI * 2);
+
+            // 5. Calcolo di Min e Max angolare del minuto (0 allocazioni di array)
+            let minDiff = 0;
+            let maxDiff = 0;
+            let firstDiff = true;
+            for (let i = 0; i < tempBuf.length; i++) {
+                const p = tempBuf[i];
+                if (hasActivePoints && (p.tws || 0) < pressureThreshold) continue;
+
+                const diff = Math.atan2(Math.sin(p.val - finalAvg), Math.cos(p.val - finalAvg));
+                if (firstDiff) {
+                    minDiff = diff;
+                    maxDiff = diff;
+                    firstDiff = false;
+                } else {
+                    if (diff < minDiff) minDiff = diff;
+                    if (diff > maxDiff) maxDiff = diff;
+                }
+            }
+
+            const finalMin = (finalAvg + minDiff + Math.PI * 2) % (Math.PI * 2);
+            const finalMax = (finalAvg + maxDiff + Math.PI * 2) % (Math.PI * 2);
+
+            finalValue = {
+                val: finalAvg,
+                min: finalMin,
+                max: finalMax
+            };
         }
+        // A. VENTO VELOCITÀ -> SUSTAINED PEAK (EMA Time-Aware) (Inalterato per minimizzare le modifiche)
+        else if (type === 'tws' || type === 'aws') {
+            const tauMs = 2500;
+            let ema = tempBuf[0].val;
+            let maxSustained = ema;
+
+            for (let i = 1; i < tempBuf.length; i++) {
+                const dt = Math.max(1, tempBuf[i].time - tempBuf[i-1].time);
+                const alpha = 1 - Math.exp(-dt / tauMs);
+                ema = (tempBuf[i].val * alpha) + (ema * (1 - alpha));
+                if (isFinite(ema) && ema > maxSustained) maxSustained = ema;
+            }
+            finalValue = maxSustained;
+        }
+        // B. PROFONDITÀ -> MINIMO (Ottimizzato a 0 allocazioni)
+        else if (type === 'depth') {
+            let minVal = Infinity;
+            for (let i = 0; i < tempBuf.length; i++) {
+                const v = tempBuf[i].val;
+                if (isFinite(v) && v < minVal) minVal = v;
+            }
+            if (minVal !== Infinity) finalValue = minVal;
+        }
+        // C. VELOCITÀ BARCA / ALTRO -> MEDIA (Ottimizzato a 0 allocazioni)
+        else {
+            let sum = 0;
+            let count = 0;
+            for (let i = 0; i < tempBuf.length; i++) {
+                const v = tempBuf[i].val;
+                if (isFinite(v)) {
+                    sum += v;
+                    count++;
+                }
+            }
+            if (count > 0) finalValue = sum / count;
+        }
+    }
 
         // Validazione e clamping di sicurezza (non si applica all'oggetto TWD)
         if (!isTwdType) {
