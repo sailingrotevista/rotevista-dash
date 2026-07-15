@@ -603,10 +603,12 @@ body.night-mode {
 }
 
 /* ==========================================================================
-   13. SMORZAMENTO FLUIDO AGHI A 60FPS (DAMPING HARDWARE)
-   ========================================================================== */
+   13. SMORZAMENTO FLUIDO AGHI A 60FPS (DAMPING HARDWARE) non utilizzato consuma troppa cpu
+   ==========================================================================
 
-/* Applichiamo la transizione fluida a tutti i puntatori mantenendo i perni nativi dell'SVG */
+ Applichiamo la transizione fluida a tutti i puntatori mantenendo i perni nativi dell'SVG
 #awa-pointer, #twa-pointer, #track-pointer, #twd-arrow, #twd-boat-wrap {
     transition: transform 0.9s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
+
+*/
