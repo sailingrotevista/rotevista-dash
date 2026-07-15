@@ -744,11 +744,20 @@ function startDisplayLoop() {
         }
 
         if (lastAvgUIUpdate % 3 === 0) {
-            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false);
-            let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false);
-            let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true);
-            let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true);
-            let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false);
+            const baseThreshold = CONFIG.averaging.stabilityThreshold || 0.95;
+            const breakout = CONFIG.averaging.stabilityBreakout || 15;
+            
+            // CALCOLO DIFFERENZIALE: Tolleranza del vento proporzionale alla sensibilità di base.
+            // Rilassiamo la soglia del vento di 0.13 rispetto alla prua (es. se la prua richiede 0.95, il vento richiede 0.82)
+            const windThreshold = Math.max(0.60, baseThreshold - 0.13);
+
+            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false, now, baseThreshold, breakout);
+            let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false, now, baseThreshold, breakout);
+            
+            // Applichiamo la soglia differenziale ottimizzata per i tre dati legati al vento
+            let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true, now, windThreshold, breakout);
+            let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true, now, windThreshold, breakout);
+            let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false, now, windThreshold, breakout);
 
             // --- GESTIONE DINAMICA ETICHETTA TACK/GYBE CON ISTERESI DI 10 GRADI ---
             if (ui.tackLabel) {

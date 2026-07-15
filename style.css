@@ -601,3 +601,12 @@ body.night-mode {
 .night-mode #wind-radar circle[stroke="#b0bec5"] {
     stroke: #440000 !important;
 }
+
+/* ==========================================================================
+   13. SMORZAMENTO FLUIDO AGHI A 60FPS (DAMPING HARDWARE)
+   ========================================================================== */
+
+/* Applichiamo la transizione fluida a tutti i puntatori mantenendo i perni nativi dell'SVG */
+#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow, #twd-boat-wrap {
+    transition: transform 0.9s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
