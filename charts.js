@@ -19,7 +19,9 @@ function calculateScale(type, data, mode) {
 
     if (!store.herculesScales) store.herculesScales = {};
     if (!store.herculesScales[type]) {
-        store.herculesScales[type] = { min: 0, max: s ? s.stdMax : 10 };
+        // Inizializzazione a NULL dello stato di partenza per consentire un allineamento istantaneo
+        // e perfettamente centrato al primo doppio clic
+        store.herculesScales[type] = { min: null, max: null };
     }
     let currentScale = store.herculesScales[type];
 
@@ -65,9 +67,10 @@ function calculateScale(type, data, mode) {
                 targetMax = targetMin + 4;
             }
 
-            if (currentVal < currentScale.min || currentVal > currentScale.max) {
-                currentScale.min = Math.min(currentScale.min, targetMin);
-                currentScale.max = Math.max(currentScale.max, targetMax);
+            // Gestione dell'allineamento iniziale o dello scostamento dei limiti della scala
+            if (currentScale.min === null || currentVal < currentScale.min || currentVal > currentScale.max) {
+                currentScale.min = currentScale.min === null ? targetMin : Math.min(currentScale.min, targetMin);
+                currentScale.max = currentScale.max === null ? targetMax : Math.max(currentScale.max, targetMax);
             } else {
                 const allStableInTarget = recentVals.every(val => val >= targetMin && val <= targetMax);
                 if (allStableInTarget) {
@@ -90,8 +93,25 @@ function calculateScale(type, data, mode) {
         const oneThirdCount = Math.max(1, Math.floor(data.length / 3));
         const recentThirdData = data.slice(-oneThirdCount);
 
-        const localMin = Math.min(...recentThirdData);
-        const localMax = Math.max(...recentThirdData);
+        let localMin = Math.min(...recentThirdData);
+        let localMax = Math.max(...recentThirdData);
+
+        // SMART MOTORING DETECTION (Specifica per i grafici di velocità: STW, SOG, VMG)
+        const isSpeedType = (type === 'stw' || type === 'sog' || type === 'vmg');
+        if (isSpeedType && data.length > oneThirdCount) {
+            const olderData = data.slice(0, data.length - oneThirdCount);
+            const olderMin = Math.min(...olderData);
+            const olderMax = Math.max(...olderData);
+            const olderRange = olderMax - olderMin; // Variazione nello storico passato
+
+            // Se lo storico passato non era piatto (range > 0.2 nodi) oppure eravamo fermi/all'ancora (< 1.5 nodi),
+            // significa che il passato è rilevante per il trend. Includiamo il passato nel calcolo della scala Y.
+            // Se invece era piatto (motore), lo ignoriamo per zoomare subito sulla vela attuale.
+            if (olderRange > 0.2 || olderMin < 0.77) {
+                localMin = Math.min(localMin, olderMin);
+                localMax = Math.max(localMax, olderMax);
+            }
+        }
 
         let targetMin = Math.max(0, Math.floor(localMin / roundStep) * roundStep);
         let targetMax = Math.ceil(localMax / roundStep) * roundStep;
@@ -100,9 +120,10 @@ function calculateScale(type, data, mode) {
             targetMax = targetMin + roundStep;
         }
 
-        if (currentVal < currentScale.min || currentVal > currentScale.max) {
-            currentScale.min = Math.min(currentScale.min, targetMin);
-            currentScale.max = Math.max(currentScale.max, targetMax);
+        // Gestione dell'allineamento iniziale o dello scostamento dei limiti della scala
+        if (currentScale.min === null || currentVal < currentScale.min || currentVal > currentScale.max) {
+            currentScale.min = currentScale.min === null ? targetMin : Math.min(currentScale.min, targetMin);
+            currentScale.max = currentScale.max === null ? targetMax : Math.max(currentScale.max, targetMax);
         } else {
             const allStableInTarget = recentThirdData.every(val => val >= targetMin && val <= targetMax);
             if (allStableInTarget) {
@@ -256,7 +277,12 @@ function drawGraph(d, id, min, max, isTws, isHercules) {
         gradientStops += `<stop offset="${offset1}%" stop-color="${props.color}" stop-opacity="${props.opacity}" />`;
         gradientStops += `<stop offset="${offset2}%" stop-color="${props.color}" stop-opacity="${props.opacity}" />`;
 
-        if (isGap) {
+        // CALCOLO ELASTICO DELL'INTERRUZIONE: Tollera buchi storici fino a 90 secondi (es. i 30s di einstein)
+        // per permettere di disegnare linee solide e continue anche se mostrate in una timeline corta e veloce
+        const maxAllowedGap = Math.max(expectedInterval * 2.5, 90000);
+        const isHistoryGap = deltaTime > maxAllowedGap;
+
+        if (isHistoryGap) {
             if (started) {
                 areaPath += `L ${x1} ${h} `;
                 started = false;

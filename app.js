@@ -216,16 +216,25 @@ function checkDepthAlarm(m) {
 function computeTrueWind() {
     const aws = store.raw["environment.wind.speedApparent"], awa = store.raw["environment.wind.angleApparent"];
     const stw = store.raw["navigation.speedThroughWater"], sog = store.raw["navigation.speedOverGround"] || 0;
-    const hdg = store.raw["navigation.headingTrue"] || 0, cog = store.raw["navigation.courseOverGroundTrue"] || 0;
+    const hdg = store.raw["navigation.headingTrue"] || 0; // Il COG qui non serve più per il calcolo stabile
     if (aws === undefined || awa === undefined) return;
 
-    // Usiamo il tempo esatto di arrivo del pacchetto del vento per la coerenza dei buffer
     const now = store.timestamps["environment.wind.speedApparent"] || Date.now();
 
-    // Verifica se lo STW fisicamente attivo ha trasmesso dati negli ultimi 15 secondi
-    const hasStw = store.timestamps["navigation.speedThroughWater"] && (now - store.timestamps["navigation.speedThroughWater"] < 15000);
-    // Se lo STW non è disponibile, usa automaticamente la velocità del GPS (SOG) come riferimento
-    const speedRef = hasStw && stw !== undefined ? stw : sog;
+    // RILEVAMENTO "LOG BLOCCATO" (Fouled Paddlewheel)
+    const hasFreshStw = store.timestamps["navigation.speedThroughWater"] && (now - store.timestamps["navigation.speedThroughWater"] < 15000);
+    let speedRef = 0;
+    
+    if (hasFreshStw && stw !== undefined) {
+        // Se la barca naviga a GPS (> 1.5 nodi) ma l'elichetta legge quasi zero (< 0.5 nodi), il log è sporco/bloccato.
+        if (sog > 0.77 && stw < 0.25) {
+            speedRef = sog; // Forza il backup su SOG ignorando lo "0" fittizio del log
+        } else {
+            speedRef = stw;
+        }
+    } else {
+        speedRef = sog;
+    }
 
     // ==========================================================================
     // 1. GESTIONE TWS (NATIVO vs FALLBACK)
@@ -234,47 +243,51 @@ function computeTrueWind() {
     let tws_water = 0;
 
     if (hasNativeTws) {
-        // Se la barca invia il TWS nativo, usiamo direttamente quello
         tws_water = store.raw["environment.wind.speedTrue"] ? msToKts(store.raw["environment.wind.speedTrue"]) : 0;
     } else {
-        // Altrimenti eseguiamo il calcolo vettoriale tattico utilizzando la velocità di riferimento (STW o SOG)
         tws_water = Math.sqrt(aws * aws + speedRef * speedRef - 2 * aws * speedRef * Math.cos(awa));
         store.raw["environment.wind.speedTrue"] = tws_water;
     }
     
-    // BUG RISOLTO: Calcoliamo il TWA sempre, indipendentemente dal TWS nativo!
-    if (tws_water > 0.05) {
-        const twa = Math.atan2(aws * Math.sin(awa), aws * Math.cos(awa) - speedRef);
-        store.raw["environment.wind.angleTrueWater"] = twa;
-        
-        // Inserimento atomico e sincronizzato di TWA e AWA nei relativi buffer mobili
-        // per garantire che le medie vettoriali siano perfettamente allineate in fase
+    let twa = 0;
+    // Verifica se riceviamo un TWA nativo valido ed efficiente negli ultimi 5 secondi
+    const hasNativeTwa = store.timestamps["environment.wind.angleTrueWater"] && (Date.now() - store.timestamps["environment.wind.angleTrueWater"] < 5000);
+
+    if (hasNativeTwa && store.raw["environment.wind.angleTrueWater"] !== undefined) {
+        // "Native First": diamo la precedenza assoluta al valore calcolato dalla centralina
+        twa = store.raw["environment.wind.angleTrueWater"];
+    } else {
+        // "Fallback Second": se manca il dato nativo, eseguiamo il calcolo vettoriale a mano
+        if (tws_water > 0.05) {
+            twa = Math.atan2(aws * Math.sin(awa), aws * Math.cos(awa) - speedRef);
+            store.raw["environment.wind.angleTrueWater"] = twa;
+        }
+    }
+
+    // Salviamo e allineiamo i buffer delle medie se abbiamo un angolo valido (nativo o calcolato)
+    if (tws_water > 0.05 || hasNativeTwa) {
         safePush(store.smoothBuf.twa, twa, now);
         safePush(store.longBuf.twa, twa, now);
-        safePush(store.smoothBuf.awa, awa, now);
-        safePush(store.longBuf.awa, awa, now);
+        
+        // Salviamo l'angolo apparente solo se il relativo sensore fisico è effettivamente attivo
+        if (awa !== undefined) {
+            safePush(store.smoothBuf.awa, awa, now);
+            safePush(store.longBuf.awa, awa, now);
+        }
     }
 
     // ==========================================================================
-    // 2. GESTIONE TWD (NATIVO vs FALLBACK)
+    // 2. GESTIONE TWD (NATIVO vs FALLBACK MATEMATICO STABILE)
     // ==========================================================================
     const hasNativeTwd = store.timestamps["environment.wind.directionTrue"] && (Date.now() - store.timestamps["environment.wind.directionTrue"] < 5000);
 
-    if (hasNativeTwd) {
-        // Se il TWD è nativo della centralina, lo lasciamo scorrere passivamente
-    } else {
-        // Altrimenti calcoliamo lo scarroccio e ricaviamo il TWD geografico sul fondo
-        const drift = (cog - hdg + Math.PI * 3) % (2 * Math.PI) - Math.PI;
-        const tw_ground_x = aws * Math.cos(awa) - sog * Math.cos(drift);
-        const tw_ground_y = aws * Math.sin(awa) - sog * Math.sin(drift);
-        const tws_ground = Math.sqrt(tw_ground_x * tw_ground_x + tw_ground_y * tw_ground_y);
-
-        if (tws_ground > 0.05) {
-            let twd = (hdg + Math.atan2(tw_ground_y, tw_ground_x) + 2 * Math.PI) % (2 * Math.PI);
-            store.raw["environment.wind.directionTrue"] = twd;
-            safePush(store.smoothBuf.twd, twd, now);
-            safePush(store.longBuf.twd, twd, now); // Alimenta la bussola meteo strategica!
-        }
+    if (!hasNativeTwd && tws_water > 0.05) {
+        // Calcolo TWD stabile e immune dal rollio: Prua + TWA
+        // Elimina i sobbalzi legati al brandeggio del COG e dello scarroccio fasullo
+        let twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
+        store.raw["environment.wind.directionTrue"] = twd;
+        safePush(store.smoothBuf.twd, twd, now);
+        safePush(store.longBuf.twd, twd, now);
     }
 }
 
@@ -386,6 +399,12 @@ function processIncomingData(path, val, source, timeMs) {
     if (path === "environment.wind.speedTrue") {
         let speedVal = (val && typeof val === 'object' && val.val !== undefined) ? val.val : val;
         store.raw["environment.wind.speedTrue"] = speedVal;
+    }
+
+    // INTERCETTAZIONE TWA NATIVO (Angolo Vento Reale pronto all'uso)
+    if (path === "environment.wind.angleTrueWater") {
+        let angleVal = (val && typeof val === 'object' && val.val !== undefined) ? val.val : val;
+        store.raw["environment.wind.angleTrueWater"] = angleVal;
     }
     
     // --- GESTIONE PRUA VERA / MAGNETICA CON AUTODIVIAZIONE ---
@@ -665,7 +684,16 @@ function startDisplayLoop() {
         
         // --- LOGICA SOG / VMG ---
         if (store.raw["navigation.speedOverGround"] !== undefined) {
-            const vmgVal = Math.abs(stwKts * Math.cos(store.raw["environment.wind.angleTrueWater"] || 0));
+            // RILEVAMENTO "LOG BLOCCATO" PER IL CALCOLO VMG
+            const hasFreshStw = store.timestamps["navigation.speedThroughWater"] && (now - store.timestamps["navigation.speedThroughWater"] < 15000);
+            let speedRefKts = sogKts; // Fallback predefinito su GPS
+            
+            if (hasFreshStw) {
+                // Se viaggiamo a più di 1.5 nodi (GPS) ma il log segna meno di 0.5 nodi, usa il SOG come backup
+                speedRefKts = (sogKts > 1.5 && stwKts < 0.5) ? sogKts : stwKts;
+            }
+
+            const vmgVal = Math.abs(speedRefKts * Math.cos(store.raw["environment.wind.angleTrueWater"] || 0));
             manageHistory('vmg', vmgVal);
             manageHistory('sog', sogKts);
             
@@ -679,13 +707,22 @@ function startDisplayLoop() {
                 if (labelSogVmg) labelSogVmg.textContent = 'SOG';
                 
                 if (isNavigating) {
-                    const lastSog = store.histories.sog.length > 0 ? store.histories.sog[store.histories.sog.length - 1].val : sogKts;
-                    const lastStw = store.histories.stw.length > 0 ? store.histories.stw[store.histories.stw.length - 1].val : stwKts;
-                    const drift = lastSog - lastStw;
+                    const hasFreshStw = store.timestamps["navigation.speedThroughWater"] && (now - store.timestamps["navigation.speedThroughWater"] < 15000);
+                    // Rileviamo se il log è plausibilmente sporco o bloccato (SOG in movimento, STW a zero)
+                    const isFouledLog = (sogKts > 1.5 && stwKts < 0.5);
 
-                    if (drift < -0.3) ui.sog.style.setProperty('color', '#ff3b30', 'important'); // Contro
-                    else if (drift > 0.3) ui.sog.style.setProperty('color', '#00C851', 'important'); // Favore
-                    else ui.sog.style.setProperty('color', '#ffbb33', 'important'); // Neutro SOG
+                    // Se non abbiamo un log affidabile, è impossibile calcolare la corrente. Evitiamo falsi colori tattici.
+                    if (!hasFreshStw || isFouledLog) {
+                        ui.sog.style.removeProperty('color');
+                    } else {
+                        const lastSog = store.histories.sog.length > 0 ? store.histories.sog[store.histories.sog.length - 1].val : sogKts;
+                        const lastStw = store.histories.stw.length > 0 ? store.histories.stw[store.histories.stw.length - 1].val : stwKts;
+                        const drift = lastSog - lastStw;
+
+                        if (drift < -0.3) ui.sog.style.setProperty('color', '#ff3b30', 'important'); // Contro
+                        else if (drift > 0.3) ui.sog.style.setProperty('color', '#00C851', 'important'); // Favore
+                        else ui.sog.style.setProperty('color', '#ffbb33', 'important'); // Neutro SOG
+                    }
                 } else {
                     ui.sog.style.removeProperty('color');
                 }
@@ -902,23 +939,74 @@ async function fetchServerHistory() {
         const data = await response.json();
         
         if (data && typeof data === 'object') {
+            // 1. RILEVAMENTO DEL DELTA DI COERENZA TEMPORALE
+            // Troviamo il timestamp più recente in assoluto presente nei dati storici del server
+            let maxServerTime = 0;
             for (let key in data) {
-                if (store.histories[key] !== undefined) {
-                    store.histories[key] = data[key];
+                if (store.histories[key] !== undefined && Array.isArray(data[key]) && data[key].length > 0) {
+                    const lastPoint = data[key][data[key].length - 1];
+                    if (lastPoint && lastPoint.time > maxServerTime) {
+                        maxServerTime = lastPoint.time;
+                    }
                 }
             }
-            // Sincronizza i dati specifici del radar storici, previsionali e i buffer minuto per minuto
-            if (data.windRadarSlots) store.windRadarSlots = data.windRadarSlots;
-            if (data.futureForecast) store.futureForecast = data.futureForecast;
-            if (data.twd) store.twdMinuteBuffer = data.twd;
-            if (data.tws) store.twsMinuteBuffer = data.tws;
+
+            // Calcoliamo lo sfasamento in millisecondi rispetto all'orologio del client (MacBook/Tablet)
+            const nowMac = Date.now();
+            const timeDelta = (maxServerTime > 0) ? (nowMac - maxServerTime) : 0;
+
+            if (Math.abs(timeDelta) > 500) {
+                console.log(`⏱️ [Clock Sync] Rilevato scostamento di ${(timeDelta/1000).toFixed(1)}s rispetto a einstein. Calibrazione attiva.`);
+            }
+
+            // 2. TRASLAZIONE DEI DATI STORICI
+            // Spostiamo nel tempo tutti i punti passati per incollarli millimetricamente al "now" del client
+            for (let key in data) {
+                if (store.histories[key] !== undefined) {
+                    if (Array.isArray(data[key])) {
+                        store.histories[key] = data[key].map(p => ({
+                            val: p.val,
+                            time: p.time + timeDelta, // Sposta il punto nel tempo per allinearlo al Mac
+                            min: p.min !== undefined ? p.min : undefined,
+                            max: p.max !== undefined ? p.max : undefined
+                        }));
+                    } else {
+                        store.histories[key] = data[key];
+                    }
+                }
+            }
+
+            // Sincronizza i dati specifici del radar storici, previsionali e i buffer minuto per minuto (applicando il Delta)
+            if (data.windRadarSlots) {
+                store.windRadarSlots = data.windRadarSlots.map(s => ({
+                    ...s,
+                    timestamp: s.timestamp + timeDelta
+                }));
+            }
+            if (data.futureForecast) {
+                store.futureForecast = {
+                    ...data.futureForecast,
+                    timestamp: data.futureForecast.timestamp + timeDelta
+                };
+            }
+            if (data.twd) {
+                store.twdMinuteBuffer = data.twd.map(p => ({
+                    ...p,
+                    time: p.time + timeDelta
+                }));
+            }
+            if (data.tws) {
+                store.twsMinuteBuffer = data.tws.map(p => ({
+                    ...p,
+                    time: p.time + timeDelta
+                }));
+            }
             
             // --- SILLABAZIONE STRATEGICA DELLA BUSSOLA METEO (TWD) ---
-            // Se il server ci invia lo storico del TWD, lo inseriamo calcolando i seni e coseni per i vettori
             if (data.twd && data.twd.length > 0) {
                 store.longBuf.twd = data.twd.map(p => ({
                     val: p.val,
-                    time: p.time,
+                    time: p.time + timeDelta, // Allinea il tempo strategico del radar
                     sin: Math.sin(p.val),
                     cos: Math.cos(p.val)
                 }));
@@ -928,7 +1016,7 @@ async function fetchServerHistory() {
         }
     } catch (err) {
         console.warn("⚠️ Impossibile caricare lo storico dal server. Utilizzo dati vuoti/simulati.");
-        throw err; // Rilancia l'errore per far attivare il fallback nella funzione init()
+        throw err;
     }
 }
 
@@ -1176,6 +1264,7 @@ function connect() {
                     { path: "environment.wind.speedApparent", minPeriod: 333 },     // AWS a 3 Hz
                     { path: "environment.wind.angleApparent", minPeriod: 333 },     // AWA a 3 Hz
                     { path: "environment.wind.speedTrue", minPeriod: 333 },         // TWS (Nativo) a 3 Hz
+                    { path: "environment.wind.angleTrueWater", minPeriod: 333 },    // TWA (Nativo) a 3 Hz (AGGIUNTO)
                     { path: "environment.wind.directionTrue", minPeriod: 333 }      // TWD (Nativo) a 3 Hz
                 ]
             };
@@ -1331,11 +1420,12 @@ async function init() {
     startDisplayLoop();
     connect(); // Si collegherà in tempo reale al WebSocket reale della barca
     
-    // 5. POLL LENTO (15 secondi): aggiorna i dati radar in background e, se attivo, li ridisegna
+    // 5. POLL LENTO (15 secondi): aggiorna i dati radar in background SOLO se lo strumento attivo è il radar,
+    // evitando di sovraccaricare la rete ed eliminando il salto visivo di reset dei grafici a 1Hz
     setInterval(async () => {
         try {
-            await fetchServerHistory();
             if (activeInstrument === 'radar') {
+                await fetchServerHistory();
                 renderRadar();
             }
         } catch (err) {

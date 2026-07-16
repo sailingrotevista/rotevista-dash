@@ -277,32 +277,40 @@ module.exports = function (app) {
         const stw = raw["navigation.speedThroughWater"];
         const sog = raw["navigation.speedOverGround"] || 0;
         const hdg = raw["navigation.headingTrue"];
-        const cog = raw["navigation.courseOverGroundTrue"] || 0;
 
         if (aws !== undefined && awa !== undefined) {
             const awsKts = aws * 1.94384;
             
-            // Verifica se lo STW fisicamente attivo ha trasmesso dati negli ultimi 15 secondi
+            // RILEVAMENTO "LOG BLOCCATO" SUL SERVER
             const hasStw = lastPathProcessTimes["navigation.speedThroughWater"] && (now - lastPathProcessTimes["navigation.speedThroughWater"] < 15000);
-            // Se lo STW non è disponibile, usa automaticamente la velocità del GPS (SOG) come riferimento
-            const speedKtsRef = hasStw && stw !== undefined ? (stw * 1.94384) : (sog * 1.94384);
+            let speedRef = 0;
+            
+            if (hasStw && stw !== undefined) {
+                if (sog > 0.77 && stw < 0.25) {
+                    speedRef = sog; // Log sporco: forza il SOG
+                } else {
+                    speedRef = stw;
+                }
+            } else {
+                speedRef = sog;
+            }
+            
+            const speedKtsRef = speedRef * 1.94384;
 
             const tw_water_x = awsKts * Math.cos(awa) - speedKtsRef;
             const tw_water_y = awsKts * Math.sin(awa);
 
-            // Calcoliamo il TWS di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
+            // Calcolo TWS
             if (now - lastNativeTwsTime > 5000) {
                 const tws = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
                 manageHistory('tws', tws);
             }
 
             const twa = Math.atan2(tw_water_y, tw_water_x);
-            
-            // La VMG viene calcolata usando la velocità di riferimento (STW reale o SOG di fallback)
             const vmg = Math.abs(speedKtsRef * Math.cos(twa));
             manageHistory('vmg', vmg);
 
-            // Calcoliamo il TWD di fallback solo se non abbiamo visto dati nativi negli ultimi 5 secondi
+            // Calcolo TWD stabile (Prua + TWA)
             if (hdg !== undefined && (now - lastNativeTwdTime > 5000)) {
                 const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
                 manageHistory('twd', twd);
