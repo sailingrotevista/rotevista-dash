@@ -976,12 +976,9 @@ async function fetchServerHistory() {
                 }
             }
 
-            // Sincronizza i dati specifici del radar storici, previsionali e i buffer minuto per minuto (applicando il Delta)
+            // Sincronizza i dati specifici del radar storici mantendo i timestamp calendarizzati assoluti (0% sfasamento dei perni)
             if (data.windRadarSlots) {
-                store.windRadarSlots = data.windRadarSlots.map(s => ({
-                    ...s,
-                    timestamp: s.timestamp + timeDelta
-                }));
+                store.windRadarSlots = data.windRadarSlots; // Mantiene gli orari spaccati al minuto per l'uguaglianza del radar
             }
             if (data.futureForecast) {
                 store.futureForecast = {

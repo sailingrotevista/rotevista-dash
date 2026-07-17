@@ -163,15 +163,25 @@ function refreshGraph(t) {
 
     if (!rawData || rawData.length < 2) return;
 
-    const values = rawData.map(p => p.val);
+    // ALINEAMENTO STRUTTURALE: Filtriamo lo storico mantenendo solo la finestra temporale visibile
+    // prima di calcolare la scala, allineando millimetricamente la scala Y con i pixel disegnati a schermo.
+    const now = Date.now();
+    const visibleMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
+    const viewportMs = visibleMinutes * 60000;
+    const viewportStart = now - viewportMs;
+
+    const visibleData = rawData.filter(p => p.time >= viewportStart);
+    if (visibleData.length < 2) return; // Abortisce se non ci sono abbastanza punti visibili
+
+    const values = visibleData.map(p => p.val); // Estrae i valori solo dei punti visibili
     const mode = graphModes[boxType];
-    const cfg = calculateScale(boxType, values, mode);
+    const cfg = calculateScale(boxType, values, mode); // Calcola la scala Y esatta per la viewBox corrente
 
     const box = document.querySelector(`.box-${boxType}`);
     if (box) box.classList.toggle('box-hercules', mode === 'hercules');
 
     updateScaleLabels(boxType, cfg.min, cfg.max);
-    drawGraph(rawData, boxType + '-graph', cfg.min, cfg.max, t === 'tws', mode === 'hercules');
+    drawGraph(visibleData, boxType + '-graph', cfg.min, cfg.max, t === 'tws', mode === 'hercules');
 }
 
 // Genera fisicamente le curve e le aree SVG
