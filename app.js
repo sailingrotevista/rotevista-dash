@@ -514,11 +514,27 @@ function updateWindTrend() {
                     // Abbiamo eseguito una vera strambata stabile e siamo usciti dalla zona di poppa secca!
                     lastGybeSide = currentTack;
 
+                    // Estraggo i dati correnti di vento reale (TWS), velocità (SOG) e l'angolo TWA smorzato
+                    const twsKts = store.raw["environment.wind.speedTrue"] ? msToKts(store.raw["environment.wind.speedTrue"]) : 0;
+                    const sogKts = msToKts(store.raw["navigation.speedOverGround"] || 0);
+                    const twaDeg = Math.abs(smoothedTwaDeg);
+
+                    // RILEVAMENTO AERODINAMICO MOTORE IN POPPA:
+                    // Se siamo di poppa (TWA > 135°) e la velocità della barca supera il 75% della velocità del vento reale,
+                    // è fisicamente impossibile essere a vela pura. Siamo a motore o in motorsailing.
+                    const isMotoringDownwind = (twaDeg > 135) && (sogKts > (twsKts * 0.75));
+
+                    // L'allarme strambata acustico è reale e attivo solo se:
+                    // 1. C'è vento significativo (> 7.0 nodi)
+                    // 2. La barca è in movimento (> 1.0 nodi)
+                    // 3. NON siamo a motore/motorsailing (isMotoringDownwind è falso)
+                    const isGybeDangerous = twsKts > 7.0 && sogKts > 1.0 && !isMotoringDownwind;
+
                     // Attivazione allarme acustico con blocco temporale di sicurezza (60 secondi)
-                    if (isNavigating && (now - lastGybeAlarmTime > 60000)) {
+                    if (isGybeDangerous && (now - lastGybeAlarmTime > 60000)) {
                         lastGybeAlarmTime = now;
                         playGybeAlarm();
-                        console.log(`⚠️ GYBE ALARM TRIGGERED: Tack switched to ${currentTack} (TWA: ${smoothedTwaDeg.toFixed(1)}°)`);
+                        console.log(`⚠️ GYBE ALARM TRIGGERED: Tack switched to ${currentTack} (TWA: ${twaDeg.toFixed(1)}°, TWS: ${twsKts.toFixed(1)}kts, SOG: ${sogKts.toFixed(1)}kts)`);
                     }
                 }
             }
