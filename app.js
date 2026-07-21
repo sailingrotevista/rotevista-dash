@@ -419,8 +419,9 @@ function processIncomingData(path, val, source, timeMs) {
             const variation = store.raw["navigation.magneticVariation"] || 0; // Legge la declinazione magnetica del GPS
             const calculatedTrueHdg = (val + variation + 2 * Math.PI) % (2 * Math.PI);
             
-            // Registriamo il valore calcolato come Prua Vera temporanea
+            // Registriamo il valore calcolato come Prua Vera temporanea e aggiorniamo il timestamp per evitare i timeout del watchdog
             store.raw["navigation.headingTrue"] = calculatedTrueHdg;
+            store.timestamps["navigation.headingTrue"] = now; // (AGGIUNTO - RISOLVE IL LOCKOUT)
             safePush(store.smoothBuf.hdg, calculatedTrueHdg, now);
             safePush(store.longBuf.hdg, calculatedTrueHdg, now);
         }
@@ -436,6 +437,7 @@ function processIncomingData(path, val, source, timeMs) {
         const sog = store.raw["navigation.speedOverGround"] || 0;
         if (!hasCompass && sog > 0.77) { // 0.77 m/s = 1.5 nodi
             store.raw["navigation.headingTrue"] = val;
+            store.timestamps["navigation.headingTrue"] = now; // (AGGIUNTO - RISOLVE IL LOCKOUT COG)
             safePush(store.smoothBuf.hdg, val, now);
             safePush(store.longBuf.hdg, val, now);
         }
