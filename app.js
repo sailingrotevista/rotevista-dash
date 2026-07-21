@@ -216,7 +216,7 @@ function checkDepthAlarm(m) {
 function computeTrueWind() {
     const aws = store.raw["environment.wind.speedApparent"], awa = store.raw["environment.wind.angleApparent"];
     const stw = store.raw["navigation.speedThroughWater"], sog = store.raw["navigation.speedOverGround"] || 0;
-    const hdg = store.raw["navigation.headingTrue"] || 0; // Il COG qui non serve più per il calcolo stabile
+    const hdg = store.raw["navigation.headingTrue"]; // Rimosso il default a 0 fittizio all'avvio
     if (aws === undefined || awa === undefined) return;
 
     const now = store.timestamps["environment.wind.speedApparent"] || Date.now();
@@ -281,9 +281,10 @@ function computeTrueWind() {
     // ==========================================================================
     const hasNativeTwd = store.timestamps["environment.wind.directionTrue"] && (Date.now() - store.timestamps["environment.wind.directionTrue"] < 5000);
 
-    if (!hasNativeTwd && tws_water > 0.05) {
+    // Eseguiamo il calcolo del TWD di fallback solo se la Prua (hdg) è realmente disponibile in memoria,
+    // evitando di inquinare i buffer all'avvio con lo zero fittizio
+    if (!hasNativeTwd && tws_water > 0.05 && hdg !== undefined) {
         // Calcolo TWD stabile e immune dal rollio: Prua + TWA
-        // Elimina i sobbalzi legati al brandeggio del COG e dello scarroccio fasullo
         let twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
         store.raw["environment.wind.directionTrue"] = twd;
         safePush(store.smoothBuf.twd, twd, now);
@@ -1017,16 +1018,9 @@ async function fetchServerHistory() {
                 }));
             }
             
-            // --- SILLABAZIONE STRATEGICA DELLA BUSSOLA METEO (TWD) ---
-            if (data.twd && data.twd.length > 0) {
-                store.longBuf.twd = data.twd.map(p => ({
-                    val: p.val,
-                    time: p.time + timeDelta, // Allinea il tempo strategico del radar
-                    sin: Math.sin(p.val),
-                    cos: Math.cos(p.val)
-                }));
-                console.log(`📈 Memoria strategica TWD sincronizzata dal server (${data.twd.length} punti).`);
-            }
+            // Sincronizziamo lo storico dei minuti per il radar, ma lasciamo che il buffer rapido 'store.longBuf.twd'
+            // parta pulito all'avvio. Si popolerà istantaneamente a 3Hz con i soli dati in tempo reale,
+            // garantendo una reattività della direzione del vento (TWD) immediata e priva di sbalzi all'avvio.
             console.log("📈 Storico dei grafici pre-popolato caricato dal server.");
         }
     } catch (err) {

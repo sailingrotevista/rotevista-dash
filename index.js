@@ -161,11 +161,10 @@ module.exports = function (app) {
         const lastVal = raw[path];
         const lastTime = lastPathProcessTimes[path] || 0;
 
-        // FILTRO DEDUPLICAZIONE CON HEARTBEAT DI SICUREZZA A 10 SECONDI:
-        // Se il nuovo dato è identico al precedente e sono passati meno di 10 secondi dall'ultimo invio,
-        // scartiamo subito l'elaborazione risparmiando cicli di CPU sul server.
-        // La soglia dei 10s garantisce la compatibilità con il Gap Detection dei grafici client.
-        if (lastVal !== undefined && isValueEqual(val, lastVal) && (now - lastTime < 10000)) {
+        // FILTRO DEDUPLICAZIONE CON HEARTBEAT DI SICUREZZA A 4 SECONDI:
+        // Ridotto a 4 secondi per garantire che anche con timeline corte (5 min, secchiello da 5s)
+        // il server scriva sempre almeno un punto nei buffer, evitando buchi nello storico.
+        if (lastVal !== undefined && isValueEqual(val, lastVal) && (now - lastTime < 4000)) {
             return;
         }
         
@@ -470,11 +469,6 @@ module.exports = function (app) {
             if (!isFinite(finalValue)) return;
             finalValue = Math.max(0, finalValue);
             histories[type].push({ val: finalValue, time: now });
-
-            // EMISSIONE DEL DELTA: Se abbiamo calcolato il TWS di fallback, lo trasmettiamo a Signal K
-            if (type === 'tws' && (now - lastNativeTwsTime > 5000)) {
-                emitDelta('environment.wind.speedTrue', finalValue / 1.94384); // Converte nodi in m/s
-            }
         } else {
             // Salvataggio specifico del TWD contenente l'oggetto { val, min, max, time }
             histories['twd'].push({
@@ -483,12 +477,6 @@ module.exports = function (app) {
                 max: finalValue.max,
                 time: now
             });
-
-            // EMISSIONE DEL DELTA: Se abbiamo calcolato il TWD di fallback, lo trasmettiamo a Signal K
-            if (now - lastNativeTwdTime > 5000) {
-                // Standard Signal K: trasmettiamo solo il valore medio (float numerico in radianti)
-                emitDelta('environment.wind.directionTrue', finalValue.val);
-            }
 
             // --- TRIGGER DI CONGELAMENTO ARCO (Ogni :00 e :30 dell'orologio) ---
             const current30mSlot = Math.floor(now / 1800000) * 1800000;
@@ -881,7 +869,7 @@ module.exports = function (app) {
     /**
         * emitDelta: Scrive ed emette un aggiornamento di rotta direttamente nel
         * server principale di Signal K per renderlo disponibile a tutti i client WebSocket.
-        */
+        
     function emitDelta(path, value) {
         if (typeof app.handleMessage === 'function') {
             app.handleMessage(plugin.id, {
@@ -901,7 +889,8 @@ module.exports = function (app) {
             });
         }
     }
-
+     */
+    
     /**
         * pruneStaleHistories: Pota in background i punti storici obsoleti dei sensori spenti.
         * Evita il congelamento dei grafici sul tablet e previene sprechi di RAM sul server.
