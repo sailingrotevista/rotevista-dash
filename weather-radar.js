@@ -279,14 +279,25 @@ function renderRadar() {
                 const pt = polarToCartesian(200, 200, radiusAnello1, angleTarget);
 
                 const led = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-                led.setAttribute("cx", pt.x.toFixed(1));
-                led.setAttribute("cy", pt.y.toFixed(1));
-                led.setAttribute("r", "5.5");
-                led.setAttribute("fill", meteoColor);
-                led.setAttribute("class", "is-trending");
-                led.setAttribute("filter", "url(#radar-center-glow)");
-                ringsContainer.appendChild(led);
-            }
-        }
-    }
-}
+                                led.setAttribute("cx", pt.x.toFixed(1));
+                                led.setAttribute("cy", pt.y.toFixed(1));
+                                led.setAttribute("r", "5.5");
+                                led.setAttribute("fill", meteoColor);
+                                led.setAttribute("class", "is-trending");
+                                led.setAttribute("filter", "url(#radar-center-glow)");
+                                ringsContainer.appendChild(led);
+                            }
+                        }
+                    }
+
+                    // ROTAZIONE TATTICA BARCA (North-Up Alignment)
+                    // Orientiamo l'icona della barca in base alla Prua Vera (HDG)
+                    const boatIcon = document.getElementById('radar-boat-icon');
+                    if (boatIcon && typeof store !== 'undefined' && store.raw) {
+                        const hdgRad = store.raw["navigation.headingTrue"] !== undefined ? store.raw["navigation.headingTrue"] : 0;
+                        const hdgDeg = Math.round(radToDeg(hdgRad));
+                        
+                        // Applicazione della rotazione centrata sull'asse (200, 200) dell'SVG
+                        boatIcon.setAttribute("transform", `rotate(${hdgDeg}, 200, 200) translate(0, 5)`);
+                    }
+                }
