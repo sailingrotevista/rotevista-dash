@@ -1,6 +1,6 @@
 {
   "name": "@sailingrotevista/rotevista-dash",
-  "version": "7.0.29",
+  "version": "7.0.30",
   "description": "Wind Dashboard with navigation and course aids",
   "main": "index.js",
   "publishConfig": {
@@ -13,7 +13,7 @@
   "author": "Sailing Rotevista",
   "license": "MIT",
   "signalk": {
-      "displayName": "Rotevista Wind Dashboard",
-      "appIcon": "icons/dash.png"
-    }
+    "displayName": "Rotevista Wind Dashboard",
+    "appIcon": "icons/dash.png"
+  }
 }
