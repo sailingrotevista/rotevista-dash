@@ -55,10 +55,10 @@ function updateCentralGauge(store, ui, now, isNavigating, sogKts, stwKts, rawAws
     }
 
     // B. Rotazione dei puntatori analogici di AWA (Apparent) e TWA (True)
-    const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, 2000, true);
-    const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, 2000, true);
-    if (smAwa) ui.awa.setAttribute('transform', `rotate(${curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val))}, 200, 200)`);
-    if (smTwa) ui.twa.setAttribute('transform', `rotate(${curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val))}, 200, 200)`);
+        const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, 2000, true);
+        const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, 2000, true);
+        if (smAwa) ui.awa.setAttribute('transform', `rotate(${curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val))}, 200, 200)`);
+        if (smTwa) ui.twa.setAttribute('transform', `rotate(${curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val))}, 200, 200)`);
     
     // C. Calcolo dello Scarroccio (Leeway) e orientamento del vettore Track
     if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {

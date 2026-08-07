@@ -33,10 +33,13 @@ function safeSetText(el, text) {
 
 // --- 2. MOTORE MATEMATICO: MEDIA CIRCOLARE VETTORIALE ---
 function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now, stabilityThreshold = 0.95, stabilityBreakout = 15) {
-    now = now || Date.now();
     const len = bufferArray.length;
     if (len === 0) return null;
 
+    // RIFERIMENTO TEMPORALE IMMUNE DA DESINCRONIZZAZIONE:
+    // Usiamo come 'ora attuale' l'ultimo timestamp presente nel buffer stesso,
+    // garantendo che la finestra di 2s sia sempre calcolata sui dati NMEA reali arrivati.
+    const referenceTime = bufferArray[len - 1].time;
     let sSin = 0, sCos = 0, count = 0;
     let newestTime = 0, oldestTime = 0;
 
@@ -51,7 +54,7 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now
 
     for (let i = len - 1; i >= 0; i--) {
         const item = bufferArray[i];
-        if ((now - item.time) > windowMs) break;
+        if ((referenceTime - item.time) > windowMs) break; // Usa referenceTime invece di 'now'
 
         let diffRad = Math.atan2(Math.sin(item.val - pilotRad), Math.cos(item.val - pilotRad));
         let finalSin, finalCos;

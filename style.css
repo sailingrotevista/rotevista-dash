@@ -612,3 +612,29 @@ body.night-mode {
 }
 
 */
+
+/* ==========================================================================
+   14. POSIZIONAMENTO SOVRAPPOSTO LAYERED COMPASS (0% CARICO CPU)
+   ========================================================================== */
+
+/* Contenitore padre relativo */
+.wind-gauge-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Sovrapposizione assoluta perfetta del livello lancette sopra lo sfondo */
+#wind-gauge-pointers {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none; /* Permette al tocco del mouse di passare sotto al centro interattivo */
+}

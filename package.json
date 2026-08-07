@@ -13,6 +13,7 @@
   "author": "Sailing Rotevista",
   "license": "MIT",
   "signalk": {
-    "displayName": "Rotevista Wind Dashboard"
-  }
+      "displayName": "Rotevista Wind Dashboard",
+      "appIcon": "icons/dash.png"
+    }
 }
