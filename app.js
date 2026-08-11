@@ -629,21 +629,27 @@ function updateWindTrend() {
 // ==========================================================================
 
 /**
-    * upUI: Aggiornamento valori digitali
+    * upUI: Aggiornamento valori digitali con tolleranza d'emergenza sul dato istantaneo
     */
 const upUI = (el, obj, instantRaw, isCompass = false) => {
-    if (!obj || obj.val === null || isNaN(obj.val) || instantRaw === undefined) {
+    // Se la media obj non è momentaneamente disponibile, usa il dato istantaneo raw come paracadute
+    const displayRad = (obj && obj.val !== null && !isNaN(obj.val)) ? obj.val : instantRaw;
+
+    if (displayRad === undefined || displayRad === null || isNaN(displayRad)) {
         el.innerHTML = "---&deg;";
         el.classList.remove('unstable-data');
     } else {
-        let valDeg = Math.round(radToDeg(obj.val));
+        let valDeg = Math.round(radToDeg(displayRad));
         let mainVal = (isCompass ? ((valDeg + 360) % 360).toString().padStart(3, '0') : valDeg) + "&deg;";
-        let dev = (obj.dev > 1 && obj.dev < 90) ? `<span style="font-size: 0.8em; opacity: 0.4; margin-left: 6px;">&plusmn;${obj.dev}</span>` : "";
+        let dev = (obj && obj.dev > 1 && obj.dev < 90) ? `<span style="font-size: 0.8em; opacity: 0.4; margin-left: 6px;">&plusmn;${obj.dev}</span>` : "";
         el.innerHTML = mainVal + dev;
         
-        let diff = Math.abs((radToDeg(instantRaw) - radToDeg(obj.val) + 540) % 360 - 180);
-        if (isNavigating && (!obj.stable || obj.dev > CONFIG.averaging.stabilityBreakout || diff > CONFIG.averaging.stabilityBreakout)) el.classList.add('unstable-data');
-        else el.classList.remove('unstable-data');
+        let diff = (obj && instantRaw !== undefined) ? Math.abs((radToDeg(instantRaw) - radToDeg(obj.val) + 540) % 360 - 180) : 0;
+        if (isNavigating && (obj && (!obj.stable || obj.dev > CONFIG.averaging.stabilityBreakout || diff > CONFIG.averaging.stabilityBreakout))) {
+            el.classList.add('unstable-data');
+        } else {
+            el.classList.remove('unstable-data');
+        }
     }
 };
 
