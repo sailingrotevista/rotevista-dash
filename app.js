@@ -805,65 +805,64 @@ function startDisplayLoop() {
         }
         
         // --- SLOW TIER (Salvataggio stato ogni 10 secondi) ---
-            if (lastAvgUIUpdate++ % 10 === 0) {
-                saveDashboardState();
+        if (lastAvgUIUpdate++ % 10 === 0) {
+            saveDashboardState();
+        }
+
+        // AGGIORNAMENTO FLUIDO MEDIE UI (Esecuzione a 1Hz costante ad ogni secondo)
+        const baseThreshold = CONFIG.averaging.stabilityThreshold || 0.95;
+        const breakout = CONFIG.averaging.stabilityBreakout || 15;
+        
+        // CALCOLO DIFFERENZIALE: Tolleranza del vento proporzionale alla sensibilità di base
+        const windThreshold = Math.max(0.60, baseThreshold - 0.13);
+
+        let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false, now, baseThreshold, breakout);
+        let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false, now, baseThreshold, breakout);
+        
+        // Applichiamo la soglia differenziale ottimizzata per i tre dati legati al vento
+        let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true, now, windThreshold, breakout);
+        let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true, now, windThreshold, breakout);
+        let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false, now, windThreshold, breakout);
+
+        // --- GESTIONE DINAMICA ETICHETTA TACK/GYBE CON ISTERESI DI 10 GRADI ---
+        if (ui.tackLabel) {
+            const absTwa = Math.abs(radToDeg(store.raw["environment.wind.angleTrueWater"] || 0));
+            if (currentTackLabelMode === 'TACK' && absTwa > 95) {
+                currentTackLabelMode = 'GYBE';
+            } else if (currentTackLabelMode === 'GYBE' && absTwa < 85) {
+                currentTackLabelMode = 'TACK';
             }
+            safeSetText(ui.tackLabel, currentTackLabelMode);
+        }
 
-            // AGGIORNAMENTO FLUIDO MEDIE UI (Esecuzione a 1Hz costante ad ogni secondo)
-            const baseThreshold = CONFIG.averaging.stabilityThreshold || 0.95;
-            const breakout = CONFIG.averaging.stabilityBreakout || 15;
-            
-            // CALCOLO DIFFERENZIALE: Tolleranza del vento proporzionale alla sensibilità di base
-            const windThreshold = Math.max(0.60, baseThreshold - 0.13);
+        upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
+        upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
+        upUI(ui.awaAvg, awObj, store.raw["environment.wind.angleApparent"], false);
+        upUI(ui.twaAvg, twObj, store.raw["environment.wind.angleTrueWater"], false);
+        upUI(ui.twdAvg, twdObj, store.raw["environment.wind.directionTrue"], true);
 
-            let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false, now, baseThreshold, breakout);
-            let cObj = getCircularAverageFromBuffer(store.longBuf.cog, CONFIG.averaging.longWindow, false, now, baseThreshold, breakout);
-            
-            // Applichiamo la soglia differenziale ottimizzata per i tre dati legati al vento
-            let awObj = getCircularAverageFromBuffer(store.longBuf.awa, CONFIG.averaging.longWindow, true, now, windThreshold, breakout);
-            let twObj = getCircularAverageFromBuffer(store.longBuf.twa, CONFIG.averaging.longWindow, true, now, windThreshold, breakout);
-            let twdObj = getCircularAverageFromBuffer(store.longBuf.twd, CONFIG.averaging.longWindow, false, now, windThreshold, breakout);
-
-            // --- GESTIONE DINAMICA ETICHETTA TACK/GYBE CON ISTERESI DI 10 GRADI ---
-            if (ui.tackLabel) {
-                const absTwa = Math.abs(radToDeg(store.raw["environment.wind.angleTrueWater"] || 0));
-                if (currentTackLabelMode === 'TACK' && absTwa > 95) {
-                    currentTackLabelMode = 'GYBE';
-                } else if (currentTackLabelMode === 'GYBE' && absTwa < 85) {
-                    currentTackLabelMode = 'TACK';
-                }
-                safeSetText(ui.tackLabel, currentTackLabelMode);
+        if (hObj && twdObj) {
+            const reflectAngle = (targetRad, axisRad) => {
+                const dS = Math.sin(axisRad - targetRad);
+                const dC = Math.cos(axisRad - targetRad);
+                return Math.atan2(Math.sin(axisRad) * dC + Math.cos(axisRad) * dS, Math.cos(axisRad) * dC - Math.sin(axisRad) * dS);
+            };
+            const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout;
+            if (!isNavigating) ui.tackHdg.innerHTML = "---&deg;";
+            else if (unstableH) { ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.add('unstable-data'); }
+            else {
+                const rH = (radToDeg(reflectAngle(hObj.val, twdObj.val)) + 360) % 360;
+                ui.tackHdg.innerHTML = `${Math.round(rH).toString().padStart(3, '0')}&deg;`;
+                ui.tackHdg.classList.remove('unstable-data');
             }
-
-            upUI(ui.hdg, hObj, store.raw["navigation.headingTrue"], true);
-            upUI(ui.cog, cObj, store.raw["navigation.courseOverGroundTrue"], true);
-            upUI(ui.awaAvg, awObj, store.raw["environment.wind.angleApparent"], false);
-            upUI(ui.twaAvg, twObj, store.raw["environment.wind.angleTrueWater"], false);
-            upUI(ui.twdAvg, twdObj, store.raw["environment.wind.directionTrue"], true);
-
-            if (hObj && twdObj) {
-                const reflectAngle = (targetRad, axisRad) => {
-                    const dS = Math.sin(axisRad - targetRad);
-                    const dC = Math.cos(axisRad - targetRad);
-                    return Math.atan2(Math.sin(axisRad) * dC + Math.cos(axisRad) * dS, Math.cos(axisRad) * dC - Math.sin(axisRad) * dS);
-                };
-                const unstableH = !hObj.stable || !twdObj.stable || hObj.dev > CONFIG.averaging.stabilityBreakout;
-                if (!isNavigating) ui.tackHdg.innerHTML = "---&deg;";
-                else if (unstableH) { ui.tackHdg.innerHTML = "---&deg;"; ui.tackHdg.classList.add('unstable-data'); }
+            if (cObj) {
+                const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout;
+                if (!isNavigating) ui.tackCog.innerHTML = "---&deg;";
+                else if (unstableC) { ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.add('unstable-data'); }
                 else {
-                    const rH = (radToDeg(reflectAngle(hObj.val, twdObj.val)) + 360) % 360;
-                    ui.tackHdg.innerHTML = `${Math.round(rH).toString().padStart(3, '0')}&deg;`;
-                    ui.tackHdg.classList.remove('unstable-data');
-                }
-                if (cObj) {
-                    const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > CONFIG.averaging.stabilityBreakout;
-                    if (!isNavigating) ui.tackCog.innerHTML = "---&deg;";
-                    else if (unstableC) { ui.tackCog.innerHTML = "---&deg;"; ui.tackCog.classList.add('unstable-data'); }
-                    else {
-                        const rC = (radToDeg(reflectAngle(cObj.val, twdObj.val)) + 360) % 360;
-                        ui.tackCog.innerHTML = `${Math.round(rC).toString().padStart(3, '0')}&deg;`;
-                        ui.tackCog.classList.remove('unstable-data');
-                    }
+                    const rC = (radToDeg(reflectAngle(cObj.val, twdObj.val)) + 360) % 360;
+                    ui.tackCog.innerHTML = `${Math.round(rC).toString().padStart(3, '0')}&deg;`;
+                    ui.tackCog.classList.remove('unstable-data');
                 }
             }
         }
