@@ -38,6 +38,7 @@ module.exports = function (app) {
     // Memoria temporale per rilevare la presenza di sensori nativi sul Cerbo
     let lastNativeTwsTime = 0;
     let lastNativeTwdTime = 0;
+    let lastNativeHeadingTrueTime = 0; // Traccia la presenza di bussola vera nativa
     
     // Monitoraggio dello scorrere dei blocchi da 30 minuti
     let lastFrozen30mSlot = 0;
@@ -248,10 +249,14 @@ module.exports = function (app) {
             lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
             manageHistory('tws', smoothedVal * 1.94384);
         }
+        else if (path === 'navigation.headingTrue') {
+            lastNativeHeadingTrueTime = now; // Rilevata prua vera nativa dalla rete NMEA
+        }
         // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
         else if (path === 'navigation.headingMagnetic') {
-            const hasTrueHdg = raw['navigation.headingTrue'] !== undefined;
-            if (!hasTrueHdg) {
+            // Converte in prua vera solo se non c'è una bussola vera nativa attiva negli ultimi 5s
+            const hasNativeTrueHdg = (now - lastNativeHeadingTrueTime < 5000);
+            if (!hasNativeTrueHdg) {
                 const variation = raw['navigation.magneticVariation'] || 0;
                 raw['navigation.headingTrue'] = (smoothedVal + variation + 2 * Math.PI) % (2 * Math.PI);
             }

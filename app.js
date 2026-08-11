@@ -348,15 +348,17 @@ function processIncomingData(path, val, source, timeMs) {
     } else {
         const currentLock = sourceLocks[path];
         const isSameSource = (currentLock.label === source);
-        const isLockExpired = (now - currentLock.lastSeen > 12000); // Scadenza a 12 secondi per tollerare il GPS dello Yacht Devices
+        const isLockExpired = (now - currentLock.lastSeen > 12000); // Scadenza a 12 secondi
         const hasHigherPriority = (score > currentLock.score);
+        // Consente lo switch tra dispositivi di pari priorità (es. AP e YD) se la sorgente precedente è inattiva da > 1.5s
+        const isSamePriorityStale = (score === currentLock.score && (now - currentLock.lastSeen > 1500));
 
         if (isSameSource) {
             // Stessa sorgente: aggiorna il timestamp e mantiene il blocco
             currentLock.lastSeen = now;
             currentLock.score = score;
-        } else if (isLockExpired || hasHigherPriority) {
-            // Ruba il blocco se la sorgente precedente è scaduta o se questa ha priorità superiore
+        } else if (isLockExpired || hasHigherPriority || isSamePriorityStale) {
+            // Ruba il blocco se la sorgente precedente è scaduta, ha priorità superiore o è inattiva da 1.5s a pari priorità
             sourceLocks[path] = { label: source, score: score, lastSeen: now };
             console.log(`🔌 [Smart Lock] Path "${path}" switched to: ${source} (Score: ${score})`);
         } else {
@@ -410,19 +412,21 @@ function processIncomingData(path, val, source, timeMs) {
     
     // --- GESTIONE PRUA VERA / MAGNETICA CON AUTODIVIAZIONE ---
     if (path === "navigation.headingTrue") {
+        store.timestamps["navigation.headingTrueNative"] = now; // Marca la presenza di un sensore nativo di prua vera
+        store.timestamps["navigation.headingTrue"] = now;
         safePush(store.smoothBuf.hdg, val, now);
         safePush(store.longBuf.hdg, val, now);
     }
     else if (path === "navigation.headingMagnetic") {
-        // Se non abbiamo ricevuto una prua vera negli ultimi 5 secondi, convertiamo quella magnetica!
-        const hasTrueHdg = store.timestamps["navigation.headingTrue"] && (now - store.timestamps["navigation.headingTrue"] < 5000);
-        if (!hasTrueHdg) {
+        // Se non c'è una prua vera NATIVA negli ultimi 5 secondi, converte e registra ad ogni secondo la prua magnetica
+        const hasNativeTrueHdg = store.timestamps["navigation.headingTrueNative"] && (now - store.timestamps["navigation.headingTrueNative"] < 5000);
+        if (!hasNativeTrueHdg) {
             const variation = store.raw["navigation.magneticVariation"] || 0; // Legge la declinazione magnetica del GPS
             const calculatedTrueHdg = (val + variation + 2 * Math.PI) % (2 * Math.PI);
             
-            // Registriamo il valore calcolato come Prua Vera temporanea e aggiorniamo il timestamp per evitare i timeout del watchdog
+            // Registra il valore calcolato mantenendo attivo il watchdog senza bloccare i successivi pacchetti magnetici
             store.raw["navigation.headingTrue"] = calculatedTrueHdg;
-            store.timestamps["navigation.headingTrue"] = now; // (AGGIUNTO - RISOLVE IL LOCKOUT)
+            store.timestamps["navigation.headingTrue"] = now;
             safePush(store.smoothBuf.hdg, calculatedTrueHdg, now);
             safePush(store.longBuf.hdg, calculatedTrueHdg, now);
         }
