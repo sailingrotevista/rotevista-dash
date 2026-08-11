@@ -373,17 +373,18 @@ function processIncomingData(path, val, source, timeMs) {
         }
     }
 
-    // Aggiorna sempre lo stato raw istantaneo all'ultimo millisecondo per massimizzare la precisione digitale
-    store.timestamps[path] = now;
+// Aggiorna lo stato raw e sincronizza il timestamp del watchdog sull'orologio locale (Date.now()) per evitare falsi timeout
+    const localNow = Date.now();
+    store.timestamps[path] = localNow;
     store.raw[path] = val;
 
-    // Converte e aggiorna istantaneamente store.raw["navigation.headingTrue"] prima del rate limiter per evitare ritardi UI
+    // Converte e aggiorna istantaneamente store.raw["navigation.headingTrue"] per la UI prima del rate limiter
     if (path === "navigation.headingMagnetic") {
-        const hasNativeTrueHdg = store.timestamps["navigation.headingTrueNative"] && (now - store.timestamps["navigation.headingTrueNative"] < 5000);
+        const hasNativeTrueHdg = store.timestamps["navigation.headingTrueNative"] && (localNow - store.timestamps["navigation.headingTrueNative"] < 5000);
         if (!hasNativeTrueHdg) {
             const variation = store.raw["navigation.magneticVariation"] || 0;
             store.raw["navigation.headingTrue"] = (val + variation + 2 * Math.PI) % (2 * Math.PI);
-            store.timestamps["navigation.headingTrue"] = now;
+            store.timestamps["navigation.headingTrue"] = localNow;
         }
     }
 
