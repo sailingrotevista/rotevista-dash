@@ -377,17 +377,25 @@ function processIncomingData(path, val, source, timeMs) {
     store.timestamps[path] = now;
     store.raw[path] = val;
 
+    // Converte e aggiorna istantaneamente store.raw["navigation.headingTrue"] prima del rate limiter per evitare ritardi UI
+    if (path === "navigation.headingMagnetic") {
+        const hasNativeTrueHdg = store.timestamps["navigation.headingTrueNative"] && (now - store.timestamps["navigation.headingTrueNative"] < 5000);
+        if (!hasNativeTrueHdg) {
+            const variation = store.raw["navigation.magneticVariation"] || 0;
+            store.raw["navigation.headingTrue"] = (val + variation + 2 * Math.PI) % (2 * Math.PI);
+            store.timestamps["navigation.headingTrue"] = now;
+        }
+    }
+
     // Le coordinate GPS e la posizione non sono soggette alla limitazione a 1Hz
     if (path === "navigation.position") {
-        return; // Esce subito (non richiede calcoli trigonometrici o inserimenti in smoothBuf/longBuf)
+        return; // Esce subito
     }
 
     // LIMITATORE DI FREQUENZA (RATE LIMITER) CLIENT-SIDE A 1HZ PER PERCORSO ATTIVO:
-    // Evita di eseguire calcoli trigonometrici, allocare oggetti in memoria dinamica
-    // e popolare i buffer smoothBuf/longBuf decine di volte al secondo per singolo sensore.
     if (!lastPathProcessTimes[path]) lastPathProcessTimes[path] = 0;
     if (now - lastPathProcessTimes[path] < 800) {
-        return; // Esce subito risparmiando cicli di calcolo del browser e batteria del tablet
+        return; // Esce subito risparmiando cicli di calcolo
     }
     lastPathProcessTimes[path] = now;
 
