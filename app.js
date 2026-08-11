@@ -323,6 +323,11 @@ function getSourcePriorityScore(sourceName) {
 }
 
 function processIncomingData(path, val, source, timeMs) {
+    // 0. Filtro di validità assoluta: ignora all'istante pacchetti vuoti, null o non numerici
+    if (val === null || val === undefined || (typeof val === 'number' && isNaN(val))) {
+        return;
+    }
+
     // 1. Filtro anti-spike vento (> 100 nodi / 51.44 m/s)
     if ((path === "environment.wind.speedApparent" || path === "environment.wind.speedTrue") && val > 51.44) {
         return;
@@ -348,21 +353,22 @@ function processIncomingData(path, val, source, timeMs) {
     } else {
         const currentLock = sourceLocks[path];
         const isSameSource = (currentLock.label === source);
-        const isLockExpired = (now - currentLock.lastSeen > 12000); // Scadenza a 12 secondi
+        // Tolleranza 5s: ignora il GPS Victron durante le micro-pause di Yacht Device per evitare imprecisioni
+        const isLockExpired = (now - currentLock.lastSeen > 5000);
         const hasHigherPriority = (score > currentLock.score);
-        // Consente lo switch tra dispositivi di pari priorità (es. AP e YD) se la sorgente precedente è inattiva da > 1.5s
+        // Switch immediato tra apparati principali di pari priorità (es. YD e AP) se inattivi da > 1.5s
         const isSamePriorityStale = (score === currentLock.score && (now - currentLock.lastSeen > 1500));
 
         if (isSameSource) {
             // Stessa sorgente: aggiorna il timestamp e mantiene il blocco
             currentLock.lastSeen = now;
             currentLock.score = score;
-        } else if (isLockExpired || hasHigherPriority || isSamePriorityStale) {
-            // Ruba il blocco se la sorgente precedente è scaduta, ha priorità superiore o è inattiva da 1.5s a pari priorità
+        } else if (hasHigherPriority || isLockExpired || isSamePriorityStale) {
+            // Passa a sorgenti secondarie (Victron) solo se Yacht Device è spento da > 5s
             sourceLocks[path] = { label: source, score: score, lastSeen: now };
             console.log(`🔌 [Smart Lock] Path "${path}" switched to: ${source} (Score: ${score})`);
         } else {
-            // Rifiuta i dati da sorgenti a priorità inferiore se quella principale è attiva
+            // Scarta sorgenti imprecise di servizio mentre Yacht Device è la sorgente principale attiva
             return;
         }
     }
@@ -799,16 +805,15 @@ function startDisplayLoop() {
         }
         
         // --- SLOW TIER (Salvataggio stato ogni 10 secondi) ---
-        if (lastAvgUIUpdate++ % 10 === 0) {
-            saveDashboardState();
-        }
+            if (lastAvgUIUpdate++ % 10 === 0) {
+                saveDashboardState();
+            }
 
-        if (lastAvgUIUpdate % 3 === 0) {
+            // AGGIORNAMENTO FLUIDO MEDIE UI (Esecuzione a 1Hz costante ad ogni secondo)
             const baseThreshold = CONFIG.averaging.stabilityThreshold || 0.95;
             const breakout = CONFIG.averaging.stabilityBreakout || 15;
             
-            // CALCOLO DIFFERENZIALE: Tolleranza del vento proporzionale alla sensibilità di base.
-            // Rilassiamo la soglia del vento di 0.13 rispetto alla prua (es. se la prua richiede 0.95, il vento richiede 0.82)
+            // CALCOLO DIFFERENZIALE: Tolleranza del vento proporzionale alla sensibilità di base
             const windThreshold = Math.max(0.60, baseThreshold - 0.13);
 
             let hObj = getCircularAverageFromBuffer(store.longBuf.hdg, CONFIG.averaging.longWindow * 2, false, now, baseThreshold, breakout);

@@ -36,10 +36,9 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now
     const len = bufferArray.length;
     if (len === 0) return null;
 
-    // RIFERIMENTO TEMPORALE IMMUNE DA DESINCRONIZZAZIONE:
-    // Usiamo come 'ora attuale' l'ultimo timestamp presente nel buffer stesso,
-    // garantendo che la finestra di 2s sia sempre calcolata sui dati NMEA reali arrivati.
+    // RIFERIMENTO TEMPORALE IMMUNE DA DESINCRONIZZAZIONE (Usa l'ultimo dato del buffer)
     const referenceTime = bufferArray[len - 1].time;
+
     let sSin = 0, sCos = 0, count = 0;
     let newestTime = 0, oldestTime = 0;
 
@@ -54,7 +53,7 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now
 
     for (let i = len - 1; i >= 0; i--) {
         const item = bufferArray[i];
-        if ((referenceTime - item.time) > windowMs) break; // Usa referenceTime invece di 'now'
+        if ((referenceTime - item.time) > windowMs) break;
 
         let diffRad = Math.atan2(Math.sin(item.val - pilotRad), Math.cos(item.val - pilotRad));
         let finalSin, finalCos;
@@ -82,12 +81,14 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now
     const R = Math.hypot(sSin, sCos) / count;
     const avgRad = Math.atan2(sSin, sCos);
     const finalVal = signed ? avgRad : (avgRad + Math.PI * 2) % (Math.PI * 2);
-    const historyDuration = (count > 2) ? (newestTime - oldestTime) : 0;
     const safeR = Math.max(R, 1e-9);
+
+    // Stabilità valida se ci sono almeno 2 campioni nel buffer e la varianza radiale supera la soglia
+    const isStable = (count >= 2) && (R > stabilityThreshold);
 
     return {
         val: finalVal,
-        stable: historyDuration > 10000 && R > stabilityThreshold,
+        stable: isStable,
         dev: (R < 1) ? Math.round(Math.sqrt(-2 * Math.log(safeR)) * (180 / Math.PI)) : 0,
         samples: count
     };
