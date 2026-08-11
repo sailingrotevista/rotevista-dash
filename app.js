@@ -342,7 +342,7 @@ function processIncomingData(path, val, source, timeMs) {
     if (path === "environment.depth.belowTransducer" && (val < -2.0 || val > 500)) {
         return;
     }
-    // Usiamo il tempo reale del pacchetto del server per eliminare lo sfasamento
+
     const now = timeMs || Date.now();
     const score = getSourcePriorityScore(source);
 
@@ -373,7 +373,7 @@ function processIncomingData(path, val, source, timeMs) {
         }
     }
 
-// Aggiorna lo stato raw e sincronizza il timestamp del watchdog sull'orologio locale (Date.now()) per evitare falsi timeout
+    // Aggiorna lo stato raw e sincronizza il timestamp del watchdog sull'orologio locale (Date.now()) per evitare falsi timeout
     const localNow = Date.now();
     store.timestamps[path] = localNow;
     store.raw[path] = val;
@@ -401,25 +401,21 @@ function processIncomingData(path, val, source, timeMs) {
     lastPathProcessTimes[path] = now;
 
     // Da qui in poi, l'inserimento nei buffer fisici avviene rigorosamente a 1Hz:
-    //if (path === "environment.wind.angleApparent") {
-    //  safePush(store.smoothBuf.awa, val, now);
-    //  safePush(store.longBuf.awa, val, now);
-    //}
 
-    // BUG RISOLTO: Intercetta il TWD nativo e lo spinge nei buffer della bussola radar
+    // Intercetta il TWD nativo e lo spinge nei buffer della bussola radar
     if (path === "environment.wind.directionTrue") {
         let directionVal = (val && typeof val === 'object' && val.val !== undefined) ? val.val : val;
         safePush(store.smoothBuf.twd, directionVal, now);
         safePush(store.longBuf.twd, directionVal, now);
     }
 
-    // BUG RISOLTO: Intercetta il TWS nativo e lo memorizza in tempo reale
+    // Intercetta il TWS nativo e lo memorizza in tempo reale
     if (path === "environment.wind.speedTrue") {
         let speedVal = (val && typeof val === 'object' && val.val !== undefined) ? val.val : val;
         store.raw["environment.wind.speedTrue"] = speedVal;
     }
 
-    // INTERCETTAZIONE TWA NATIVO (Angolo Vento Reale pronto all'uso)
+    // Intercetta TWA nativo (Angolo Vento Reale)
     if (path === "environment.wind.angleTrueWater") {
         let angleVal = (val && typeof val === 'object' && val.val !== undefined) ? val.val : val;
         store.raw["environment.wind.angleTrueWater"] = angleVal;
@@ -428,7 +424,7 @@ function processIncomingData(path, val, source, timeMs) {
     // --- GESTIONE PRUA VERA / MAGNETICA CON AUTODIVIAZIONE ---
     if (path === "navigation.headingTrue") {
         store.timestamps["navigation.headingTrueNative"] = now; // Marca la presenza di un sensore nativo di prua vera
-        store.timestamps["navigation.headingTrue"] = now;
+        store.timestamps["navigation.headingTrue"] = localNow;
         safePush(store.smoothBuf.hdg, val, now);
         safePush(store.longBuf.hdg, val, now);
     }
@@ -441,7 +437,7 @@ function processIncomingData(path, val, source, timeMs) {
             
             // Registra il valore calcolato mantenendo attivo il watchdog senza bloccare i successivi pacchetti magnetici
             store.raw["navigation.headingTrue"] = calculatedTrueHdg;
-            store.timestamps["navigation.headingTrue"] = now;
+            store.timestamps["navigation.headingTrue"] = localNow;
             safePush(store.smoothBuf.hdg, calculatedTrueHdg, now);
             safePush(store.longBuf.hdg, calculatedTrueHdg, now);
         }
@@ -457,7 +453,7 @@ function processIncomingData(path, val, source, timeMs) {
         const sog = store.raw["navigation.speedOverGround"] || 0;
         if (!hasCompass && sog > 0.77) { // 0.77 m/s = 1.5 nodi
             store.raw["navigation.headingTrue"] = val;
-            store.timestamps["navigation.headingTrue"] = now; // (AGGIUNTO - RISOLVE IL LOCKOUT COG)
+            store.timestamps["navigation.headingTrue"] = localNow;
             safePush(store.smoothBuf.hdg, val, now);
             safePush(store.longBuf.hdg, val, now);
         }

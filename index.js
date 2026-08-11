@@ -246,22 +246,21 @@ module.exports = function (app) {
             // Già gestito e normalizzato dal filtro passa-basso superiore
         }
         else if (path === 'environment.wind.speedTrue') {
-            lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
-            manageHistory('tws', smoothedVal * 1.94384);
-        }
-        else if (path === 'navigation.headingTrue') {
-            lastNativeHeadingTrueTime = now; // Rilevata prua vera nativa dalla rete NMEA
-        }
-        // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
-        else if (path === 'navigation.headingMagnetic') {
-            // Converte in prua vera solo se non c'è una bussola vera nativa attiva negli ultimi 5s
-            const hasNativeTrueHdg = (now - lastNativeHeadingTrueTime < 5000);
-            if (!hasNativeTrueHdg) {
-                const variation = raw['navigation.magneticVariation'] || 0;
-                raw['navigation.headingTrue'] = (smoothedVal + variation + 2 * Math.PI) % (2 * Math.PI);
+                lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
+                manageHistory('tws', smoothedVal * 1.94384);
             }
-        }
-        else if (path === 'environment.wind.directionTrue') {
+            else if (path === 'navigation.headingTrue') {
+                lastNativeHeadingTrueTime = now; // Rilevata prua vera nativa dalla rete NMEA
+            }
+            // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
+            else if (path === 'navigation.headingMagnetic') {
+                const hasNativeTrueHdg = (now - lastNativeHeadingTrueTime < 5000);
+                if (!hasNativeTrueHdg) {
+                    const variation = raw['navigation.magneticVariation'] || 0;
+                    raw['navigation.headingTrue'] = (smoothedVal + variation + 2 * Math.PI) % (2 * Math.PI);
+                }
+            }
+            else if (path === 'environment.wind.directionTrue') {
             lastNativeTwdTime = now; // Rilevato TWD nativo della centralina!
             manageHistory('twd', smoothedVal);
         }
