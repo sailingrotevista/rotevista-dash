@@ -762,13 +762,13 @@ module.exports = function (app) {
 
         lastForecast30mSlot = current30mSlot; // Aggiorna preventivamente lo slot per evitare chiamate simultanee in caso di rallentamento di rete
 
-        https.get(url, (res) => {
-            if (res.statusCode !== 200) {
-                app.error(`[Open-Meteo] HTTP Error: ${res.statusCode}`);
-                res.resume();
-                lastForecast30mSlot = 0; // Reset in caso di errore per permettere un tentativo al prossimo pacchetto GPS
-                return;
-            }
+            const req = https.get(url, (res) => {
+                if (res.statusCode !== 200) {
+                    app.error(`[Open-Meteo] HTTP Error: ${res.statusCode}`);
+                    res.resume();
+                    lastForecast30mSlot = 0; // Reset in caso di errore per permettere un tentativo al prossimo pacchetto GPS
+                    return;
+                }
 
             let data = '';
             res.on('data', (chunk) => { data += chunk; });
@@ -808,15 +808,24 @@ module.exports = function (app) {
                     calculateInterpolatedFuture(forecastList);
 
                 } catch (err) {
-                    app.error(`[Open-Meteo] Error parsing JSON: ${err.message}`);
-                    lastForecast30mSlot = 0;
+                                app.error(`[Open-Meteo] Error parsing JSON: ${err.message}`);
+                                lastForecast30mSlot = 0;
+                            }
+                        });
+                    });
+
+                    // Timeout di sicurezza a 8 secondi contro cadute di linea 4G/Satellite
+                    req.setTimeout(8000, () => {
+                        app.error('[Open-Meteo] Request Timeout (8s)');
+                        req.abort();
+                        lastForecast30mSlot = 0;
+                    });
+
+                    req.on('error', (err) => {
+                        app.error(`[Open-Meteo] Network Error: ${err.message}`);
+                        lastForecast30mSlot = 0;
+                    });
                 }
-            });
-        }).on('error', (err) => {
-            app.error(`[Open-Meteo] Network Error: ${err.message}`);
-            lastForecast30mSlot = 0;
-        });
-    }
 
     /**
         * calculateInterpolatedFuture: Esegue l'interpolazione lineare e vettoriale circolare

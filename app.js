@@ -53,6 +53,7 @@ let rotationTrend = 0, meteoTrend = 0;
 let lastShortAvgVal = null, lastInstantTwa = null;
 let lastTrendTime = Date.now(), lastGybeAlarmTime = 0, lastTWCompute = 0;
 let twDirty = false, isNavigating = false, reconnectDelay = 1000;
+let lastMessageReceivedTime = Date.now(); // Watchdog anti-zombie per monitorare il flusso dati reale
 
 let pressTimer, isFocusActive = false;
 
@@ -665,10 +666,17 @@ function startDisplayLoop() {
         // --- CALCOLO TREND VENTO & ALLARME STRAMBATA ---
         updateWindTrend();
 
-        // --- AGGIORNAMENTO STATUS CON CONTEGGIO MINUTI REALE ---
+        // --- AGGIORNAMENTO STATUS CON WATCHDOG ANTI-ZOMBIE ---
         const isSocketOpen = socket && socket.readyState === WebSocket.OPEN;
+        const isDataFlowing = (now - lastMessageReceivedTime) < 6000; // Flusso dati attivo negli ultimi 6s
         
-        if (isSocketOpen) {
+        // Se il socket risulta aperto ma non riceve pacchetti da > 6s (connessione zombie congelata da Android)
+        if (isSocketOpen && !isDataFlowing && !document.hidden && !simulationMode) {
+            console.warn("🔌 [Watchdog] Rilevato socket zombie (0 byte ricevuti da 6s). Forzo riconnessione...");
+            connect();
+        }
+
+        if (isSocketOpen && isDataFlowing) {
             ui.status.className = "online"; // Colore Verde
             const viewportMinutes = CONFIG.graphs.historyMinutes * (isNavigating ? 1 : 2);
             const requiredMs = viewportMinutes * 60000;
@@ -687,7 +695,7 @@ function startDisplayLoop() {
             }
         } else {
             ui.status.className = "offline"; // Colore Rosso
-            ui.status.innerText = "OFFLINE"; // Chirurgico: Forza il testo a OFFLINE se il socket è chiuso, evitando scritte verdi in rosso
+            ui.status.innerText = isSocketOpen ? "STALL (RECONNECTING...)" : "OFFLINE";
         }
 
         // --- WATCHDOG: CONTROLLO TIMEOUT ---
@@ -1266,6 +1274,17 @@ function startDynamicSimulation() {
 
 function connect() {
     if (simulationMode) return;
+
+    // Pulizia preventiva del vecchio socket orfano (elimina memory leak ed eventi doppi)
+    if (socket) {
+        socket.onopen = null;
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        try { socket.close(); } catch(e) {}
+        socket = null;
+    }
+
     let addr = window.location.host || CONFIG.server.fallbackIp;
     try {
         // Connessione con subscribe=none per impedire a Signal K l'invio automatico di tutto lo stream di bordo
@@ -1275,6 +1294,7 @@ function connect() {
             ui.status.className = "online";
             ui.status.innerText = "ONLINE";
             reconnectDelay = 1000;
+            lastMessageReceivedTime = Date.now(); // Reset timestamp dati
             
             // Sottoscrizione selettiva bilanciata: applichiamo un filtro a 3 Hz (333ms) per i dati rapidi,
             // garantendo fluidità matematica senza ritardi e ottimizzando profondità (1s) e GPS (10s)
@@ -1316,11 +1336,12 @@ function connect() {
         };
         
         socket.onmessage = (e) => {
-            const d = JSON.parse(e.data);
-            if (d.updates) {
-                d.updates.forEach(u => {
-                    // Sincronizzazione dell'orologio sul tempo reale del server (NMEA/GPS)
-                    const timeMs = u.timestamp ? new Date(u.timestamp).getTime() : Date.now();
+                    lastMessageReceivedTime = Date.now(); // Aggiorna il battito cardiaco del flusso dati
+                    const d = JSON.parse(e.data);
+                    if (d.updates) {
+                        d.updates.forEach(u => {
+                            // Sincronizzazione dell'orologio sul tempo reale del server (NMEA/GPS)
+                            const timeMs = u.timestamp ? new Date(u.timestamp).getTime() : Date.now();
                     let sourceLabel = "Unknown";
                     if (u.$source) {
                         sourceLabel = u.$source;
@@ -1467,20 +1488,24 @@ async function init() {
     }
 }
 
-// Watchdog attivo per la gestione intelligente dello standby e il massimo risparmio energetico
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-        console.log("🔌 [Watchdog] Schermo sbloccato / Tab visibile. Riconnessione immediata e allineamento storico...");
-        // Al risveglio stabiliamo una nuova connessione pulita che scaricherà lo storico accumulato in background dal server
+// Gestore unificato di riattivazione su Android / iOS (Visibility, Focus, Pageshow, Online)
+const handleWakeUp = () => {
+    if (!document.hidden) {
+        console.log("🔌 [Watchdog] Risveglio dispositivo / Tab attiva. Riconnessione immediata...");
+        reconnectDelay = 1000;
         connect();
-    } else if (document.visibilityState === 'hidden') {
-        console.log("🔌 [Watchdog] Schermo bloccato / Tab in background. Chiusura WebSocket preventiva per salvaguardare la batteria.");
-        // Tagliamo attivamente la connessione per congelare all'istante l'attività di rete ed i consumi del browser
+    } else {
+        console.log("🔌 [Watchdog] Schermo bloccato / Tab in background. Chiusura preventiva WebSocket.");
         if (socket) {
-            socket.close();
+            try { socket.close(); } catch(e) {}
         }
     }
-});
+};
+
+document.addEventListener('visibilitychange', handleWakeUp);
+window.addEventListener('pageshow', handleWakeUp);
+window.addEventListener('focus', handleWakeUp);
+window.addEventListener('online', handleWakeUp);
 
 window.addEventListener('load', init);
 window.addEventListener('pagehide', saveDashboardState);
