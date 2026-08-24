@@ -77,6 +77,7 @@ const sourceLocks = {};
 const store = {
     raw: {},
     timestamps: {},
+    isNavigating: false,         // Stato unificato di navigazione barca in movimento
     depthProtectedActive: false, // Memoria per lo stato della protezione profondità
     herculesScales: {},          // Memoria per i limiti attivi della modalità Hercules
     smoothBuf: { hdg: [], cog: [], awa: [], twa: [], twd: [] },
@@ -662,6 +663,7 @@ function startDisplayLoop() {
         const sogKts = msToKts(store.raw["navigation.speedOverGround"] || 0);
         
         isNavigating = stwKts > CONFIG.averaging.minSpeed || sogKts > CONFIG.averaging.minSpeed;
+        store.isNavigating = isNavigating; // Sincronizzazione stato nello store condiviso
 
         // --- CALCOLO TREND VENTO & ALLARME STRAMBATA ---
         updateWindTrend();
@@ -1032,18 +1034,7 @@ async function fetchServerHistory() {
                     timestamp: data.futureForecast.timestamp + timeDelta
                 };
             }
-            if (data.twd) {
-                store.twdMinuteBuffer = data.twd.map(p => ({
-                    ...p,
-                    time: p.time + timeDelta
-                }));
-            }
-            if (data.tws) {
-                store.twsMinuteBuffer = data.tws.map(p => ({
-                    ...p,
-                    time: p.time + timeDelta
-                }));
-            }
+            // data.twd e data.tws sono già mappati direttamente in store.histories.twd e store.histories.tws
             
             // Sincronizziamo lo storico dei minuti per il radar, ma lasciamo che il buffer rapido 'store.longBuf.twd'
             // parta pulito all'avvio. Si popolerà istantaneamente a 3Hz con i soli dati in tempo reale,

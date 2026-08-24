@@ -59,8 +59,9 @@ function calculateActive30mRing() {
     const now = Date.now();
     const start30m = now - 1800000;
 
-    const twdRecent = (store.twdMinuteBuffer || []).filter(p => p.time >= start30m);
-    const twsRecent = (store.twsMinuteBuffer || []).filter(p => p.time >= start30m);
+    // Lettura unificata dai buffer storici dello store
+    const twdRecent = (store.histories.twd || []).filter(p => p.time >= start30m);
+    const twsRecent = (store.histories.tws || []).filter(p => p.time >= start30m);
 
     if (twdRecent.length === 0) return null;
 
@@ -264,7 +265,8 @@ function renderRadar() {
     // Disegno del LED lampeggiante del meteo-trend
     if (activeRing && !activeRing.isCalm) {
         const twdNow = getCircularAverageFromBuffer(store.longBuf.twd, 60000, false);
-        const strategicWindowMs = (isNavigating ? 15 : 60) * 60000;
+        const isNav = (typeof store !== 'undefined' && store.isNavigating);
+        const strategicWindowMs = (isNav ? 15 : 60) * 60000;
         const twdRef = getCircularAverageFromBuffer(store.longBuf.twd, strategicWindowMs, false);
 
         if (twdNow && twdRef) {
