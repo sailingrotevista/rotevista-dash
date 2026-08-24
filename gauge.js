@@ -4,7 +4,7 @@
  * ==========================================================================
  * Gestisce l'aggiornamento grafico dei puntatori analogici (AWA, TWA),
  * dello scarroccio (Leeway), della rotta (Track) e dei trend della bussola.
- * file gauge,js
+ * file gauge.js
  */
 
 // 1. VARIABILI DI STATO DELLE ROTAZIONI (Estratte da app.js)
@@ -54,26 +54,26 @@ function updateCentralGauge(store, ui, now, isNavigating, sogKts, stwKts, rawAws
         }
     }
 
-    // B. Rotazione dei puntatori analogici di AWA (Apparent) e TWA (True)
-        const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, 2000, true);
-        const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, 2000, true);
-        if (smAwa) ui.awa.setAttribute('transform', `rotate(${curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val))}, 200, 200)`);
-        if (smTwa) ui.twa.setAttribute('transform', `rotate(${curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val))}, 200, 200)`);
+    // B. Rotazione dei puntatori analogici di AWA (Apparent) e TWA (True) con passaggio di timestamp "now"
+    const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, 2000, true, now);
+    const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, 2000, true, now);
+    if (smAwa) ui.awa.setAttribute('transform', `rotate(${curAwaRot = getShortestRotation(curAwaRot, radToDeg(smAwa.val))}, 200, 200)`);
+    if (smTwa) ui.twa.setAttribute('transform', `rotate(${curTwaRot = getShortestRotation(curTwaRot, radToDeg(smTwa.val))}, 200, 200)`);
     
-    // C. Calcolo dello Scarroccio (Leeway) e orientamento del vettore Track
-    if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
-        let driftDeg = radToDeg((store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (2 * Math.PI) - Math.PI);
-        smoothedLeeway = (sogKts < CONFIG.averaging.minSpeed) ? 0 : (smoothedLeeway * 0.9) + (driftDeg * 0.1);
-        curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway);
-        ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
-        ui.leewayVal.style.color = (Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7) ? "#ff9800" : "";
-        updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
-    }
+        // C. Calcolo dello Scarroccio (Leeway) e orientamento del vettore Track
+        if (store.raw["navigation.courseOverGroundTrue"] !== undefined && store.raw["navigation.headingTrue"] !== undefined) {
+            let driftDeg = radToDeg((store.raw["navigation.courseOverGroundTrue"] - store.raw["navigation.headingTrue"] + Math.PI * 3) % (2 * Math.PI) - Math.PI);
+            smoothedLeeway = (sogKts < CONFIG.averaging.minSpeed) ? 0 : (smoothedLeeway * 0.9) + (driftDeg * 0.1);
+            curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway);
+            ui.track.setAttribute('transform', `rotate(${curTrackRot}, 200, 200)`);
+            ui.leewayVal.style.color = (Math.abs(sogKts - stwKts) > 0.5 && Math.abs(smoothedLeeway) > 7) ? "#ff9800" : "";
+            updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
+        }
 
-    // D. Orientamento delle icone della barca e del vento nel Mini-Compass (TWD)
-    const smHdgIcons = getCircularAverageFromBuffer(store.smoothBuf.hdg, 2000, false);
-    const smTwdIcons = getCircularAverageFromBuffer(store.smoothBuf.twd, 2000, false);
-    if (smHdgIcons && smTwdIcons) {
+        // D. Orientamento delle icone della barca e del vento nel Mini-Compass (TWD) con passaggio di timestamp "now"
+        const smHdgIcons = getCircularAverageFromBuffer(store.smoothBuf.hdg, 2000, false, now);
+        const smTwdIcons = getCircularAverageFromBuffer(store.smoothBuf.twd, 2000, false, now);
+        if (smHdgIcons && smTwdIcons) {
         curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(smTwdIcons.val));
         ui.twdArrow.setAttribute('transform', `rotate(${curWindCompassRot}, 20, 20)`);
         curBoatCompassRot = getShortestRotation(curBoatCompassRot, radToDeg(smHdgIcons.val));

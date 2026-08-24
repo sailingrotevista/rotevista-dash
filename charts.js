@@ -90,28 +90,12 @@ function calculateScale(type, data, mode) {
 
     if (mode === 'hercules') {
         const roundStep = s.hercSpan;
+        // Finestra di calcolo ad alta risoluzione: ancorata rigorosamente all'ultimo terzo dei dati
         const oneThirdCount = Math.max(1, Math.floor(data.length / 3));
         const recentThirdData = data.slice(-oneThirdCount);
 
         let localMin = Math.min(...recentThirdData);
         let localMax = Math.max(...recentThirdData);
-
-        // SMART MOTORING DETECTION (Specifica per i grafici di velocità: STW, SOG, VMG)
-        const isSpeedType = (type === 'stw' || type === 'sog' || type === 'vmg');
-        if (isSpeedType && data.length > oneThirdCount) {
-            const olderData = data.slice(0, data.length - oneThirdCount);
-            const olderMin = Math.min(...olderData);
-            const olderMax = Math.max(...olderData);
-            const olderRange = olderMax - olderMin; // Variazione nello storico passato
-
-            // Se lo storico passato non era piatto (range > 0.2 nodi) oppure eravamo fermi/all'ancora (< 1.5 nodi),
-            // significa che il passato è rilevante per il trend. Includiamo il passato nel calcolo della scala Y.
-            // Se invece era piatto (motore), lo ignoriamo per zoomare subito sulla vela attuale.
-            if (olderRange > 0.2 || olderMin < 0.77) {
-                localMin = Math.min(localMin, olderMin);
-                localMax = Math.max(localMax, olderMax);
-            }
-        }
 
         let targetMin = Math.max(0, Math.floor(localMin / roundStep) * roundStep);
         let targetMax = Math.ceil(localMax / roundStep) * roundStep;

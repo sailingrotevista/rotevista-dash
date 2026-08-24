@@ -705,11 +705,14 @@ function startDisplayLoop() {
             "navigation.speedThroughWater": ui.stw, "navigation.speedOverGround": ui.sog,
             "navigation.headingTrue": ui.hdg, "navigation.courseOverGroundTrue": ui.cog,
             "environment.wind.speedApparent": ui.awsSvg, "environment.depth.belowTransducer": ui.depth,
-            "environment.wind.speedTrue": ui.tws
+            "environment.wind.speedTrue": ui.tws,
+            "environment.wind.angleApparent": ui.awaAvg,
+            "environment.wind.angleTrueWater": ui.twaAvg,
+            "environment.wind.directionTrue": ui.twdAvg
         };
         for (let p in watch) {
             if (!store.timestamps[p] || (now - store.timestamps[p] > TIMEOUT_MS)) {
-                safeSetText(watch[p], "---"); // Sostituito innerText con la funzione protetta!
+                if (watch[p]) safeSetText(watch[p], "---");
                 delete store.raw[p];
 
                 // Forza lo scorrimento dei dati fuori dallo schermo per i sensori in timeout

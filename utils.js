@@ -36,8 +36,11 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now
     const len = bufferArray.length;
     if (len === 0) return null;
 
-    // RIFERIMENTO TEMPORALE IMMUNE DA DESINCRONIZZAZIONE (Usa l'ultimo dato del buffer)
-    const referenceTime = bufferArray[len - 1].time;
+    const currentTime = now || Date.now();
+    const newestSampleTime = bufferArray[len - 1].time;
+
+    // Se l'ultimo pacchetto registrato nel buffer ha più di 15 secondi di silenzio, il sensore è offline
+    if ((currentTime - newestSampleTime) > 15000) return null;
 
     let sSin = 0, sCos = 0, count = 0;
     let newestTime = 0, oldestTime = 0;
@@ -53,7 +56,8 @@ function getCircularAverageFromBuffer(bufferArray, windowMs, signed = false, now
 
     for (let i = len - 1; i >= 0; i--) {
         const item = bufferArray[i];
-        if ((referenceTime - item.time) > windowMs) break;
+        // Decadimento temporale reale ancorato sull'orologio corrente
+        if ((currentTime - item.time) > windowMs) break;
 
         let diffRad = Math.atan2(Math.sin(item.val - pilotRad), Math.cos(item.val - pilotRad));
         let finalSin, finalCos;
