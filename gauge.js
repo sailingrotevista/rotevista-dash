@@ -70,13 +70,21 @@ function updateCentralGauge(store, ui, now, isNavigating, sogKts, stwKts, rawAws
             updateLeewayDisplay(Math.max(-20, Math.min(20, smoothedLeeway)));
         }
 
-        // D. Orientamento delle icone della barca e del vento nel Mini-Compass (TWD) con passaggio di timestamp "now"
-        const smHdgIcons = getCircularAverageFromBuffer(store.smoothBuf.hdg, 2000, false, now);
-        const smTwdIcons = getCircularAverageFromBuffer(store.smoothBuf.twd, 2000, false, now);
-        if (smHdgIcons && smTwdIcons) {
-        curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(smTwdIcons.val));
+    // D. Orientamento delle icone della barca e del vento nel Mini-Compass (TWD)
+    // Sincronizzato con la media a 30s (longBuf) e fallback istantaneo su store.raw per allineamento al testo
+    const longWindow = CONFIG.averaging.longWindow || 30000;
+    const smHdgIcons = getCircularAverageFromBuffer(store.longBuf.hdg, longWindow * 2, false, now);
+    const smTwdIcons = getCircularAverageFromBuffer(store.longBuf.twd, longWindow, false, now);
+
+    const twdAngleRad = smTwdIcons ? smTwdIcons.val : store.raw["environment.wind.directionTrue"];
+    if (twdAngleRad !== undefined && twdAngleRad !== null) {
+        curWindCompassRot = getShortestRotation(curWindCompassRot, radToDeg(twdAngleRad));
         ui.twdArrow.setAttribute('transform', `rotate(${curWindCompassRot}, 20, 20)`);
-        curBoatCompassRot = getShortestRotation(curBoatCompassRot, radToDeg(smHdgIcons.val));
+    }
+
+    const hdgAngleRad = smHdgIcons ? smHdgIcons.val : store.raw["navigation.headingTrue"];
+    if (hdgAngleRad !== undefined && hdgAngleRad !== null) {
+        curBoatCompassRot = getShortestRotation(curBoatCompassRot, radToDeg(hdgAngleRad));
         ui.twdBoat.setAttribute('transform', `rotate(${curBoatCompassRot}, 20, 20)`);
     }
 }
