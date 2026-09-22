@@ -141,6 +141,8 @@ function refreshGraph(t) {
 
     if (t === 'tws' && displayModeTws === 'AWS') {
         rawData = store.histories['aws'];
+    } else if (t === 'sog' && displayModeSog === 'VMG') {
+        rawData = store.histories['vmg'];
     } else {
         rawData = store.histories[t];
     }
