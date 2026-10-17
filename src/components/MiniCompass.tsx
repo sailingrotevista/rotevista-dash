@@ -3,8 +3,8 @@ import React from 'react';
 interface MiniCompassProps {
   boatRotDeg: number;
   windRotDeg: number;
-  compassCwDot: { active: boolean; color: string };
-  compassCcwDot: { active: boolean; color: string };
+  compassCwDot: { active: boolean; color: string; blinking?: boolean };
+  compassCcwDot: { active: boolean; color: string; blinking?: boolean };
 }
 
 export const MiniCompass: React.FC<MiniCompassProps> = ({
@@ -104,7 +104,7 @@ export const MiniCompass: React.FC<MiniCompassProps> = ({
           cy="8.5"
           r="1.8"
           fill={compassCwDot.color}
-          className={compassCwDot.active ? 'is-trending' : ''}
+          className={compassCwDot.blinking ? 'is-trending' : compassCwDot.active ? 'is-steady' : ''}
         />
         <circle
           id="trend-dot-ccw"
@@ -112,7 +112,7 @@ export const MiniCompass: React.FC<MiniCompassProps> = ({
           cy="8.5"
           r="1.8"
           fill={compassCcwDot.color}
-          className={compassCcwDot.active ? 'is-trending' : ''}
+          className={compassCcwDot.blinking ? 'is-trending' : compassCcwDot.active ? 'is-steady' : ''}
         />
       </g>
     </svg>

@@ -541,7 +541,9 @@ body.night-mode,
 .night-mode .value-large { color: #ff3333 !important; text-shadow: 0 0 8px rgba(255, 0, 0, 0.4) !important; }
 .night-mode .value { color: #ff3333; text-shadow: 0 0 8px rgba(255, 0, 0, 0.3); }
 .night-mode #tws[style*="#5c6bc0"],
-.night-mode .box-tws #tws[style*="#5c6bc0"] { color: #ff3333 !important; }
+.night-mode #tws[style*="rgb(92, 107, 192)"],
+.night-mode .box-tws #tws[style*="#5c6bc0"],
+.night-mode .box-tws #tws[style*="rgb(92, 107, 192)"] { color: #ff3333 !important; }
 .night-mode #status { background: rgba(255, 0, 0, 0.1) !important; color: #ff3333 !important; }
 .night-mode #status.simulating { color: #f59e0b !important; }
 
@@ -556,7 +558,7 @@ body.night-mode,
 }
 
 .night-mode .graph-wrapper svg {
-    filter: brightness(0.6) contrast(1.2);
+    filter: brightness(0.9) contrast(1.1);
 }
 
 .night-mode .graph-wrapper line[style] {
@@ -655,11 +657,11 @@ body.night-mode,
 .night-mode .graph-wrapper line[style*="#2c3e50"],
 .night-mode .graph-wrapper line[stroke="#2c3e50"],
 .night-mode .graph-wrapper line[stroke*="2c3e50"] {
-    stroke: #6c8ea0 !important;
+    stroke: #8cb4cc !important;
 }
 .night-mode .graph-wrapper polygon[style*="#2c3e50"],
 .night-mode .graph-wrapper path[fill*="2c3e50"] {
-    fill: #6c8ea0 !important;
+    fill: #8cb4cc !important;
 }
 
 .night-mode .graph-wrapper line[style*="#0088cc"],

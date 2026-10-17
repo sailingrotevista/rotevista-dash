@@ -114,7 +114,7 @@ export const Sparkline: React.FC<SparklineProps> = ({
 
   const colDanger = '#ff3b30';
   const colWarning = '#ff9800';
-  const colTws = isNightMode ? '#6c8ea0' : '#2c3e50';
+  const colTws = isNightMode ? '#8cb4cc' : '#2c3e50';
   const colAws = '#5c6bc0';
   const colDepth = isNightMode ? '#33aadd' : '#0088cc';
   const colStw = '#00C851';
@@ -260,7 +260,7 @@ export const Sparkline: React.FC<SparklineProps> = ({
     }
 
     return { lineElements: lines, areaPath: path, gradientStops: stops };
-  }, [visibleData, viewportStart, viewportMs, min, range, isFocused, displayMode]);
+  }, [visibleData, viewportStart, viewportMs, min, range, isFocused, displayMode, isNightMode]);
 
   const gradId = `grad-${id}`;
 

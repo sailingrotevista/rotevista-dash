@@ -72,6 +72,8 @@ export function useDashboard() {
   const [displayModeTws, setDisplayModeTws] = useState<DisplayModeTws>('TWS');
   const [activeInstrument, setActiveInstrument] = useState<ActiveInstrument>('gauge');
   const [isNightMode, setIsNightMode] = useState<boolean>(false);
+  const isNightModeRef = useRef<boolean>(isNightMode);
+  isNightModeRef.current = isNightMode;
   const [isFocusActive, setIsFocusActive] = useState<boolean>(false);
   const [focusedBox, setFocusedBox] = useState<BoxType | null>(null);
   const [graphModes, setGraphModes] = useState<Record<string, GraphMode>>({
@@ -119,8 +121,10 @@ export function useDashboard() {
     boatCompassRotDeg: 0,
     tacticCwDot: { active: false, color: '#bbb', gybing: false },
     tacticCcwDot: { active: false, color: '#bbb', gybing: false },
-    compassCwDot: { active: false, color: '#bbb' },
-    compassCcwDot: { active: false, color: '#bbb' },
+    compassCwDot: { active: false, color: '#bbb', blinking: false } as { active: boolean; color: string; blinking?: boolean },
+    compassCcwDot: { active: false, color: '#bbb', blinking: false } as { active: boolean; color: string; blinking?: boolean },
+    twdShiftText: '--',
+    twdShiftColor: '#888',
     meteoLed: null as { active: boolean; color: string; angleTarget: number } | null,
     isNavigating: false,
   });
@@ -932,30 +936,88 @@ export function useDashboard() {
         }
       }
 
-      // Strategic Weather Trend (TWD 1m vs 15m/60m)
-      const twdNow = getCircularAverageFromBuffer(store.longBuf.twd, 60000, false, now);
-      const strategicWindowMs = (isNav ? 15 : 60) * 60000;
-      const twdRef = getCircularAverageFromBuffer(store.longBuf.twd, strategicWindowMs, false, now);
-      let compassCw = { active: false, color: '#bbb' };
-      let compassCcw = { active: false, color: '#bbb' };
+      // Strategic Weather Trend & Hourly Rotation Rate (°/h)
+      const isNight = isNightModeRef.current;
+      let twdShiftText = '--';
+      let twdShiftColor = isNight ? '#800000' : '#888';
+      let compassCw: { active: boolean; color: string; blinking?: boolean } = {
+        active: false,
+        color: isNight ? '#440000' : '#bbb',
+        blinking: false,
+      };
+      let compassCcw: { active: boolean; color: string; blinking?: boolean } = {
+        active: false,
+        color: isNight ? '#440000' : '#bbb',
+        blinking: false,
+      };
       let meteoLedState = null;
 
-      if (twdNow && twdRef) {
-        const deltaMeteo = radToDeg(((twdNow.val - twdRef.val + Math.PI * 3) % (2 * Math.PI)) - Math.PI);
-        if (Math.abs(deltaMeteo) > 6.0) {
-          const isSouth = store.raw['navigation.position']?.latitude < 0;
-          const meteoColor = !isSouth ? (deltaMeteo < 0 ? '#27ae60' : '#c0392b') : deltaMeteo > 0 ? '#27ae60' : '#c0392b';
-          if (deltaMeteo > 0) {
-            compassCw = { active: true, color: meteoColor };
-          } else {
-            compassCcw = { active: true, color: meteoColor };
+      const twdBuf = store.longBuf.twd;
+      if (twdBuf.length >= 2) {
+        const oldestTime = twdBuf[0].time;
+        const availableMs = now - oldestTime;
+
+        if (availableMs >= 600000) { // Almeno 10 minuti di dati per evitare sovrastima iniziale
+          const windowMs = Math.min(availableMs, 60 * 60000);
+          const twdRecent = getCircularAverageFromBuffer(twdBuf, 180000, false, now);
+
+          const pastStart = now - windowMs;
+          const pastEnd = pastStart + 300000;
+          let pSin = 0;
+          let pCos = 0;
+          let pCount = 0;
+          let pSumTime = 0;
+
+          for (let i = 0; i < twdBuf.length; i++) {
+            const item = twdBuf[i];
+            if (item.time >= pastStart && item.time <= pastEnd) {
+              pSin += item.sin;
+              pCos += item.cos;
+              pSumTime += item.time;
+              pCount++;
+            }
+            if (item.time > pastEnd) break;
           }
 
-          meteoLedState = {
-            active: true,
-            color: meteoColor,
-            angleTarget: deltaMeteo > 0 ? radToDeg(twdNow.val) + 15 : radToDeg(twdNow.val) - 15,
-          };
+          if (twdRecent && pCount > 0) {
+            const pastAvgRad = (Math.atan2(pSin, pCos) + Math.PI * 2) % (Math.PI * 2);
+            const pastAvgTime = pSumTime / pCount;
+            const effectiveHours = Math.max(0.1, (now - pastAvgTime) / 3600000);
+
+            const deltaDeg = radToDeg(((twdRecent.val - pastAvgRad + Math.PI * 3) % (2 * Math.PI)) - Math.PI);
+            const ratePerHour = Math.round(deltaDeg / effectiveHours);
+            const absRate = Math.abs(ratePerHour);
+
+            const isSouth = (store.raw['navigation.position']?.latitude || 0) < 0;
+
+            if (absRate < 8) {
+              twdShiftText = '0°/h';
+              twdShiftColor = isNight ? '#800000' : '#888';
+            } else {
+              const isFast = absRate >= 25;
+              const isClockwise = ratePerHour > 0;
+              const signSymbol = isClockwise ? '↻ +' : '↺ ';
+              twdShiftText = `${signSymbol}${isClockwise ? ratePerHour : ratePerHour}°/h`;
+
+              let shiftColor = isClockwise ? '#c0392b' : '#27ae60';
+              if (isSouth) shiftColor = isClockwise ? '#27ae60' : '#c0392b';
+              if (isNight) shiftColor = '#ff3333';
+
+              twdShiftColor = shiftColor;
+
+              if (isClockwise) {
+                compassCw = { active: true, color: shiftColor, blinking: isFast };
+              } else {
+                compassCcw = { active: true, color: shiftColor, blinking: isFast };
+              }
+
+              meteoLedState = {
+                active: true,
+                color: shiftColor,
+                angleTarget: isClockwise ? radToDeg(twdRecent.val) + 15 : radToDeg(twdRecent.val) - 15,
+              };
+            }
+          }
         }
       }
 
@@ -1065,7 +1127,7 @@ export function useDashboard() {
       } else if (currentWindVal >= config.graphs.reef1) {
         twsColor = '#ff9800';
       } else if (displayModeTws === 'AWS') {
-        twsColor = isNightMode ? '' : '#5c6bc0';
+        twsColor = isNight ? '' : '#5c6bc0';
       }
 
       setDisplayValues({
@@ -1102,6 +1164,8 @@ export function useDashboard() {
         tacticCcwDot: tacticCcw,
         compassCwDot: compassCw,
         compassCcwDot: compassCcw,
+        twdShiftText,
+        twdShiftColor,
         meteoLed: meteoLedState,
         isNavigating: isNav,
       });
