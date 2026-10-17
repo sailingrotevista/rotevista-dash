@@ -1,3 +1,18 @@
+# Dipendenze
+node_modules/
+
+# Build di produzione
+dist/
+build/
+
+# Cache di Vite e TypeScript
+.vite/
+*.tsbuildinfo
+
+# File di sistema macOS e log
 .DS_Store
-.DS_Store
-.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+bun.lockb
