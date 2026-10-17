@@ -76,6 +76,20 @@ module.exports = function (app) {
                 };
                 res.json(responseData);
             });
+
+            // Fallback static mount per Signal K per garantire che /rotevista-dash serva sempre la cartella public
+            try {
+                const path = require('path');
+                const express = require('express');
+                const publicPath = path.join(__dirname, 'public');
+                if (typeof app.use === 'function') {
+                    app.use('/rotevista-dash', express.static(publicPath));
+                    app.use('/@sailingrotevista/rotevista-dash', express.static(publicPath));
+                }
+            } catch (err) {
+                app.debug(`[rotevista-dash] Notice on static fallback: ${err.message}`);
+            }
+
             routeRegistered = true;
             app.debug('Public API endpoints registered at /rotevista-config and /rotevista-history');
         }

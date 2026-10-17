@@ -283,9 +283,32 @@ body.night-mode .alarm-danger {
         margin-bottom: 0px !important;
     }
 
-    .box-twd .value-with-compass { justify-content: space-between; gap: 6px; box-sizing: border-box; }
-    .box-twd .mini-compass { height: min(76cqh, 34cqw) !important; width: min(76cqh, 34cqw) !important; aspect-ratio: 1/1 !important; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12)); }
-    .box-twd #twd-avg, .box-twd .value-large { font-size: clamp(1.15rem, 48cqh, 22cqw) !important; white-space: nowrap !important; }
+    .box-twd .value-with-compass {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        gap: 6px;
+        box-sizing: border-box;
+        height: 96%;
+        padding: 0 3px;
+    }
+    .box-twd .mini-compass {
+        height: min(94cqh, 48cqw) !important;
+        width: min(94cqh, 48cqw) !important;
+        aspect-ratio: 1/1 !important;
+        flex-shrink: 0;
+        filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.15));
+    }
+    .box-twd #twd-avg, .box-twd .value-large {
+        font-size: clamp(1.2rem, 54cqh, 25cqw) !important;
+        white-space: nowrap !important;
+        flex-shrink: 1;
+        text-align: right !important;
+        letter-spacing: -0.5px;
+        font-weight: 700;
+        margin-left: auto;
+    }
 }
 
 /* ==========================================================================
@@ -405,15 +428,29 @@ body.night-mode .alarm-danger {
         white-space: nowrap !important;
     }
 
+    .box-twd .value-with-compass {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        box-sizing: border-box;
+        height: 94%;
+        padding: 0 4px;
+    }
     .box-twd .mini-compass {
-        height: min(84cqh, 36cqw) !important;
-        width: min(84cqh, 36cqw) !important;
+        height: min(92cqh, 46cqw) !important;
+        width: min(92cqh, 46cqw) !important;
         aspect-ratio: 1/1 !important;
-        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
+        flex-shrink: 0;
+        filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.15));
     }
     .box-twd .value-large, .box-twd #twd-avg {
-        font-size: clamp(1.4rem, 54cqh, 24cqw) !important;
+        font-size: clamp(1.45rem, 58cqh, 28cqw) !important;
+        letter-spacing: -0.5px;
         white-space: nowrap !important;
+        font-weight: 700;
+        margin-left: auto;
     }
 
     .main-container.focus-active {
