@@ -77,7 +77,7 @@ export function useDashboard() {
   });
 
   const [connectionStatus, setConnectionStatus] = useState<{ text: string; className: string }>({
-    text: 'OFFLINE',
+    text: 'CONNESSIONE...',
     className: 'offline',
   });
 
@@ -388,10 +388,16 @@ export function useDashboard() {
     }
   }, [config.graphs.historyMinutes]);
 
-  // Load configuration from settings.json
+  // Load configuration from Signal K plugin or settings.json
   useEffect(() => {
-    fetch('/settings.json')
-      .then(res => res.json())
+    fetch('/rotevista-config')
+      .then(res => {
+        if (!res.ok) throw new Error('Not available');
+        return res.json();
+      })
+      .catch(() => {
+        return fetch('/settings.json').then(r => (r.ok ? r.json() : null));
+      })
       .then(data => {
         if (data) {
           setConfig(prev => ({
@@ -404,9 +410,7 @@ export function useDashboard() {
           }));
         }
       })
-      .catch(() => {
-        // Use defaults
-      });
+      .catch(() => {});
 
     // Load saved dashboard state
     const saved = localStorage.getItem('rotevista_dash_state');
@@ -432,75 +436,39 @@ export function useDashboard() {
     }
   }, [isNightMode]);
 
-  const historyInitializedRef = useRef(false);
-
-  // Pre-seed mock history for rich initial display (strictly once)
-  useEffect(() => {
-    if (historyInitializedRef.current) return;
-    historyInitializedRef.current = true;
-
+  // Helper per la modalità dimostrativa/simulazione (eseguito solo se Signal K è assente)
+  const seedDemoHistory = useCallback((now: number, historyMinutes: number) => {
     const store = storeRef.current;
-    const now = Date.now();
-    const historyMinutes = config.graphs.historyMinutes || 30;
     const stepMs = (historyMinutes * 60000) / 60;
-
     const baseHdg = 45;
     const baseTws = 12;
     const baseTwd = 90;
     const baseDepth = 12;
     const baseStw = 5.2;
 
-    // Reset histories to prevent duplicates
-    store.histories.stw = [];
-    store.histories.sog = [];
-    store.histories.vmg = [];
-    store.histories.tws = [];
-    store.histories.aws = [];
-    store.histories.depth = [];
-    store.histories.twd = [];
-
-    // Ascending order: from oldest (now - 60*stepMs) to newest (now)
-    // Realistic marine telemetry with wave chop, gustiness, and steering response
     for (let i = 60; i >= 0; i--) {
       const t = now - i * stepMs;
-      // Wind speed has natural gust cycles (base 12.5 kts, oscillating with realistic gust peaks)
       const twsNoise = Math.sin(i * 0.45) * 1.8 + Math.cos(i * 0.9) * 0.9 + Math.sin(i * 1.7) * 0.6;
       const twsVal = Math.max(7.0, baseTws + twsNoise);
-
-      // Wind direction shifts with atmospheric oscillations (shifts ±6°)
       const twdShift = Math.sin(i * 0.3) * 5.5 + Math.cos(i * 0.75) * 2.5;
       const twdDegVal = (baseTwd + twdShift + 360) % 360;
       const twdVal = degToRad(twdDegVal);
-
-      // Helmsman tracks wind shifts with slight yaw (±2°)
       const hdgShift = twdShift * 0.7 + Math.sin(i * 1.2) * 1.8;
       const hdgDegVal = (baseHdg + hdgShift + 360) % 360;
       const hdgVal = degToRad(hdgDegVal);
-
-      // True Wind Angle fluctuates naturally between 41° and 49°
       const twaDegVal = Math.max(38, Math.min(52, (twdDegVal - hdgDegVal + 360) % 360));
       const twaRad = degToRad(twaDegVal);
-
-      // Hull speed in waves: boat surges when wind increases, with natural wave chop
       const waveChop = Math.sin(i * 1.5) * 0.35 + Math.cos(i * 2.8) * 0.25;
       const windDrive = (twsVal - 12.0) * 0.22;
       const stwVal = Math.max(3.5, baseStw + windDrive + waveChop);
-
-      // SOG: speed over ground with tidal current drift (+0.25 kts) and GPS micro-jitter
       const sogVal = Math.max(3.8, stwVal + 0.25 + Math.sin(i * 0.8) * 0.15);
-
-      // VMG: authentic Velocity Made Good = SOG * cos(TWA)
       const vmgVal = Math.max(2.2, sogVal * Math.cos(twaRad));
-
-      // Apparent wind vector
       const tw_x = twsVal * Math.cos(twaRad);
       const tw_y = twsVal * Math.sin(twaRad);
       const aw_x = tw_x + stwVal;
       const aw_y = tw_y;
       const awsVal = Math.sqrt(aw_x * aw_x + aw_y * aw_y);
       const awaVal = Math.atan2(aw_y, aw_x);
-
-      // Seabed depth with natural bathymetric contours
       const depthVal = Math.max(4.0, baseDepth + Math.sin(i * 0.25) * 3.5 + Math.cos(i * 0.6) * 1.2);
 
       store.histories.stw.push({ val: parseFloat(stwVal.toFixed(2)), time: t });
@@ -514,8 +482,6 @@ export function useDashboard() {
       safePush(store.longBuf.twd, twdVal, t, true, historyMinutes);
       safePush(store.smoothBuf.twd, twdVal, t, true, historyMinutes);
       safePush(store.longBuf.hdg, hdgVal, t, false, historyMinutes);
-      // With wind from the right (starboard tack: TWA > 0), aerodynamic and hydrodynamic leeway
-      // pushes the vessel to port (left/sottovento). Therefore COG drifts to the left of HDG (COG = HDG - leeway).
       const leewayDegSeed = Math.sin(twaRad) * 2.8;
       const cogDegVal = (hdgDegVal - leewayDegSeed + 360) % 360;
       safePush(store.longBuf.cog, degToRad(cogDegVal), t, false, historyMinutes);
@@ -536,9 +502,8 @@ export function useDashboard() {
       twd: [...store.histories.twd],
     });
 
-    // Pre-populate sample historical radar slots for the past 3 hours
     const current30mSlot = Math.floor(now / 1800000) * 1800000;
-    const sampleSlots: WindRadarSlot[] = [
+    setWindRadarSlots([
       {
         timestamp: current30mSlot - 1800000,
         twdMin: degToRad(75),
@@ -563,8 +528,7 @@ export function useDashboard() {
         twsMin: 8.5,
         isCalm: false,
       },
-    ];
-    setWindRadarSlots(sampleSlots);
+    ]);
 
     setFutureForecast({
       timestamp: now + 1800000,
@@ -572,16 +536,28 @@ export function useDashboard() {
       twd: degToRad(95),
       gust: 18.0,
     });
-  }, [config.graphs.historyMinutes]);
+  }, []);
 
-  // WebSocket or Simulation connection
+  // Connessione a Signal K o fallback a simulazione offline
   useEffect(() => {
     let ws: WebSocket | null = null;
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let simTimer: ReturnType<typeof setInterval> | null = null;
+    let handshakeTimeout: ReturnType<typeof setTimeout> | null = null;
+    let hasEverConnectedToSignalK = false;
 
     const startSimulation = () => {
+      if (hasEverConnectedToSignalK) return;
       storeRef.current.isSimulating = true;
+      const store = storeRef.current;
+      const now = Date.now();
+      const historyMinutes = config.graphs.historyMinutes || 30;
+
+      // Popola lo storico dimostrativo solo se i grafici sono ancora vuoti
+      if (store.histories.stw.length === 0) {
+        seedDemoHistory(now, historyMinutes);
+      }
+
       let sim = {
         hdg: 45,
         tws: 12.5,
@@ -591,21 +567,17 @@ export function useDashboard() {
         startTime: Date.now(),
       };
 
+      if (simTimer) clearInterval(simTimer);
       simTimer = setInterval(() => {
         const elapsed = (Date.now() - sim.startTime) / 1000;
 
-        // Wave chop & swell surge (period ~ 3-5 seconds)
         const waveChop = Math.sin(elapsed * 1.5) * 0.35 + Math.cos(elapsed * 2.7) * 0.2 + (Math.random() - 0.5) * 0.15;
-
-        // Realistic atmospheric gustiness & lulls (base ~ 12.5 kts, gusts up to 14.5 kts, lulls to 10.5 kts)
         const windGust = Math.sin(elapsed * 0.35) * 1.5 + Math.sin(elapsed * 0.12) * 1.2 + (Math.random() - 0.5) * 0.3;
         sim.tws = Math.max(8.0, 12.5 + windGust);
 
-        // Wind shifts: macro oscillations (±6°) with micro-turbulence (±1.5°)
         const windShift = Math.sin(elapsed * 0.15) * 5.5 + Math.sin(elapsed * 0.5) * 1.8;
         sim.twd = (90 + windShift + 360) % 360;
 
-        // Helmsman yaw oscillation keeping close-hauled
         const yaw = windShift * 0.7 + Math.sin(elapsed * 0.8) * 1.4 + (Math.random() - 0.5) * 0.4;
         sim.hdg = (45 + yaw + 360) % 360;
 
@@ -613,12 +585,10 @@ export function useDashboard() {
         if (twaRel > 180) twaRel -= 360;
         const twaRad = degToRad(twaRel);
 
-        // Speed through water: boat accelerates on gusts and surges on waves
         const windSurge = (sim.tws - 12.5) * 0.2;
         sim.stw = Math.max(3.8, 5.2 + windSurge + waveChop);
         const sogKts = sim.stw + 0.25 + (Math.random() - 0.5) * 0.08;
 
-        // Apparent wind vector
         const tw_x = sim.tws * Math.cos(twaRad);
         const tw_y = sim.tws * Math.sin(twaRad);
         const aw_x = tw_x + sim.stw;
@@ -637,8 +607,6 @@ export function useDashboard() {
         processIncomingData('environment.depth.belowTransducer', currentDepth);
         processIncomingData('navigation.speedThroughWater', ktsToMs(sim.stw));
         processIncomingData('navigation.speedOverGround', ktsToMs(sogKts));
-        // Authentic leeway physics: with wind from starboard (twaRad > 0, right),
-        // the hull drifts to port (left/sottovento). COG = HDG - leeway.
         const leewaySimDeg = Math.sin(twaRad) * 2.8 + (Math.random() - 0.5) * 0.15;
         const simCog = (sim.hdg - leewaySimDeg + 360) % 360;
         processIncomingData('navigation.courseOverGroundTrue', degToRad(simCog));
@@ -647,14 +615,21 @@ export function useDashboard() {
 
     const connectWs = () => {
       const addr = window.location.host;
-      // Only connect to WebSocket if not on localhost / cloud preview without SignalK
       try {
         ws = new WebSocket(`ws://${addr}/signalk/v1/stream?subscribe=none`);
 
         ws.onopen = () => {
-          storeRef.current.isSocketOpen = true;
+          hasEverConnectedToSignalK = true;
+          if (handshakeTimeout) {
+            clearTimeout(handshakeTimeout);
+            handshakeTimeout = null;
+          }
+          if (simTimer) {
+            clearInterval(simTimer);
+            simTimer = null;
+          }
           storeRef.current.isSimulating = false;
-          if (simTimer) clearInterval(simTimer);
+          storeRef.current.isSocketOpen = true;
 
           const subscriptionPayload = {
             context: 'vessels.self',
@@ -677,6 +652,40 @@ export function useDashboard() {
           try {
             ws?.send(JSON.stringify(subscriptionPayload));
           } catch (e) {}
+
+          // Se presente, recupera lo storico reale mantenuto in RAM dal plugin server Signal K
+          fetch('/rotevista-history')
+            .then(res => (res.ok ? res.json() : null))
+            .then(data => {
+              if (data && !storeRef.current.isSimulating) {
+                const store = storeRef.current;
+                let hasHistory = false;
+                (['stw', 'sog', 'vmg', 'depth', 'tws', 'aws', 'twd'] as const).forEach(key => {
+                  if (Array.isArray(data[key]) && data[key].length > 0) {
+                    store.histories[key] = [...data[key]];
+                    hasHistory = true;
+                  }
+                });
+                if (Array.isArray(data.windRadarSlots) && data.windRadarSlots.length > 0) {
+                  setWindRadarSlots(data.windRadarSlots);
+                }
+                if (data.futureForecast) {
+                  setFutureForecast(data.futureForecast);
+                }
+                if (hasHistory) {
+                  setHistoriesState({
+                    stw: [...store.histories.stw],
+                    sog: [...store.histories.sog],
+                    vmg: [...store.histories.vmg],
+                    depth: [...store.histories.depth],
+                    tws: [...store.histories.tws],
+                    aws: [...store.histories.aws],
+                    twd: [...store.histories.twd],
+                  });
+                }
+              }
+            })
+            .catch(() => {});
         };
 
         ws.onmessage = (e) => {
@@ -695,31 +704,48 @@ export function useDashboard() {
 
         ws.onclose = () => {
           storeRef.current.isSocketOpen = false;
-          // Fall back to simulation if real socket is closed
-          if (!storeRef.current.isSimulating) {
-            startSimulation();
+          if (!hasEverConnectedToSignalK) {
+            if (!storeRef.current.isSimulating) {
+              startSimulation();
+            }
+          } else {
+            // Connessione reale interrotta: riprova senza inquinare con simulazione
+            reconnectTimeout = setTimeout(connectWs, 5000);
           }
-          reconnectTimeout = setTimeout(connectWs, 30000);
         };
 
         ws.onerror = () => {
-          if (!storeRef.current.isSimulating) {
-            startSimulation();
+          if (!hasEverConnectedToSignalK && !storeRef.current.isSimulating) {
+            handshakeTimeout = setTimeout(() => {
+              if (!hasEverConnectedToSignalK && !storeRef.current.isSimulating) {
+                startSimulation();
+              }
+            }, 1500);
           }
         };
       } catch (err) {
-        startSimulation();
+        if (!hasEverConnectedToSignalK) {
+          startSimulation();
+        }
       }
     };
+
+    // Timeout handshake iniziale: se entro 2500ms Signal K non è raggiungibile, avvia la simulazione
+    handshakeTimeout = setTimeout(() => {
+      if (!hasEverConnectedToSignalK && !storeRef.current.isSocketOpen) {
+        startSimulation();
+      }
+    }, 2500);
 
     connectWs();
 
     return () => {
       if (ws) ws.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (handshakeTimeout) clearTimeout(handshakeTimeout);
       if (simTimer) clearInterval(simTimer);
     };
-  }, [processIncomingData]);
+  }, [config.graphs.historyMinutes, processIncomingData, seedDemoHistory]);
 
   // Main 1Hz Tactical Display Loop
   useEffect(() => {
@@ -1088,17 +1114,7 @@ export function useDashboard() {
       const isDataFlowing = now - store.lastMessageReceivedTime < 6000;
 
       if (store.isSimulating) {
-        if (oldestTime) {
-          const availableMs = now - oldestTime;
-          if (availableMs >= requiredMs) {
-            setConnectionStatus({ text: `ONLINE ${viewportMinutes}min`, className: 'online' });
-          } else {
-            const availableMin = Math.max(1, Math.floor(availableMs / 60000));
-            setConnectionStatus({ text: `ONLINE ${availableMin}/${viewportMinutes}min`, className: 'online' });
-          }
-        } else {
-          setConnectionStatus({ text: `ONLINE`, className: 'online' });
-        }
+        setConnectionStatus({ text: 'SIMULAZIONE', className: 'simulating' });
       } else if (isSocketOpen && isDataFlowing) {
         if (oldestTime) {
           const availableMs = now - oldestTime;
@@ -1109,11 +1125,11 @@ export function useDashboard() {
             setConnectionStatus({ text: `ONLINE ${availableMin}/${viewportMinutes}min`, className: 'online' });
           }
         } else {
-          setConnectionStatus({ text: `ONLINE`, className: 'online' });
+          setConnectionStatus({ text: 'ONLINE', className: 'online' });
         }
       } else {
         setConnectionStatus({
-          text: isSocketOpen ? 'STALL (RECONNECTING...)' : 'OFFLINE',
+          text: isSocketOpen ? 'ATTESA DATI...' : 'OFFLINE',
           className: 'offline',
         });
       }

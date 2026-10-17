@@ -483,6 +483,7 @@ body.night-mode .alarm-danger {
 }
 .online { color: #27ae60; opacity: 0.9; }
 .offline { color: #c0392b; font-weight: bold; }
+.simulating { color: #d97706; font-weight: bold; }
 
 .mini-compass {
     display: block;
@@ -540,6 +541,7 @@ body.night-mode,
 .night-mode .value-large { color: #ff3333 !important; text-shadow: 0 0 8px rgba(255, 0, 0, 0.4) !important; }
 .night-mode .value { color: #ff3333; text-shadow: 0 0 8px rgba(255, 0, 0, 0.3); }
 .night-mode #status { background: rgba(255, 0, 0, 0.1) !important; color: #ff3333 !important; }
+.night-mode #status.simulating { color: #f59e0b !important; }
 
 .night-mode .graph-wrapper {
     background: rgba(10, 0, 0, 0.8) !important;
