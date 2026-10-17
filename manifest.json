@@ -5,7 +5,12 @@
     {
       "src": "./icons/dash.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "152x152"
+    },
+    {
+      "src": "./apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "152x152"
     }
   ],
   "start_url": "./index.html",

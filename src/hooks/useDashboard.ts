@@ -1065,7 +1065,7 @@ export function useDashboard() {
       } else if (currentWindVal >= config.graphs.reef1) {
         twsColor = '#ff9800';
       } else if (displayModeTws === 'AWS') {
-        twsColor = '#5c6bc0';
+        twsColor = isNightMode ? '' : '#5c6bc0';
       }
 
       setDisplayValues({

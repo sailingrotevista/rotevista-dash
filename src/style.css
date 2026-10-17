@@ -540,6 +540,8 @@ body.night-mode,
 .night-mode .label, .night-mode .unit, .night-mode .dual-label { color: #800000 !important; }
 .night-mode .value-large { color: #ff3333 !important; text-shadow: 0 0 8px rgba(255, 0, 0, 0.4) !important; }
 .night-mode .value { color: #ff3333; text-shadow: 0 0 8px rgba(255, 0, 0, 0.3); }
+.night-mode #tws[style*="#5c6bc0"],
+.night-mode .box-tws #tws[style*="#5c6bc0"] { color: #ff3333 !important; }
 .night-mode #status { background: rgba(255, 0, 0, 0.1) !important; color: #ff3333 !important; }
 .night-mode #status.simulating { color: #f59e0b !important; }
 
@@ -604,8 +606,12 @@ body.night-mode,
 
 .night-mode #center-glow feDropShadow { flood-color: #ff0000 !important; flood-opacity: 0.6 !important; }
 .night-mode #boat-icon { fill: #220000 !important; stroke: #ff0000 !important; stroke-width: 0.8px !important; opacity: 1 !important; }
-.night-mode #aws-display-group text { fill: #800000 !important; }
-.night-mode #aws-val-svg { fill: #ff3333 !important; }
+.night-mode #aws-display-group text:first-of-type { fill: #800000 !important; }
+.night-mode #aws-display-group #aws-val-svg,
+.night-mode #aws-val-svg {
+    fill: #ff3333 !important;
+    filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.4)) !important;
+}
 .night-mode #ticks line { stroke: #550000 !important; }
 .night-mode #tick-labels { fill: #800000 !important; }
 .night-mode #wind-gauge path[stroke="#ff0000"] { stroke: #800000 !important; opacity: 0.8; }
@@ -646,17 +652,23 @@ body.night-mode,
 .is-gybing { opacity: 1 !important; animation: none !important; filter: drop-shadow(0 0 8px #ff0000) !important; }
 .unstable-data { animation: blink-trend 1.5s infinite ease-in-out; color: #e67e22 !important; }
 
-.night-mode .graph-wrapper line[style*="#2c3e50"] {
+.night-mode .graph-wrapper line[style*="#2c3e50"],
+.night-mode .graph-wrapper line[stroke="#2c3e50"],
+.night-mode .graph-wrapper line[stroke*="2c3e50"] {
     stroke: #6c8ea0 !important;
 }
-.night-mode .graph-wrapper polygon[style*="#2c3e50"] {
+.night-mode .graph-wrapper polygon[style*="#2c3e50"],
+.night-mode .graph-wrapper path[fill*="2c3e50"] {
     fill: #6c8ea0 !important;
 }
 
-.night-mode .graph-wrapper line[style*="#0088cc"] {
+.night-mode .graph-wrapper line[style*="#0088cc"],
+.night-mode .graph-wrapper line[stroke="#0088cc"],
+.night-mode .graph-wrapper line[stroke*="0088cc"] {
     stroke: #33aadd !important;
 }
-.night-mode .graph-wrapper polygon[style*="#0088cc"] {
+.night-mode .graph-wrapper polygon[style*="#0088cc"],
+.night-mode .graph-wrapper path[fill*="0088cc"] {
     fill: #33aadd !important;
 }
 

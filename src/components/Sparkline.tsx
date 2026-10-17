@@ -10,6 +10,7 @@ interface SparklineProps {
   isNavigating: boolean;
   displayMode: string;
   isFocused: boolean;
+  isNightMode?: boolean;
   onScaleChange?: (min: number, max: number) => void;
 }
 
@@ -22,6 +23,7 @@ export const Sparkline: React.FC<SparklineProps> = ({
   isNavigating,
   displayMode,
   isFocused,
+  isNightMode = false,
 }) => {
   const w = 200;
   const h = 40;
@@ -112,9 +114,9 @@ export const Sparkline: React.FC<SparklineProps> = ({
 
   const colDanger = '#ff3b30';
   const colWarning = '#ff9800';
-  const colTws = '#2c3e50';
+  const colTws = isNightMode ? '#6c8ea0' : '#2c3e50';
   const colAws = '#5c6bc0';
-  const colDepth = '#0088cc';
+  const colDepth = isNightMode ? '#33aadd' : '#0088cc';
   const colStw = '#00C851';
   const colSog = '#ffbb33';
   const colVmg = '#00b8d4';

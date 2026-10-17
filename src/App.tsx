@@ -252,6 +252,7 @@ export const App: React.FC = () => {
             isNavigating={displayValues.isNavigating}
             displayMode="DEPTH"
             isFocused={focusedBox === 'depth'}
+            isNightMode={isNightMode}
           />
         </div>
       </DataBox>
@@ -285,6 +286,7 @@ export const App: React.FC = () => {
             isNavigating={displayValues.isNavigating}
             displayMode={displayModeTws}
             isFocused={focusedBox === 'tws'}
+            isNightMode={isNightMode}
           />
         </div>
       </DataBox>

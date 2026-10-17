@@ -8,7 +8,8 @@
   },
   "keywords": [
     "signalk-webapp",
-    "signalk-node-server-plugin"
+    "signalk-node-server-plugin",
+    "signalk-category-instruments"
   ],
   "author": "Sailing Rotevista",
   "license": "MIT",
@@ -27,6 +28,7 @@
     "index.js",
     "public",
     "icons",
+    "apple-touch-icon.png",
     "manifest.json",
     "settings.json"
   ],
