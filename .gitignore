@@ -4,6 +4,8 @@ node_modules/
 # Build di produzione
 dist/
 build/
+public/assets/
+public/index.html
 
 # Cache di Vite e TypeScript
 .vite/

@@ -63,6 +63,11 @@ function safePush(buffer: AngleBufferItem[], val: number, time: number, isTwd = 
 
 export function useDashboard() {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
+  const configRef = useRef(config);
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
   const [displayModeSog, setDisplayModeSog] = useState<DisplayModeSog>('SOG');
   const [displayModeTws, setDisplayModeTws] = useState<DisplayModeTws>('TWS');
   const [activeInstrument, setActiveInstrument] = useState<ActiveInstrument>('gauge');
@@ -195,6 +200,7 @@ export function useDashboard() {
     currentTackLabelMode: 'TACK',
     isSocketOpen: false,
     isSimulating: false,
+    hasEverConnectedToSignalK: false,
   });
 
   // Manage history insertion
@@ -202,8 +208,8 @@ export function useDashboard() {
     if (value === undefined || value === null || !isFinite(value)) return;
     const store = storeRef.current;
     const now = Date.now();
-    const historyMinutes = Math.max(1, config.graphs.historyMinutes || 10);
-    const samples = Math.max(2, config.graphs.samples || 60);
+    const historyMinutes = Math.max(1, configRef.current.graphs.historyMinutes || 10);
+    const samples = Math.max(2, configRef.current.graphs.samples || 60);
     const bucketIntervalMs = (historyMinutes * 60000) / samples;
 
     if (!store.graphTempBuf[type]) store.graphTempBuf[type] = [];
@@ -266,7 +272,7 @@ export function useDashboard() {
 
     store.graphTempBuf[type] = [];
     store.lastUpdates[type] = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
-  }, [config.graphs]);
+  }, []);
 
   // Process incoming data
   const processIncomingData = useCallback((path: string, val: any, timeMs?: number) => {
@@ -284,10 +290,12 @@ export function useDashboard() {
     store.raw[path] = val;
     store.lastMessageReceivedTime = localNow;
 
+    const historyMinutes = configRef.current.graphs.historyMinutes;
+
     if (path === 'environment.wind.directionTrue') {
       const directionVal = typeof val === 'object' && val.val !== undefined ? val.val : val;
-      safePush(store.smoothBuf.twd, directionVal, now, true, config.graphs.historyMinutes);
-      safePush(store.longBuf.twd, directionVal, now, true, config.graphs.historyMinutes);
+      safePush(store.smoothBuf.twd, directionVal, now, true, historyMinutes);
+      safePush(store.longBuf.twd, directionVal, now, true, historyMinutes);
       // Also push to twd history for radar
       store.histories.twd.push({ val: directionVal, time: now });
       while (store.histories.twd.length > 0 && now - store.histories.twd[0].time > 120 * 60000) {
@@ -297,8 +305,8 @@ export function useDashboard() {
 
     if (path === 'navigation.headingTrue') {
       store.timestamps['navigation.headingTrueNative'] = now;
-      safePush(store.smoothBuf.hdg, val, now, false, config.graphs.historyMinutes);
-      safePush(store.longBuf.hdg, val, now, false, config.graphs.historyMinutes);
+      safePush(store.smoothBuf.hdg, val, now, false, historyMinutes);
+      safePush(store.longBuf.hdg, val, now, false, historyMinutes);
     } else if (path === 'navigation.headingMagnetic') {
       const hasNativeTrueHdg = store.timestamps['navigation.headingTrueNative'] && (now - store.timestamps['navigation.headingTrueNative'] < 5000);
       if (!hasNativeTrueHdg) {
@@ -306,22 +314,22 @@ export function useDashboard() {
         const calculatedTrueHdg = (val + variation + 2 * Math.PI) % (2 * Math.PI);
         store.raw['navigation.headingTrue'] = calculatedTrueHdg;
         store.timestamps['navigation.headingTrue'] = localNow;
-        safePush(store.smoothBuf.hdg, calculatedTrueHdg, now, false, config.graphs.historyMinutes);
-        safePush(store.longBuf.hdg, calculatedTrueHdg, now, false, config.graphs.historyMinutes);
+        safePush(store.smoothBuf.hdg, calculatedTrueHdg, now, false, historyMinutes);
+        safePush(store.longBuf.hdg, calculatedTrueHdg, now, false, historyMinutes);
       }
     }
 
     if (path === 'navigation.courseOverGroundTrue') {
-      safePush(store.smoothBuf.cog, val, now, false, config.graphs.historyMinutes);
-      safePush(store.longBuf.cog, val, now, false, config.graphs.historyMinutes);
+      safePush(store.smoothBuf.cog, val, now, false, historyMinutes);
+      safePush(store.longBuf.cog, val, now, false, historyMinutes);
 
       const hasCompass = store.raw['navigation.headingTrue'] !== undefined || store.raw['navigation.headingMagnetic'] !== undefined;
       const sog = store.raw['navigation.speedOverGround'] || 0;
       if (!hasCompass && sog > 0.77) {
         store.raw['navigation.headingTrue'] = val;
         store.timestamps['navigation.headingTrue'] = localNow;
-        safePush(store.smoothBuf.hdg, val, now, false, config.graphs.historyMinutes);
-        safePush(store.longBuf.hdg, val, now, false, config.graphs.historyMinutes);
+        safePush(store.smoothBuf.hdg, val, now, false, historyMinutes);
+        safePush(store.longBuf.hdg, val, now, false, historyMinutes);
       }
     }
 
@@ -378,21 +386,22 @@ export function useDashboard() {
           if (!hasNativeTwd && tws_water > 0.05 && hdg !== undefined) {
             const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
             store.raw['environment.wind.directionTrue'] = twd;
-            safePush(store.smoothBuf.twd, twd, now, true, config.graphs.historyMinutes);
-            safePush(store.longBuf.twd, twd, now, true, config.graphs.historyMinutes);
+            safePush(store.smoothBuf.twd, twd, now, true, historyMinutes);
+            safePush(store.longBuf.twd, twd, now, true, historyMinutes);
             store.histories.twd.push({ val: twd, time: now });
           }
         }
         store.lastTWCompute = now;
       }
     }
-  }, [config.graphs.historyMinutes]);
+  }, []);
 
   // Load configuration from Signal K plugin or settings.json
   useEffect(() => {
     fetch('/rotevista-config')
       .then(res => {
         if (!res.ok) throw new Error('Not available');
+        storeRef.current.hasEverConnectedToSignalK = true;
         return res.json();
       })
       .catch(() => {
@@ -544,14 +553,14 @@ export function useDashboard() {
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let simTimer: ReturnType<typeof setInterval> | null = null;
     let handshakeTimeout: ReturnType<typeof setTimeout> | null = null;
-    let hasEverConnectedToSignalK = false;
+    let isDisposed = false;
 
     const startSimulation = () => {
-      if (hasEverConnectedToSignalK) return;
+      if (storeRef.current.hasEverConnectedToSignalK) return;
       storeRef.current.isSimulating = true;
       const store = storeRef.current;
       const now = Date.now();
-      const historyMinutes = config.graphs.historyMinutes || 30;
+      const historyMinutes = configRef.current.graphs.historyMinutes || 30;
 
       // Popola lo storico dimostrativo solo se i grafici sono ancora vuoti
       if (store.histories.stw.length === 0) {
@@ -614,12 +623,14 @@ export function useDashboard() {
     };
 
     const connectWs = () => {
+      if (isDisposed) return;
       const addr = window.location.host;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       try {
-        ws = new WebSocket(`ws://${addr}/signalk/v1/stream?subscribe=none`);
+        ws = new WebSocket(`${protocol}//${addr}/signalk/v1/stream?subscribe=none`);
 
         ws.onopen = () => {
-          hasEverConnectedToSignalK = true;
+          storeRef.current.hasEverConnectedToSignalK = true;
           if (handshakeTimeout) {
             clearTimeout(handshakeTimeout);
             handshakeTimeout = null;
@@ -689,6 +700,14 @@ export function useDashboard() {
         };
 
         ws.onmessage = (e) => {
+          storeRef.current.hasEverConnectedToSignalK = true;
+          if (storeRef.current.isSimulating) {
+            storeRef.current.isSimulating = false;
+            if (simTimer) {
+              clearInterval(simTimer);
+              simTimer = null;
+            }
+          }
           try {
             const d = JSON.parse(e.data);
             if (d.updates) {
@@ -704,48 +723,51 @@ export function useDashboard() {
 
         ws.onclose = () => {
           storeRef.current.isSocketOpen = false;
-          if (!hasEverConnectedToSignalK) {
+          if (!storeRef.current.hasEverConnectedToSignalK) {
             if (!storeRef.current.isSimulating) {
               startSimulation();
             }
           } else {
             // Connessione reale interrotta: riprova senza inquinare con simulazione
-            reconnectTimeout = setTimeout(connectWs, 5000);
+            if (!isDisposed) {
+              reconnectTimeout = setTimeout(connectWs, 3000);
+            }
           }
         };
 
         ws.onerror = () => {
-          if (!hasEverConnectedToSignalK && !storeRef.current.isSimulating) {
+          if (!storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating) {
             handshakeTimeout = setTimeout(() => {
-              if (!hasEverConnectedToSignalK && !storeRef.current.isSimulating) {
+              if (!storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating && !storeRef.current.isSocketOpen) {
                 startSimulation();
               }
-            }, 1500);
+            }, 3000);
           }
         };
       } catch (err) {
-        if (!hasEverConnectedToSignalK) {
+        if (!storeRef.current.hasEverConnectedToSignalK) {
           startSimulation();
         }
       }
     };
 
-    // Timeout handshake iniziale: se entro 2500ms Signal K non è raggiungibile, avvia la simulazione
+    // Timeout handshake iniziale: se entro 4000ms Signal K non è raggiungibile e non abbiamo ricevuto segnale, avvia la simulazione
     handshakeTimeout = setTimeout(() => {
-      if (!hasEverConnectedToSignalK && !storeRef.current.isSocketOpen) {
+      if (!storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSocketOpen) {
         startSimulation();
       }
-    }, 2500);
+    }, 4000);
 
     connectWs();
 
     return () => {
+      isDisposed = true;
       if (ws) ws.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (handshakeTimeout) clearTimeout(handshakeTimeout);
       if (simTimer) clearInterval(simTimer);
     };
-  }, [config.graphs.historyMinutes, processIncomingData, seedDemoHistory]);
+  }, [processIncomingData, seedDemoHistory]);
 
   // Main 1Hz Tactical Display Loop
   useEffect(() => {
