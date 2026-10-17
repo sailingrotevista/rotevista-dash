@@ -1,7 +1,7 @@
 /* ==========================================================================
    1. BASE E RESET DI SISTEMA
    ========================================================================== */
-body {
+html, body, #root {
     background-color: #fff;
     color: #000;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -46,20 +46,19 @@ body {
    ========================================================================== */
 .data-box {
     position: relative; border-bottom: 1px solid #eee;
-    /* Padding alto (1.2rem) per non far toccare il numero al titolo assoluto */
-    padding: 1.2rem 8px 4px 8px;
+    padding: 0.75rem 8px 3px 8px;
     display: flex; flex-direction: column; width: 100%;
     box-sizing: border-box; container-type: size;
     min-height: 0; overflow: hidden;
     background: rgba(0, 0, 0, 0.03); border-radius: 12px;
     transition: background-color 0.2s ease;
-    /* Forza la centratura verticale del valore per display curvi */
     justify-content: center !important;
+    cursor: pointer;
 }
 
 /* Titoli ancorati sempre in alto */
 .label-row {
-    position: absolute; top: 4px; left: 8px; right: 8px;
+    position: absolute; top: 3px; left: 8px; right: 8px;
     display: flex; align-items: baseline; z-index: 10;
 }
 
@@ -78,7 +77,8 @@ body {
 .box-depth, .box-tws, .box-twa, .box-awa, .box-twd {
     align-items: flex-end !important;
     text-align: right !important;
-    padding-right: 14px !important; /* BUG RISOLTO: Aumenta il padding destro per evitare il clipping dei numeri sul bordo */
+    padding-right: 8px !important;
+    padding-left: 8px !important;
 }
 .box-depth .label-row, .box-tws .label-row, .box-twa .label-row, .box-awa .label-row, .box-twd .label-row {
     flex-direction: row-reverse !important; justify-content: space-between !important;
@@ -88,48 +88,61 @@ body {
    4. TIPOGRAFIA GERARCHICA (OTTIMIZZATA PER TUTTI I DISPLAY)
    ========================================================================== */
 
+/* Numeri monospaziati/tabulari per evitare oscillazioni visive */
+.value, .value-large, .dual-val {
+    font-variant-numeric: tabular-nums;
+}
+
 /* --- VALORI STANDARD (STW, SOG, DEPTH, TWS) --- */
 .value {
     color: #000;
-    /* Su Tablet: 25% altezza box. Su schermi stretti max 32% larghezza */
-    font-size: clamp(1.1rem, 25cqh, 32cqw);
-    font-weight: 600; line-height: 0.85; letter-spacing: -1.5px;
+    /* Massimizzazione visibilità: riempie fino al 38% dell'altezza e 56% larghezza, riducendo i margini vuoti */
+    font-size: clamp(1.35rem, 38cqh, 56cqw);
+    font-weight: 600; line-height: 0.82; letter-spacing: -0.8px;
     margin-top: auto; margin-bottom: 2px;
 }
 
-/* Protezione iPhone Landscape: Schermi molto bassi */
 @media screen and (max-height: 450px) {
-    .value { font-size: clamp(1rem, 18cqh, 25cqw) !important; }
+    .value { font-size: clamp(1.15rem, 28cqh, 46cqw) !important; }
 }
 
 /* --- VALORI MEDIATI (HEADING, COG, TWA, AWA) --- */
 .value-large {
-    font-weight: 600; line-height: 1; margin: auto 0;
-    /* 55cqh riempie il box verticalmente, 22cqw protegge la larghezza */
-    font-size: clamp(1.5rem, 55cqh, 22cqw) !important;
+    font-weight: 600; line-height: 0.95; margin: auto 0;
+    font-size: clamp(1.65rem, 64cqh, 40cqw) !important;
+    white-space: nowrap !important;
 }
 
 @media screen and (max-height: 450px) {
-    .value-large { font-size: clamp(1.4rem, 40cqh, 20cqw) !important; }
+    .value-large { font-size: clamp(1.35rem, 50cqh, 34cqw) !important; }
 }
 
 /* --- BOX TWD (Bussola Meteo) --- */
 .value-with-compass {
     display: flex; flex-direction: row; justify-content: space-between;
-    align-items: center; width: 100%; height: 85%;
+    align-items: center; width: 100%; height: 92%;
+    box-sizing: border-box;
+    gap: 8px;
+    padding: 0 4px;
 }
 .box-twd .mini-compass {
-    height: 85cqh !important; width: auto !important; aspect-ratio: 1/1; flex-shrink: 0;
+    height: min(88cqh, 38cqw) !important;
+    width: min(88cqh, 38cqw) !important;
+    aspect-ratio: 1/1 !important;
+    flex-shrink: 0;
+    filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.12));
 }
 @media screen and (max-height: 450px) {
-    .box-twd .mini-compass { height: 65cqh !important; }
-    .box-twd #twd-avg { font-size: clamp(1.4rem, 45cqh, 20cqw) !important; }
+    .box-twd .mini-compass { height: min(76cqh, 32cqw) !important; width: min(76cqh, 32cqw) !important; }
+    .box-twd #twd-avg, .box-twd .value-large { font-size: clamp(1.2rem, 46cqh, 22cqw) !important; }
 }
 
-/* --- OTTIMIZZAZIONE SPECIFICA TWD PER EVITARE ANDATA A CAPO in landscape--- */
-.box-twd .value-large {
-    /* Riduciamo il limite di larghezza (18cqw) per far spazio al simbolo ± rimpicciolendo il testo se serve */
-    font-size: clamp(1.2rem, 55cqh, 18cqw) !important;
+.box-twd .value-large, .box-twd #twd-avg {
+    font-size: clamp(1.4rem, 54cqh, 25cqw) !important;
+    white-space: nowrap !important;
+    text-align: right !important;
+    flex-shrink: 1;
+    letter-spacing: -0.5px;
 }
 
 /* --- BOX TACK (Mure Opposte) --- */
@@ -137,22 +150,20 @@ body {
 .box-tack .dual-value-col { display: flex; flex-direction: column; justify-content: center; }
 .box-tack .dual-value-col:first-child { align-items: flex-start; }
 .box-tack .dual-value-col:last-child { align-items: flex-end; }
-.box-tack .dual-label { color: #888; font-size: 0.5rem; font-weight: 800; margin-bottom: -2px; }
-.box-tack .value.dual-val { font-size: clamp(1rem, 32cqh, 10cqw) !important; line-height: 0.9; }
+.box-tack .dual-label { color: #888; font-size: 0.55rem; font-weight: 800; margin-bottom: -1px; }
+.box-tack .value.dual-val { font-size: clamp(1.2rem, 42cqh, 24cqw) !important; line-height: 0.88; }
 
 @media screen and (max-height: 450px) {
-    .box-tack .value.dual-val { font-size: clamp(0.9rem, 28cqh, 10cqw) !important; }
+    .box-tack .value.dual-val { font-size: clamp(1rem, 34cqh, 18cqw) !important; }
 }
 
-/* ==========================================================================
-   AGGIUNTA: Gestione Allarmi Profondità
-   ========================================================================== */
+/* --- ALLARMI PROFONDITÀ --- */
 .alarm-warning {
-    color: #e67e22 !important; /* Arancione per Warning */
+    color: #e67e22 !important;
 }
 
 .alarm-danger {
-    color: #c0392b !important; /* Rosso per Danger */
+    color: #c0392b !important;
 }
 
 .blink-alarm {
@@ -164,8 +175,6 @@ body {
     to { opacity: 0.3; }
 }
 
-/* Override per la Night Mode: se siamo in modalità notte,
-   il rosso deve restare ben visibile o diventare più acceso */
 body.night-mode .alarm-danger {
     color: #ff0000 !important;
     text-shadow: 0 0 10px rgba(255, 0, 0, 0.8) !important;
@@ -178,12 +187,12 @@ body.night-mode .alarm-danger {
 .focus-active .box-gauge { display: none !important; }
 
 .focus-active.focus-side-left {
-    grid-template-columns: 3fr 2fr !important;
+    grid-template-columns: 3.2fr 1.8fr !important;
     grid-template-areas: "focused gauge" !important;
     grid-template-rows: 100% !important;
 }
 .focus-active.focus-side-right {
-    grid-template-columns: 2fr 3fr !important;
+    grid-template-columns: 1.8fr 3.2fr !important;
     grid-template-areas: "gauge focused" !important;
     grid-template-rows: 100% !important;
 }
@@ -192,35 +201,36 @@ body.night-mode .alarm-danger {
     grid-area: focused !important;
     height: 100vh !important;
     background: rgba(0, 0, 0, 0.02) !important;
-    padding: 2vw 3vw !important;
+    padding: 1.2vh 1.8vw !important;
     justify-content: center !important;
 }
 
-/* Ingrandimento scale nel Focus Mode */
 .focus-active .is-focused .scale-labels {
-    font-size: clamp(14px, 2vw, 24px) !important;
-    min-width: 60px !important;
+    font-size: clamp(14px, 2.2vw, 26px) !important;
+    min-width: 55px !important;
     color: #444 !important;
 }
 
-/* Margine extra per le scale nel Focus */
-.focus-active .is-focused .graph-wrapper { margin-top: 25px !important; }
+.focus-active .is-focused .graph-wrapper { margin-top: 10px !important; flex-grow: 1.4 !important; }
 
-/* PRIORITÀ COLORE HERCULES IN FOCUS */
 .focus-active .is-focused.box-hercules {
     background: rgba(255, 0, 0, 0.12) !important;
     box-shadow: inset 0 0 30px rgba(255, 0, 0, 0.1);
 }
 
 .focus-active .is-focused .value {
-    font-size: clamp(4rem, 25cqh, 15rem) !important;
-    margin-top: 20px !important;
+    font-size: clamp(4.5rem, 36cqh, 16rem) !important;
+    margin-top: 8px !important;
+}
+
+.focus-active .is-focused .value-large {
+    font-size: clamp(5rem, 64cqh, 18rem) !important;
 }
 
 .focus-active .box-gauge { display: flex !important; grid-area: gauge !important; }
 
 /* ==========================================================================
-   6. VIEWPORT QUADRATA (U-SHAPE) - LOGICA ANTI-COLLISIONE
+   6. VIEWPORT QUADRATA (U-SHAPE)
    ========================================================================== */
 @media screen and (min-aspect-ratio: 0.86/1) and (max-aspect-ratio: 1.25/1) {
     .main-container {
@@ -230,21 +240,29 @@ body.night-mode .alarm-danger {
             "sog   gauge gauge tws"
             "hdg   gauge gauge twa"
             "cog   tack  twd   awa" !important;
-        grid-template-rows: 1.75fr 1.75fr 0.75fr 1.25fr !important;
+        grid-template-rows: 1.6fr 1.6fr 1.05fr 1.05fr !important;
     }
 
-    /* Sfondo per distinguere la riga tattica inferiore */
+    .value {
+        font-size: clamp(1.2rem, 30cqh, 40cqw) !important;
+        white-space: nowrap !important;
+    }
+
+    .value-large {
+        font-size: clamp(1.35rem, 50cqh, 34cqw) !important;
+        white-space: nowrap !important;
+    }
+
     .box-cog, .box-tack, .box-twd, .box-awa {
         border-top: 1px solid #eee;
         background: rgba(0, 0, 0, 0.04) !important;
     }
 
-    /* --- TACK: Impilamento Verticale Rigido in U-Shape --- */
     .box-tack .dual-value-container {
         flex-direction: column !important;
         justify-content: center !important;
         align-items: flex-start !important;
-        gap: 8px !important;
+        gap: 4px !important;
     }
     
     .box-tack .dual-value-col {
@@ -256,18 +274,18 @@ body.night-mode .alarm-danger {
     }
 
     .box-tack .value.dual-val {
-        font-size: clamp(1rem, 30cqh, 15cqw) !important;
+        font-size: clamp(1.05rem, 32cqh, 21cqw) !important;
         line-height: 1 !important;
+        white-space: nowrap !important;
     }
     
     .box-tack .dual-label {
         margin-bottom: 0px !important;
     }
 
-    /* --- TWD: Calibrazione per box stretto --- */
-    .box-twd .value-with-compass { justify-content: center; gap: 5px; }
-    .box-twd .mini-compass { height: 60cqh !important; }
-    .box-twd #twd-avg { font-size: clamp(1.2rem, 50cqh, 20cqw) !important; }
+    .box-twd .value-with-compass { justify-content: space-between; gap: 6px; box-sizing: border-box; }
+    .box-twd .mini-compass { height: min(76cqh, 34cqw) !important; width: min(76cqh, 34cqw) !important; aspect-ratio: 1/1 !important; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12)); }
+    .box-twd #twd-avg, .box-twd .value-large { font-size: clamp(1.15rem, 48cqh, 22cqw) !important; white-space: nowrap !important; }
 }
 
 /* ==========================================================================
@@ -293,10 +311,11 @@ body.night-mode .alarm-danger {
     background: transparent !important;
 }
 
-/* I componenti interni dell'SVG gestiscono autonomamente spessori e colori via JS */
-.graph-wrapper polygon,
+.graph-wrapper polygon {
+    shape-rendering: geometricPrecision;
+}
+
 .graph-wrapper line {
-    transition: all 0.3s ease;
     shape-rendering: geometricPrecision;
 }
 
@@ -308,21 +327,35 @@ body.night-mode .alarm-danger {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    font-size: 9px;
+    font-size: 9.5px;
     color: #666;
     font-weight: 800;
-    min-width: 22px;
+    width: auto;
+    min-width: auto;
     height: 100%;
     line-height: 1;
     z-index: 5;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+    flex-shrink: 0;
 }
 
-/* --- COLONNA SINISTRA (STW, SOG) --- */
+/* --- COLONNA SINISTRA (STW, SOG): Scala a DX del grafico, allineata a destra a filo con 'kts' --- */
 .box-stw .sparkline, .box-sog .sparkline { order: 1; }
-.box-stw .scale-labels, .box-sog .scale-labels { order: 2; text-align: left; padding-left: 4px; }
+.box-stw .scale-labels, .box-sog .scale-labels {
+    order: 2;
+    text-align: right;
+    padding-right: 4px;
+    padding-left: 3px;
+}
 
-/* --- COLONNA DESTRA (DEPTH, TWS) --- */
-.box-depth .scale-labels, .box-tws .scale-labels { order: 1; text-align: right; padding-right: 4px; }
+/* --- COLONNA DESTRA (DEPTH, TWS): Scala a SX del grafico, allineata a sinistra a filo con 'm' --- */
+.box-depth .scale-labels, .box-tws .scale-labels {
+    order: 1;
+    text-align: left;
+    padding-left: 4px;
+    padding-right: 3px;
+}
 .box-depth .sparkline, .box-tws .sparkline { order: 2; }
 
 /* --- REGOLE HERCULES (Zoom) --- */
@@ -349,13 +382,13 @@ body.night-mode .alarm-danger {
 
     .data-box { height: auto !important; }
 
-    .box-stw, .box-sog, .box-depth, .box-tws { justify-content: flex-start !important; padding-top: 1.2rem !important; }
+    .box-stw, .box-sog, .box-depth, .box-tws { justify-content: flex-start !important; padding-top: 1rem !important; }
 
     .box-stw .value, .box-sog .value, .box-depth .value, .box-tws .value {
-        font-size: clamp(1.2rem, 30cqh, 35cqw) !important;
-        line-height: 0.8 !important;
-        margin-top: -4px !important;
-        margin-bottom: 4px !important;
+        font-size: clamp(1.35rem, 34cqh, 50cqw) !important;
+        line-height: 0.82 !important;
+        margin-top: -2px !important;
+        margin-bottom: 2px !important;
         padding-bottom: 0 !important;
         font-weight: 700;
     }
@@ -365,7 +398,23 @@ body.night-mode .alarm-danger {
         flex-grow: 1 !important;
     }
 
-    .box-hdg, .box-cog, .box-twa, .box-awa, .box-twd, .box-tack { justify-content: center !important; padding-top: 1.2rem !important; }
+    .box-hdg, .box-cog, .box-twa, .box-awa, .box-twd, .box-tack { justify-content: center !important; padding-top: 1rem !important; }
+
+    .box-hdg .value-large, .box-cog .value-large, .box-twa .value-large, .box-awa .value-large {
+        font-size: clamp(1.6rem, 62cqh, 40cqw) !important;
+        white-space: nowrap !important;
+    }
+
+    .box-twd .mini-compass {
+        height: min(84cqh, 36cqw) !important;
+        width: min(84cqh, 36cqw) !important;
+        aspect-ratio: 1/1 !important;
+        filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
+    }
+    .box-twd .value-large, .box-twd #twd-avg {
+        font-size: clamp(1.4rem, 54cqh, 24cqw) !important;
+        white-space: nowrap !important;
+    }
 
     .main-container.focus-active {
         grid-template-columns: 1fr !important;
@@ -380,7 +429,7 @@ body.night-mode .alarm-danger {
     .box-tack .dual-value-col { display: flex !important; flex-direction: column !important; justify-content: center; }
     .box-tack .dual-value-col:first-child { align-items: flex-start !important; text-align: left !important; }
     .box-tack .dual-value-col:last-child { align-items: flex-end !important; text-align: right !important; }
-    .box-tack .value.dual-val { font-size: clamp(1rem, 38cqh, 15cqw) !important; }
+    .box-tack .value.dual-val { font-size: clamp(1.15rem, 40cqh, 22cqw) !important; }
 }
 
 /* ==========================================================================
@@ -393,14 +442,32 @@ body.night-mode .alarm-danger {
     text-transform: uppercase; z-index: 1000;
     background: rgba(0,0,0,0.08);
     padding: 3px 8px; border-radius: 4px; letter-spacing: 1px;
+    user-select: none;
 }
-.online { color: #27ae60; opacity: 0.8; }
+.online { color: #27ae60; opacity: 0.9; }
 .offline { color: #c0392b; font-weight: bold; }
 
-.mini-compass { background: #f0f0f0; border-radius: 50%; border: 1.5px solid #ddd; }
-.mini-compass text:last-of-type { fill: #000 !important; opacity: 0.4; }
-#twd-boat-wrap path { fill: #000 !important; opacity: 0.3; }
-#twd-wind-chevron { stroke: #000 !important; }
+.mini-compass {
+    display: block;
+    overflow: visible;
+}
+.mini-compass .mini-boat-hull {
+    fill: #1e293b;
+    stroke: #ffffff;
+    stroke-width: 0.8px;
+    opacity: 1;
+}
+.mini-compass .mini-wind-chevron {
+    stroke: #0284c7;
+}
+
+body.night-mode .mini-compass-bezel { fill: #1c0000 !important; stroke: #4a0000 !important; }
+body.night-mode .mini-compass-dial { fill: #0e0000 !important; stroke: #3a0000 !important; }
+body.night-mode .mini-cardinal-n { fill: #ff2222 !important; }
+body.night-mode .mini-cardinal { fill: #880000 !important; }
+body.night-mode .mini-tick { stroke: #550000 !important; }
+body.night-mode .mini-boat-hull { fill: #330000 !important; stroke: #ff2222 !important; opacity: 1 !important; }
+body.night-mode #twd-wind-chevron { stroke: #ff4444 !important; }
 
 #wind-gauge circle[fill="#050505"] { fill: #fcfcfc; }
 #wind-gauge circle[fill="#121212"] { fill: #f0f0f0; }
@@ -419,37 +486,34 @@ rect[fill="#222"] { fill: #eee !important; }
 /* ==========================================================================
    10. NIGHT MODE (TACTICAL RED - ARCHITETTURA INTEGRALE)
    ========================================================================== */
-body.night-mode {
+body.night-mode,
+.night-mode #root,
+.night-mode .main-container {
     background-color: #000 !important;
     color: #ff3333 !important;
 }
 
-/* --- 10.1 STRUTTURA DEI CONTENITORI --- */
 .night-mode .data-box {
     background: rgba(20, 0, 0, 0.4) !important;
     border-color: #440000 !important;
     box-shadow: inset 0 0 15px rgba(255, 0, 0, 0.05) !important;
 }
 
-/* --- 10.2 TIPOGRAFIA E TESTI --- */
 .night-mode .label, .night-mode .unit, .night-mode .dual-label { color: #800000 !important; }
 .night-mode .value-large { color: #ff3333 !important; text-shadow: 0 0 8px rgba(255, 0, 0, 0.4) !important; }
 .night-mode .value { color: #ff3333; text-shadow: 0 0 8px rgba(255, 0, 0, 0.3); }
 .night-mode #status { background: rgba(255, 0, 0, 0.1) !important; color: #ff3333 !important; }
 
-/* --- 10.3 GRAFICI (STILE DINAMICO NIGHT MODE) --- */
 .night-mode .graph-wrapper {
-    background: rgba(10, 0, 0, 0.8) !important; /* Sfondo scurissimo per alto contrasto */
+    background: rgba(10, 0, 0, 0.8) !important;
     border: 1px solid #330000;
 }
 
-/* Griglia temporale (minuti e livelli): quasi impercettibile */
 .night-mode .sparkline line[stroke="rgba(0,0,0,0.12)"],
 .night-mode .sparkline line[stroke="rgba(0,0,0,0.08)"] {
-    stroke: rgba(255, 0, 0, 0.1) !important; /* Griglia temporale rossa soffusa */
+    stroke: rgba(255, 0, 0, 0.1) !important;
 }
 
-/* Regolazione della luminosità notturna per preservare i gradienti e i colori del JS */
 .night-mode .graph-wrapper svg {
     filter: brightness(0.6) contrast(1.2);
 }
@@ -462,7 +526,6 @@ body.night-mode {
 .night-mode .scale-labels { color: #800000 !important; }
 .night-mode .is-focused .scale-labels { color: #ff3333 !important; }
 
-/* --- 10.4 WIND GAUGE (STRUMENTO CENTRALE) --- */
 .night-mode #wind-gauge circle:not(#trend-gauge-cw):not(#trend-gauge-ccw) {
     fill: #000000 !important;
     stroke: #220000 !important;
@@ -472,32 +535,29 @@ body.night-mode {
     stroke: #330000 !important;
 }
 
-/* 1. STATO SPENTO/RIPOSO: Attivo solo se l'attributo fill originario è grigio (#bbb o #bbbbbb) */
 .night-mode #trend-gauge-cw[fill="#bbb"],
 .night-mode #trend-gauge-ccw[fill="#bbb"],
 .night-mode #trend-gauge-cw[fill="#bbbbbb"],
 .night-mode #trend-gauge-ccw[fill="#bbbbbb"] {
-    fill: #440000 !important; /* Rosso scurissimo soffuso */
+    fill: #440000 !important;
     stroke: none !important;
     filter: none !important;
     opacity: 0.3 !important;
 }
 
-/* 2. STATO ATTIVO VERDE (Buono/Sotto-vento): Attivo solo se JS imposta il colore di lift (#27ae60) */
 .night-mode #trend-gauge-cw[fill="#27ae60"],
 .night-mode #trend-gauge-ccw[fill="#27ae60"] {
-    fill: #00C851 !important; /* Verde smeraldo brillante */
+    fill: #00C851 !important;
     stroke: none !important;
     filter: drop-shadow(0 0 5px #00C851) !important;
     opacity: 1 !important;
 }
 
-/* 3. STATO ATTIVO ROSSO (Scarso/Sopra-vento o strambata): Attivo se JS imposta il colore di header (#c0392b) o se in allarme strambata */
 .night-mode #trend-gauge-cw[fill="#c0392b"],
 .night-mode #trend-gauge-ccw[fill="#c0392b"],
 .night-mode #trend-gauge-cw.is-gybing,
 .night-mode #trend-gauge-ccw.is-gybing {
-    fill: #ff3b30 !important; /* Rosso brillante */
+    fill: #ff3b30 !important;
     stroke: none !important;
     filter: drop-shadow(0 0 5px #ff3b30) !important;
     opacity: 1 !important;
@@ -516,19 +576,18 @@ body.night-mode {
 .night-mode #twa-pointer path { fill: #800000 !important; stroke: #000 !important; }
 .night-mode #track-pointer path { fill: #ff3333 !important; stroke: none !important; }
 
-/* --- 10.5 WIDGETS ACCESSORI --- */
 .night-mode #leeway-val { fill: #ff3333 !important; color: #ff3333 !important; }
 .night-mode rect[fill="url(#leeway-grad)"] { fill: url(#leeway-night-grad) !important; }
 .night-mode rect[fill="#eee"], .night-mode rect[fill="#222"] { fill: #0a0000 !important; stroke: #330000 !important; }
 .night-mode g[stroke="#555"] line { stroke: #440000 !important; }
 .night-mode g[fill="#555"] text { fill: #800000 !important; }
-.night-mode .mini-compass { border-color: #330000 !important; background: #000 !important; }
+.night-mode .mini-compass { border: none !important; background: transparent !important; }
+.night-mode .mini-compass .mini-compass-dial { fill: #000 !important; stroke: #330000 !important; }
 .night-mode .mini-compass text { fill: #800000 !important; }
 .night-mode .mini-compass text:last-of-type { fill: #800000 !important; opacity: 1; }
 .night-mode #twd-boat-wrap path { fill: #ff3333 !important; opacity: 0.4 !important; }
 .night-mode #twd-arrow #twd-wind-chevron { stroke: #ff3333 !important; }
 
-/* --- 10.6 LOGICA RED-SHIFT TREND (PULITA) --- */
 .night-mode circle[fill="#bbb"]:not(#trend-gauge-cw):not(#trend-gauge-ccw), .night-mode circle[fill="#bbbbbb"]:not(#trend-gauge-cw):not(#trend-gauge-ccw) {
     fill: #440000 !important;
 }
@@ -548,8 +607,6 @@ body.night-mode {
 .is-gybing { opacity: 1 !important; animation: none !important; filter: drop-shadow(0 0 8px #ff0000) !important; }
 .unstable-data { animation: blink-trend 1.5s infinite ease-in-out; color: #e67e22 !important; }
 
-/* --- CORREZIONE VISIBILITÀ COLORI BASE SCURI IN NIGHT MODE --- */
-/* Il Navy Slate (#2c3e50) diventa nero con il filtro notturno. Lo schiariamo a un Grigio-Azzurro. */
 .night-mode .graph-wrapper line[style*="#2c3e50"] {
     stroke: #6c8ea0 !important;
 }
@@ -557,7 +614,6 @@ body.night-mode {
     fill: #6c8ea0 !important;
 }
 
-/* Opzionale: Diamo una piccola "spinta" anche all'azzurro della Depth per bilanciarlo */
 .night-mode .graph-wrapper line[style*="#0088cc"] {
     stroke: #33aadd !important;
 }
@@ -576,7 +632,6 @@ body.night-mode {
     transition: opacity 0.2s ease-in-out;
 }
 
-/* --- OVERRIDE NIGHT MODE PER IL WIND RADAR --- */
 .night-mode #wind-radar circle:not(.is-trending) {
     fill: #000000 !important;
     stroke: #220000 !important;
@@ -602,22 +657,6 @@ body.night-mode {
     stroke: #440000 !important;
 }
 
-/* ==========================================================================
-   13. SMORZAMENTO FLUIDO AGHI A 60FPS (DAMPING HARDWARE) non utilizzato consuma troppa cpu
-   ==========================================================================
-
- Applichiamo la transizione fluida a tutti i puntatori mantenendo i perni nativi dell'SVG
-#awa-pointer, #twa-pointer, #track-pointer, #twd-arrow, #twd-boat-wrap {
-    transition: transform 0.9s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-
-*/
-
-/* ==========================================================================
-   14. POSIZIONAMENTO SOVRAPPOSTO LAYERED COMPASS (0% CARICO CPU)
-   ========================================================================== */
-
-/* Contenitore padre relativo */
 .wind-gauge-container {
     position: relative;
     width: 100%;
@@ -626,15 +665,4 @@ body.night-mode {
     display: flex;
     align-items: center;
     justify-content: center;
-}
-
-/* Sovrapposizione assoluta perfetta del livello lancette sopra lo sfondo */
-#wind-gauge-pointers {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    pointer-events: none; /* Permette al tocco del mouse di passare sotto al centro interattivo */
 }
