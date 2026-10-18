@@ -668,7 +668,11 @@ export function useDashboard() {
             ws?.send(JSON.stringify(subscriptionPayload));
           } catch (e) {}
 
-          // Se presente, recupera lo storico reale mantenuto in RAM dal plugin server Signal K
+          fetchHistory();
+        };
+
+        const fetchHistory = () => {
+          // Recupera lo storico e i buffer rolling mantenuti in RAM dal server Signal K
           fetch('/rotevista-history')
             .then(res => (res.ok ? res.json() : null))
             .then(data => {
@@ -687,6 +691,38 @@ export function useDashboard() {
                 if (data.futureForecast) {
                   setFutureForecast(data.futureForecast);
                 }
+
+                // Idratazione istantanea dei buffer rolling per azzerare il warm-up iniziale
+                if (data.rollingAngles) {
+                  (['hdg', 'cog', 'twa', 'awa', 'twd'] as const).forEach(key => {
+                    const arr = data.rollingAngles[key];
+                    if (Array.isArray(arr) && arr.length > 0) {
+                      const mapped: AngleBufferItem[] = arr.map((item: any) => ({
+                        val: item.val,
+                        time: item.time,
+                        sin: Math.sin(item.val),
+                        cos: Math.cos(item.val),
+                      }));
+                      store.longBuf[key] = mapped;
+                      store.smoothBuf[key] = [...mapped];
+                    }
+                  });
+                }
+
+                // Idratazione dello storico lungo TWD per i pallini di rotazione oraria (°/h)
+                if (Array.isArray(data.twd) && data.twd.length > 0) {
+                  const recentTimes = new Set((store.longBuf.twd || []).map(p => p.time));
+                  const histItems: AngleBufferItem[] = data.twd
+                    .filter((p: any) => !recentTimes.has(p.time))
+                    .map((p: any) => ({
+                      val: p.val,
+                      time: p.time,
+                      sin: Math.sin(p.val),
+                      cos: Math.cos(p.val),
+                    }));
+                  store.longBuf.twd = [...histItems, ...(store.longBuf.twd || [])].sort((a, b) => a.time - b.time);
+                }
+
                 if (hasHistory) {
                   setHistoriesState({
                     stw: [...store.histories.stw],
@@ -762,10 +798,46 @@ export function useDashboard() {
       }
     }, 4000);
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !isDisposed) {
+        if (storeRef.current.hasEverConnectedToSignalK) {
+          fetch('/rotevista-history')
+            .then(res => (res.ok ? res.json() : null))
+            .then(data => {
+              if (data && !storeRef.current.isSimulating) {
+                const store = storeRef.current;
+                if (data.rollingAngles) {
+                  (['hdg', 'cog', 'twa', 'awa', 'twd'] as const).forEach(key => {
+                    const arr = data.rollingAngles[key];
+                    if (Array.isArray(arr) && arr.length > 0) {
+                      const mapped: AngleBufferItem[] = arr.map((item: any) => ({
+                        val: item.val,
+                        time: item.time,
+                        sin: Math.sin(item.val),
+                        cos: Math.cos(item.val),
+                      }));
+                      store.longBuf[key] = mapped;
+                      store.smoothBuf[key] = [...mapped];
+                    }
+                  });
+                }
+              }
+            })
+            .catch(() => {});
+
+          if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+            connectWs();
+          }
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     connectWs();
 
     return () => {
       isDisposed = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (ws) ws.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (handshakeTimeout) clearTimeout(handshakeTimeout);

@@ -39,6 +39,10 @@ module.exports = function (app) {
     let lastNativeTwsTime = 0;
     let lastNativeTwdTime = 0;
     let lastNativeHeadingTrueTime = 0; // Traccia la presenza di bussola vera nativa
+    let lastNativeTwaTime = 0;         // Traccia la presenza di TWA nativo
+    
+    // Buffer rolling ad alta frequenza (1Hz, ultimi 60s) per cold-start rapido dei valori medi
+    let rollingAngles = { hdg: [], cog: [], twa: [], awa: [], twd: [] };
     
     // Monitoraggio dello scorrere dei blocchi da 30 minuti
     let lastFrozen30mSlot = 0;
@@ -70,6 +74,7 @@ module.exports = function (app) {
                 // Costruiamo un pacchetto unificato che unisce i grafici classici, i dati radar e il futuro
                 const responseData = {
                     ...histories,
+                    rollingAngles: rollingAngles,
                     windRadarSlots: windRadarSlots,
                     futureForecast: futureForecast,
                     'navigation.position': raw['navigation.position'] // Chirurgico: Espone le coordinate GPS correnti per la diagnostica e il radar
@@ -105,6 +110,7 @@ module.exports = function (app) {
                 { path: 'environment.wind.speedApparent', minPeriod: 1000 },
                 { path: 'environment.wind.angleApparent', minPeriod: 1000 },
                 { path: 'environment.wind.speedTrue', minPeriod: 1000 },
+                { path: 'environment.wind.angleTrueWater', minPeriod: 1000 },
                 { path: 'environment.wind.directionTrue', minPeriod: 1000 },
                 { path: 'navigation.headingTrue', minPeriod: 1000 },
                 { path: 'navigation.headingMagnetic', minPeriod: 1000 },
@@ -257,34 +263,44 @@ module.exports = function (app) {
             manageHistory('aws', smoothedVal * 1.94384);
         }
         else if (path === 'environment.wind.angleApparent') {
-            // Già gestito e normalizzato dal filtro passa-basso superiore
+            pushRollingAngle('awa', smoothedVal, now);
+        }
+        else if (path === 'environment.wind.angleTrueWater') {
+            lastNativeTwaTime = now;
+            pushRollingAngle('twa', smoothedVal, now);
         }
         else if (path === 'environment.wind.speedTrue') {
-                lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
-                manageHistory('tws', smoothedVal * 1.94384);
+            lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
+            manageHistory('tws', smoothedVal * 1.94384);
+        }
+        else if (path === 'navigation.headingTrue') {
+            lastNativeHeadingTrueTime = now; // Rilevata prua vera nativa dalla rete NMEA
+            pushRollingAngle('hdg', smoothedVal, now);
+        }
+        // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
+        else if (path === 'navigation.headingMagnetic') {
+            const hasNativeTrueHdg = (now - lastNativeHeadingTrueTime < 5000);
+            if (!hasNativeTrueHdg) {
+                const variation = raw['navigation.magneticVariation'] || 0;
+                const trueHdg = (smoothedVal + variation + 2 * Math.PI) % (2 * Math.PI);
+                raw['navigation.headingTrue'] = trueHdg;
+                pushRollingAngle('hdg', trueHdg, now);
             }
-            else if (path === 'navigation.headingTrue') {
-                lastNativeHeadingTrueTime = now; // Rilevata prua vera nativa dalla rete NMEA
-            }
-            // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
-            else if (path === 'navigation.headingMagnetic') {
-                const hasNativeTrueHdg = (now - lastNativeHeadingTrueTime < 5000);
-                if (!hasNativeTrueHdg) {
-                    const variation = raw['navigation.magneticVariation'] || 0;
-                    raw['navigation.headingTrue'] = (smoothedVal + variation + 2 * Math.PI) % (2 * Math.PI);
-                }
-            }
-            else if (path === 'environment.wind.directionTrue') {
+        }
+        else if (path === 'environment.wind.directionTrue') {
             lastNativeTwdTime = now; // Rilevato TWD nativo della centralina!
             manageHistory('twd', smoothedVal);
+            pushRollingAngle('twd', smoothedVal, now);
         }
         else if (path === 'navigation.courseOverGroundTrue') {
+            pushRollingAngle('cog', smoothedVal, now);
             // Se non è installata alcuna bussola fisica sulla rete e la barca è in movimento stabile (> 1.5 nodi),
             // emuliamo l'Heading usando il COG per consentire il calcolo del TWD e della bussola radar.
             const hasCompass = raw['navigation.headingTrue'] !== undefined || raw['navigation.headingMagnetic'] !== undefined;
             const sog = raw['navigation.speedOverGround'] || 0;
             if (!hasCompass && sog > 0.77) { // 0.77 m/s = 1.5 nodi
                 raw['navigation.headingTrue'] = smoothedVal;
+                pushRollingAngle('hdg', smoothedVal, now);
             }
         }
 
@@ -327,17 +343,51 @@ module.exports = function (app) {
             const vmg = Math.abs(speedKtsRef * Math.cos(twa));
             manageHistory('vmg', vmg);
 
+            if (now - lastNativeTwaTime > 5000) {
+                pushRollingAngle('twa', twa, now);
+            }
+
             // Calcolo TWD stabile (Prua + TWA)
             if (hdg !== undefined && (now - lastNativeTwdTime > 5000)) {
                 const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
                 manageHistory('twd', twd);
+                pushRollingAngle('twd', twd, now);
             }
         }
     }
     
     /**
-        * manageHistory: Versione Server-side dell'aggregatore matematico tattico
-        */
+     * pushRollingAngle: Mantiene un buffer rolling 1Hz degli ultimi 60 secondi
+     * per gli angoli di navigazione (HDG, COG, TWA, AWA).
+     * Garantisce inserimento O(1) e potatura deterministica (max 65 campioni).
+     */
+    function pushRollingAngle(type, val, time) {
+        if (val === undefined || val === null || !isFinite(val)) return;
+        if (!rollingAngles[type]) rollingAngles[type] = [];
+        const buf = rollingAngles[type];
+
+        // Limita a max 1Hz per canale (evita duplicati se arrivano più pacchetti ravvicinati)
+        if (buf.length > 0 && (time - buf[buf.length - 1].time < 800)) {
+            return;
+        }
+
+        buf.push({ val: Number(val.toFixed(4)), time: time });
+
+        // Calcola la finestra richiesta in base alle configurazioni tattiche (almeno 60s o il doppio di longWindow)
+        const longWindow = (currentConfig.averaging && currentConfig.averaging.longWindow) ? currentConfig.averaging.longWindow : 30000;
+        const windowMs = Math.max(60000, longWindow * 2);
+        const maxSamples = Math.ceil(windowMs / 1000) + 5;
+
+        // Conserva solo i campioni necessari per la finestra di calcolo ed evita accumuli anomali
+        const cutoff = time - windowMs;
+        while (buf.length > 0 && (buf[0].time < cutoff || buf.length > maxSamples)) {
+            buf.shift();
+        }
+    }
+
+    /**
+     * manageHistory: Versione Server-side dell'aggregatore matematico tattico
+     */
     function manageHistory(type, value) {
         if (value === undefined || value === null || !isFinite(value)) return;
 
@@ -935,6 +985,15 @@ module.exports = function (app) {
             }
             if (pruned) {
                 app.debug(`🧹 [Server RAM] Pruned stale points for "${type}" due to instrument silence.`);
+            }
+        }
+
+        const longWindow = (currentConfig.averaging && currentConfig.averaging.longWindow) ? currentConfig.averaging.longWindow : 30000;
+        const maxRollingMs = Math.max(60000, longWindow * 2);
+
+        for (let type in rollingAngles) {
+            while (rollingAngles[type].length > 0 && (now - rollingAngles[type][0].time) > maxRollingMs) {
+                rollingAngles[type].shift();
             }
         }
     }
