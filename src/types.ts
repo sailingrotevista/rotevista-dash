@@ -127,6 +127,7 @@ export interface AisTarget {
   aisClass?: string;
   flag?: string;
   inCluster?: boolean;
+  clusterId?: string | null;
   trail?: AisTrailPoint[];
 }
 
@@ -134,8 +135,10 @@ export interface HarborCluster {
   id: string;
   lat: number;
   lon: number;
+  center?: [number, number];
   dist: number;
   count: number;
   hull: Array<[number, number]>;
+  flags?: Record<string, number>;
 }
 

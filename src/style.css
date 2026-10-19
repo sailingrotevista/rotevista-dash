@@ -1377,10 +1377,22 @@ body.night-mode .ais-tool-btn.btn-active,
     color: #0f172a;
 }
 
-/* Card Body - Target List (Screenshot 1) */
+/* Card List Wrapper & Body - Target List (Screenshot 1) */
+.ais-card-list {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
 .ais-card-body {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
     padding: 12px;
     display: flex;
     flex-direction: column;
@@ -1523,6 +1535,9 @@ body.night-mode .ais-tool-btn.btn-active,
 .ais-card-detail {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .ais-detail-header {

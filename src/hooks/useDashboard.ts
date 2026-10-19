@@ -24,6 +24,7 @@ import {
   playBingBing,
   playGybeAlarm,
 } from '../utils/math';
+import { MARINA_DI_RAGUSA_SIM_DATA } from '../utils/marinaDiRagusaSimData';
 
 const DEFAULT_CONFIG: AppConfig = {
   alarms: { depthDanger: 2.5, depthWarning: 3.5 },
@@ -98,8 +99,8 @@ export function useDashboard() {
   const [topThreat, setTopThreat] = useState<AisTarget | null>(null);
   const [selectedAisTargetId, setSelectedAisTargetId] = useState<string | null>(null);
   const [snoozedThreats, setSnoozedThreats] = useState<Record<string, { until: number; initialRisk: string }>>({});
-  const [ownShipPosition, setOwnShipPosition] = useState<{ lat: number; lon: number }>({ lat: 43.5528, lon: 10.3015 });
-  const [ownShipCourse, setOwnShipCourse] = useState<{ hdg: number; cog: number; sog: number }>({ hdg: 45, cog: 45, sog: 5.2 });
+  const [ownShipPosition, setOwnShipPosition] = useState<{ lat: number; lon: number }>({ lat: 36.780956, lon: 14.545439 });
+  const [ownShipCourse, setOwnShipCourse] = useState<{ hdg: number; cog: number; sog: number }>({ hdg: 45, cog: 45, sog: 0.0 });
 
   const snoozeThreat = useCallback((targetId: string) => {
     setTopThreat(currentTop => {
@@ -644,6 +645,11 @@ export function useDashboard() {
         startTime: Date.now(),
       };
 
+      let simTargets = MARINA_DI_RAGUSA_SIM_DATA.targets.map(t => ({
+        ...t,
+        trail: t.trail ? [...t.trail] : [],
+      }));
+
       if (simTimer) clearInterval(simTimer);
       simTimer = setInterval(() => {
         const elapsed = (Date.now() - sim.startTime) / 1000;
@@ -687,100 +693,51 @@ export function useDashboard() {
         const leewaySimDeg = Math.sin(twaRad) * 2.8 + (Math.random() - 0.5) * 0.15;
         const simCog = (sim.hdg - leewaySimDeg + 360) % 360;
         processIncomingData('navigation.courseOverGroundTrue', degToRad(simCog));
+
+        // Avanzamento cinematico bersagli AIS in movimento
+        const myLat = MARINA_DI_RAGUSA_SIM_DATA.myGps.lat;
+        const myLon = MARINA_DI_RAGUSA_SIM_DATA.myGps.lon;
+
+        simTargets = simTargets.map(t => {
+          if (!t.isMoving || t.sog < 0.3) return t;
+
+          const cogRad = degToRad(t.cog || 0);
+          const distStepMeters = (t.sog * 1852) / 3600; // spostamento per 1s
+          const dLat = (distStepMeters * Math.cos(cogRad)) / 111139;
+          const dLon = (distStepMeters * Math.sin(cogRad)) / (111139 * Math.cos(degToRad(t.lat)));
+
+          const newLat = t.lat + dLat;
+          const newLon = t.lon + dLon;
+
+          const currentTrail = t.trail ? [...t.trail] : [];
+          const lastPt = currentTrail[currentTrail.length - 1];
+          if (!lastPt || Math.abs(lastPt.lat - newLat) > 0.00001 || Math.abs(lastPt.lon - newLon) > 0.00001) {
+            currentTrail.push({ lat: newLat, lon: newLon });
+            if (currentTrail.length > 25) currentTrail.shift();
+          }
+
+          const dx = (newLon - myLon) * 111139 * Math.cos(degToRad((myLat + newLat) / 2));
+          const dy = (newLat - myLat) * 111139;
+          const newDist = Math.round(Math.sqrt(dx * dx + dy * dy));
+
+          return {
+            ...t,
+            lat: newLat,
+            lon: newLon,
+            dist: newDist,
+            age: 0,
+            trail: currentTrail,
+          };
+        });
+
+        setAisTargets([...simTargets]);
       }, 1000);
 
-      // Popola bersagli AIS dimostrativi per testing offline
-      const simTargets: AisTarget[] = [
-        {
-          id: 'mmsi:247000111',
-          name: 'GRIMALDI LINES',
-          type: 60,
-          lat: 43.565,
-          lon: 10.32,
-          cog: 215,
-          sog: 18.2,
-          dist: 2200,
-          isAnchored: false,
-          isMoving: true,
-          risk: 'ORANGE',
-          riskMsg: 'ATTENZIONE INCROCIO',
-          cpa: 680,
-          tcpa: 5.4,
-          crossDir: 'Passa a Prua\n👉 DAI PRECEDENZA (Nave commerciale)',
-          crossOutcome: 'Passa a Prua',
-          crossRule: 'DAI PRECEDENZA (Nave commerciale)',
-          sightingTxt: '35° a Dritta (ore 1)',
-          age: 4,
-          callsign: 'IBKL',
-          length: 195,
-          beam: 26,
-          draft: 6.8,
-          destination: 'LIVORNO',
-          eta: '18:30',
-          aisClass: 'A',
-          flag: '🇮🇹',
-        },
-        {
-          id: 'mmsi:247999222',
-          name: 'OCEANIS 45',
-          type: 36,
-          lat: 43.548,
-          lon: 10.292,
-          cog: 0,
-          sog: 0.1,
-          dist: 450,
-          isAnchored: true,
-          isMoving: false,
-          risk: 'GREY',
-          riskMsg: '',
-          cpa: null,
-          tcpa: null,
-          crossDir: "All'ancora",
-          crossOutcome: "All'ancora",
-          crossRule: '',
-          sightingTxt: 'Al Traverso di Sinistra (ore 9)',
-          age: 12,
-          callsign: 'IZ458',
-          length: 13.8,
-          beam: 4.5,
-          draft: 2.1,
-          destination: 'CALA DE MEDICI',
-          eta: '',
-          aisClass: 'B',
-          flag: '🇮🇹',
-        },
-        {
-          id: 'mmsi:247333444',
-          name: 'MAESTRALE II',
-          type: 30,
-          lat: 43.57,
-          lon: 10.285,
-          cog: 120,
-          sog: 3.5,
-          dist: 1600,
-          isAnchored: false,
-          isMoving: true,
-          risk: 'GREY',
-          riskMsg: '',
-          cpa: 1100,
-          tcpa: 12.0,
-          crossDir: 'Sfila a Sinistra',
-          crossOutcome: 'Sfila a Sinistra',
-          crossRule: 'Peschereccio in pesca',
-          sightingTxt: '60° a Sinistra (ore 10)',
-          age: 8,
-          callsign: 'IM772',
-          length: 22,
-          beam: 6,
-          draft: 2.8,
-          destination: 'PESCA',
-          eta: '',
-          aisClass: 'B',
-          flag: '🇮🇹',
-        },
-      ];
+      // Popola bersagli AIS e cluster con i bersagli reali di Marina di Ragusa
+      setOwnShipPosition(MARINA_DI_RAGUSA_SIM_DATA.myGps);
       setAisTargets(simTargets);
-      setTopThreat(simTargets[0]);
+      setHarborClusters(MARINA_DI_RAGUSA_SIM_DATA.harborClusters);
+      setTopThreat(null);
     };
 
     let aisPollInterval: ReturnType<typeof setInterval> | null = null;

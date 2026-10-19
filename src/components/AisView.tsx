@@ -85,12 +85,21 @@ export const AisView: React.FC<AisViewProps> = ({
   const clustersLayerRef = useRef<L.LayerGroup | null>(null);
   const ownShipMarkerRef = useRef<L.Marker | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const listBodyRef = useRef<HTMLDivElement | null>(null);
+  const listScrollTopRef = useRef<number>(0);
+  const cameraSnapshotRef = useRef<{ center: L.LatLng; zoom: number; followMode: FollowMode } | null>(null);
+  const onSelectTargetRef = useRef(onSelectTarget);
+  useEffect(() => {
+    onSelectTargetRef.current = onSelectTarget;
+  }, [onSelectTarget]);
 
   const [followMode, setFollowMode] = useState<FollowMode>('own');
+  const [mapZoom, setMapZoom] = useState<number>(16);
   const [showListDrawer, setShowListDrawer] = useState<boolean>(false);
   const [selectedTarget, setSelectedTarget] = useState<AisTarget | null>(null);
   const [targetDetailTab, setTargetDetailTab] = useState<'telemetry' | 'info'>('telemetry');
   const [copiedMmsi, setCopiedMmsi] = useState<boolean>(false);
+  const [ackedLabels, setAckedLabels] = useState<Record<string, string>>({});
 
   // Sync selectedTarget with selectedTargetId or targets updates
   useEffect(() => {
@@ -108,7 +117,7 @@ export const AisView: React.FC<AisViewProps> = ({
 
     const map = L.map(mapContainerRef.current, {
       center: [ownShipPosition.lat, ownShipPosition.lon],
-      zoom: 13,
+      zoom: 16,
       zoomControl: false,
       attributionControl: false,
     });
@@ -142,6 +151,14 @@ export const AisView: React.FC<AisViewProps> = ({
       setFollowMode('none');
     });
 
+    map.on('click', () => {
+      setFollowMode('none');
+    });
+
+    map.on('zoomend', () => {
+      setMapZoom(Math.round(map.getZoom()));
+    });
+
     mapRef.current = map;
 
     return () => {
@@ -162,8 +179,7 @@ export const AisView: React.FC<AisViewProps> = ({
     }
   }, [isNightMode]);
 
-  // Calcola il centro geografico corretto per posizionare un punto (lat, lon)
-  // esattamente nel centro della porzione di schermo libera a sinistra della card
+  // Calcola il centro geografico corretto adattandosi a Desktop (Orizzontale) e Mobile (Verticale)
   const getOffsetCenter = useCallback(
     (latLng: [number, number], zoomOverride?: number): L.LatLng => {
       if (!mapRef.current) return L.latLng(latLng[0], latLng[1]);
@@ -174,14 +190,23 @@ export const AisView: React.FC<AisViewProps> = ({
 
       const zoom = zoomOverride !== undefined ? zoomOverride : mapRef.current.getZoom();
       const rect = cardRef.current?.getBoundingClientRect();
-      const cardLeft = rect ? rect.left : Math.max(80, window.innerWidth - (360 + 68));
-      // Centro della porzione libera a sinistra: cardLeft / 2
-      // Centro dello schermo: window.innerWidth / 2
-      // Offset pixel da sommare alle coordinate proiettate per centrare nella zona libera:
-      const pixelOffsetX = Math.max(0, (window.innerWidth - cardLeft) / 2);
+      const isMobilePortrait = window.innerWidth < 640 || window.innerWidth < window.innerHeight;
+
+      let pixelOffsetX = 0;
+      let pixelOffsetY = 0;
+
+      if (isMobilePortrait) {
+        // Mobile Portrait: la scheda è in alto, posiziona il target al centro della fascia libera inferiore
+        const cardBottom = rect ? rect.bottom : 320;
+        pixelOffsetY = -Math.max(0, cardBottom / 2);
+      } else {
+        // Desktop / Landscape: la scheda è a destra, posiziona il target al centro della fascia libera sinistra
+        const cardLeft = rect ? rect.left : Math.max(80, window.innerWidth - (360 + 68));
+        pixelOffsetX = Math.max(0, (window.innerWidth - cardLeft) / 2);
+      }
 
       const targetPoint = mapRef.current.project(latLng, zoom);
-      const offsetCenterPoint = targetPoint.add([pixelOffsetX, 0]);
+      const offsetCenterPoint = targetPoint.add([pixelOffsetX, pixelOffsetY]);
       return mapRef.current.unproject(offsetCenterPoint, zoom);
     },
     [showListDrawer, Boolean(selectedTarget)]
@@ -191,12 +216,39 @@ export const AisView: React.FC<AisViewProps> = ({
   const handleCenterOnTarget = useCallback(
     (target: AisTarget) => {
       if (!mapRef.current) return;
+      if (!cameraSnapshotRef.current) {
+        cameraSnapshotRef.current = {
+          center: mapRef.current.getCenter(),
+          zoom: mapRef.current.getZoom(),
+          followMode,
+        };
+      }
       setFollowMode('target');
       const targetCenter = getOffsetCenter([target.lat, target.lon]);
       mapRef.current.panTo(targetCenter, { animate: true });
     },
-    [getOffsetCenter]
+    [getOffsetCenter, followMode]
   );
+
+  // Ripristina inquadratura mappa e posizione scroll lista al ritorno dal dettaglio
+  const handleReturnToList = useCallback(() => {
+    setSelectedTarget(null);
+    onSelectTarget(null);
+    setShowListDrawer(true);
+    if (cameraSnapshotRef.current && mapRef.current) {
+      const snap = cameraSnapshotRef.current;
+      cameraSnapshotRef.current = null;
+      setFollowMode(snap.followMode);
+      mapRef.current.setView(snap.center, snap.zoom, { animate: true });
+    } else {
+      setFollowMode('own');
+    }
+    requestAnimationFrame(() => {
+      if (listBodyRef.current) {
+        listBodyRef.current.scrollTop = listScrollTopRef.current;
+      }
+    });
+  }, [onSelectTarget]);
 
   // Center on Own Ship & Contextual Standard Zoom
   const handleCenterOnOwnShip = useCallback(() => {
@@ -213,77 +265,134 @@ export const AisView: React.FC<AisViewProps> = ({
       setFollowMode('own');
       mapRef.current.panTo(targetCenter, { animate: true });
     } else {
-      // 2° Click: zoom standard contestuale alla velocità (fermi/ancora: 16, navigazione: 13)
-      const isStoppedOrAnchored = ownShipCourse.sog < 1.0;
+      // 2° Click: zoom standard contestuale alla velocità o presenza in porto (fermi/porto: 16, navigazione: 13)
+      const isInHarbor = harborClusters.some(c => c.dist < 500);
+      const isStoppedOrAnchored = ownShipCourse.sog < 1.0 || isInHarbor;
       const standardZoom = isStoppedOrAnchored ? 16 : 13;
       const targetZoom = currentZoom === standardZoom ? (standardZoom === 16 ? 13 : 16) : standardZoom;
       const newTargetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], targetZoom);
       mapRef.current.setView(newTargetCenter, targetZoom, { animate: true });
     }
-  }, [ownShipPosition, ownShipCourse, followMode, getOffsetCenter]);
+  }, [ownShipPosition, ownShipCourse, harborClusters, followMode, getOffsetCenter]);
 
-  // Follow Mode: dinamico per propria barca ('own') o bersaglio attivo ('target')
+  // Follow Mode: progressivo con soglia di movimento (~20px) per evitare traslazioni ad ogni refresh
+  const lastFollowPosRef = useRef<{ lat: number; lon: number; mode: FollowMode; targetId?: string } | null>(null);
+
   useEffect(() => {
-    if (!mapRef.current || followMode === 'none') return;
-    if (followMode === 'own') {
-      const targetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon]);
-      mapRef.current.panTo(targetCenter, { animate: true });
-    } else if (followMode === 'target' && selectedTarget) {
-      const targetCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon]);
-      mapRef.current.panTo(targetCenter, { animate: true });
+    if (!mapRef.current || followMode === 'none') {
+      lastFollowPosRef.current = null;
+      return;
     }
-  }, [ownShipPosition, selectedTarget, followMode, getOffsetCenter]);
 
-  // Seleziona e insegue il bersaglio quando viene passato o modificato selectedTargetId dall'esterno
+    const pos = followMode === 'own'
+      ? [ownShipPosition.lat, ownShipPosition.lon] as [number, number]
+      : selectedTarget
+        ? [selectedTarget.lat, selectedTarget.lon] as [number, number]
+        : null;
+
+    if (!pos) return;
+
+    const map = mapRef.current;
+    const targetCenter = getOffsetCenter(pos);
+    const modeKey = followMode;
+    const currentTargetId = selectedTarget?.id;
+
+    const hasModeChanged =
+      !lastFollowPosRef.current ||
+      lastFollowPosRef.current.mode !== modeKey ||
+      lastFollowPosRef.current.targetId !== currentTargetId;
+
+    if (hasModeChanged) {
+      lastFollowPosRef.current = { lat: pos[0], lon: pos[1], mode: modeKey, targetId: currentTargetId };
+      map.panTo(targetCenter, { animate: true });
+      return;
+    }
+
+    // Calcola la distanza in pixel accumulata rispetto all'ultima posizione in cui la mappa è stata centrata
+    const lastPt = map.latLngToContainerPoint([lastFollowPosRef.current.lat, lastFollowPosRef.current.lon]);
+    const currentPt = map.latLngToContainerPoint(pos);
+    const pixelDistance = Math.hypot(currentPt.x - lastPt.x, currentPt.y - lastPt.y);
+
+    // Soglia di movimento sulla mappa (100px): trasla lo sfondo solo quando lo scostamento supera i 100 pixel
+    if (pixelDistance > 100) {
+      lastFollowPosRef.current = { lat: pos[0], lon: pos[1], mode: modeKey, targetId: currentTargetId };
+      map.panTo(targetCenter, { animate: true, duration: 2.0, easeLinearity: 0.25 });
+    }
+  }, [ownShipPosition.lat, ownShipPosition.lon, selectedTarget?.lat, selectedTarget?.lon, followMode, selectedTarget?.id, getOffsetCenter]);
+
+  // Seleziona e insegue il bersaglio unicamente quando cambia selectedTargetId dall'esterno
+  const prevSelectedTargetIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (selectedTargetId) {
+    if (selectedTargetId && selectedTargetId !== prevSelectedTargetIdRef.current) {
       const found = targets.find(t => t.id === selectedTargetId);
       if (found) {
         handleCenterOnTarget(found);
       }
     }
-  }, [selectedTargetId, handleCenterOnTarget]);
+    prevSelectedTargetIdRef.current = selectedTargetId;
+  }, [selectedTargetId, targets, handleCenterOnTarget]);
 
-  // Render Range Rings (0.5 NM, 1.0 NM, 2.0 NM, 5.0 NM) around own ship
+  // Render Dynamic Range Rings (scaling from 15m at zoom 19+ up to unlimited NM on zoom out)
   useEffect(() => {
     if (!ringsLayerRef.current) return;
     ringsLayerRef.current.clearLayers();
 
-    const center: [number, number] = [ownShipPosition.lat, ownShipPosition.lon];
-    const ringRanges = [
-      { radiusMeters: 926, label: '0.5 NM' },
-      { radiusMeters: 1852, label: '1.0 NM' },
-      { radiusMeters: 3704, label: '2.0 NM' },
-      { radiusMeters: 9260, label: '5.0 NM' },
-    ];
+    const center: [number, number] = selectedTarget
+      ? [selectedTarget.lat, selectedTarget.lon]
+      : [ownShipPosition.lat, ownShipPosition.lon];
 
-    const ringColor = isNightMode ? '#445566' : '#778899';
+    let ringRanges: Array<{ radiusMeters: number; label: string }> = [];
+    if (mapZoom >= 19) {
+      ringRanges = [{ radiusMeters: 15, label: '15m' }, { radiusMeters: 30, label: '30m' }, { radiusMeters: 45, label: '45m' }];
+    } else if (mapZoom === 18) {
+      ringRanges = [{ radiusMeters: 25, label: '25m' }, { radiusMeters: 50, label: '50m' }, { radiusMeters: 75, label: '75m' }];
+    } else if (mapZoom === 17) {
+      ringRanges = [{ radiusMeters: 50, label: '50m' }, { radiusMeters: 100, label: '100m' }, { radiusMeters: 150, label: '150m' }];
+    } else if (mapZoom === 16) {
+      ringRanges = [{ radiusMeters: 100, label: '100m' }, { radiusMeters: 200, label: '200m' }, { radiusMeters: 300, label: '300m' }];
+    } else if (mapZoom === 15) {
+      ringRanges = [{ radiusMeters: 250, label: '250m' }, { radiusMeters: 500, label: '500m' }, { radiusMeters: 750, label: '750m' }];
+    } else if (mapZoom === 14) {
+      ringRanges = [{ radiusMeters: 500, label: '500m' }, { radiusMeters: 926, label: '0.5 NM' }, { radiusMeters: 1852, label: '1 NM' }];
+    } else if (mapZoom === 13) {
+      ringRanges = [{ radiusMeters: 926, label: '0.5 NM' }, { radiusMeters: 1852, label: '1 NM' }, { radiusMeters: 3704, label: '2 NM' }];
+    } else if (mapZoom === 12) {
+      ringRanges = [{ radiusMeters: 1852, label: '1 NM' }, { radiusMeters: 3704, label: '2 NM' }, { radiusMeters: 9260, label: '5 NM' }];
+    } else {
+      const baseNm = Math.round(2 * Math.pow(2, 11 - Math.max(2, mapZoom)));
+      ringRanges = [baseNm, baseNm * 2, baseNm * 4].map(nm => ({
+        radiusMeters: nm * 1852,
+        label: `${nm} NM`,
+      }));
+    }
+
+    const ringColor = selectedTarget ? '#06b6d4' : (isNightMode ? '#38bdf8' : '#0369a1');
 
     ringRanges.forEach(ring => {
       const circle = L.circle(center, {
         radius: ring.radiusMeters,
         color: ringColor,
-        weight: 1,
-        dashArray: '3, 6',
+        weight: selectedTarget ? 1.6 : 1.2,
+        opacity: isNightMode ? 0.65 : 0.75,
+        dashArray: selectedTarget ? '6, 6' : '4, 7',
         fill: false,
         interactive: false,
       });
       ringsLayerRef.current?.addLayer(circle);
 
-      // Distance tag north of own ship
-      const latOffset = (ring.radiusMeters / 111139);
+      const latOffset = ring.radiusMeters / 111139;
       const tagMarker = L.marker([center[0] + latOffset, center[1]], {
         icon: L.divIcon({
           className: 'range-ring-label',
           html: `<span>${ring.label}</span>`,
-          iconSize: [60, 16],
-          iconAnchor: [30, 8],
+          iconSize: [64, 16],
+          iconAnchor: [32, 8],
         }),
         interactive: false,
       });
       ringsLayerRef.current?.addLayer(tagMarker);
     });
-  }, [ownShipPosition, isNightMode]);
+  }, [ownShipPosition, selectedTarget, mapZoom, isNightMode]);
 
   // Render Harbor Clusters Hulls
   useEffect(() => {
@@ -293,21 +402,29 @@ export const AisView: React.FC<AisViewProps> = ({
     harborClusters.forEach(cluster => {
       if (cluster.hull && cluster.hull.length >= 3) {
         const polygon = L.polygon(cluster.hull, {
-          color: '#00c3ff',
-          weight: 1.5,
-          dashArray: '4, 4',
-          fillColor: '#00c3ff',
-          fillOpacity: 0.12,
-        });
-        polygon.bindTooltip(`Porto (${cluster.count} unità ormeggiate)`, {
-          permanent: false,
-          direction: 'center',
-          className: 'harbor-cluster-tooltip',
+          color: '#38bdf8',
+          weight: 1.2,
+          dashArray: '5, 6',
+          fillColor: '#0284c7',
+          fillOpacity: isNightMode ? 0.12 : 0.08,
+          interactive: false,
         });
         clustersLayerRef.current?.addLayer(polygon);
+
+        const centerPt: [number, number] = cluster.center || [cluster.lat, cluster.lon];
+        const badgeMarker = L.marker(centerPt, {
+          icon: L.divIcon({
+            className: 'harbor-cluster-badge-marker',
+            html: `<div style="background:rgba(15,23,42,0.88);backdrop-filter:blur(8px);border:1px solid rgba(56,189,248,0.45);border-radius:8px;padding:2px 7px;font-size:9.5px;font-weight:900;font-family:monospace;color:#38bdf8;box-shadow:0 4px 12px rgba(0,0,0,0.6);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;pointer-events:none;text-transform:uppercase;"><span>🏛️</span><span>Porto (${cluster.count})</span></div>`,
+            iconSize: [96, 22],
+            iconAnchor: [48, 11],
+          }),
+          interactive: false,
+        });
+        clustersLayerRef.current?.addLayer(badgeMarker);
       }
     });
-  }, [harborClusters]);
+  }, [harborClusters, isNightMode]);
 
   // Render Own Ship & AIS Target Markers
   useEffect(() => {
@@ -326,7 +443,9 @@ export const AisView: React.FC<AisViewProps> = ({
       </div>
     `;
 
+    const isOwnDimmed = Boolean(selectedTarget);
     const ownMarker = L.marker([ownShipPosition.lat, ownShipPosition.lon], {
+      opacity: isOwnDimmed ? 0.35 : 1.0,
       icon: L.divIcon({
         className: 'own-ship-marker',
         html: ownIconHtml,
@@ -356,7 +475,7 @@ export const AisView: React.FC<AisViewProps> = ({
           color: '#00c3ff',
           weight: 2,
           dashArray: '4, 4',
-          opacity: 0.9,
+          opacity: isOwnDimmed ? 0.25 : 0.9,
           interactive: false,
         }
       );
@@ -369,14 +488,40 @@ export const AisView: React.FC<AisViewProps> = ({
       const isOrange = t.risk === 'ORANGE';
       const isSelected = selectedTarget?.id === t.id;
 
-      let color = '#94a3b8'; // GREY default
-      if (isRed) color = '#ff2d55';
-      else if (isOrange) color = '#ff9500';
+      // Colorazione MarineTraffic in base alla tipologia AIS (con sovrascrittura in caso di allarme)
+      let mtFill = '#94a3b8';
+      let mtStroke = '#334155';
 
+      if (isRed) {
+        mtFill = '#ff2d55';
+        mtStroke = '#991b1b';
+      } else if (isOrange) {
+        mtFill = '#ff9500';
+        mtStroke = '#c2410c';
+      } else {
+        const tNum = typeof t.type === 'number' ? t.type : parseInt(String(t.type), 10) || 0;
+        const nameUpper = (t.name || '').toUpperCase();
+        if ((tNum >= 60 && tNum <= 69) || nameUpper.includes('FERRY') || nameUpper.includes('PASSEGGERI')) {
+          mtFill = '#2563eb'; mtStroke = '#1d4ed8'; // Blu Passeggeri
+        } else if (tNum >= 70 && tNum <= 79) {
+          mtFill = '#22c55e'; mtStroke = '#15803d'; // Verde Cargo
+        } else if (tNum >= 80 && tNum <= 89) {
+          mtFill = '#ef4444'; mtStroke = '#991b1b'; // Rosso Tanker
+        } else if (tNum === 36 || tNum === 37 || nameUpper.startsWith('S/Y') || nameUpper.startsWith('M/Y') || nameUpper.includes('YACHT') || nameUpper.includes('SAIL')) {
+          mtFill = '#d946ef'; mtStroke = '#a21caf'; // Magenta/Viola Yacht & Vela
+        } else if (tNum === 30 || nameUpper.includes('PESCA') || nameUpper.includes('FISH') || nameUpper.startsWith('M/P')) {
+          mtFill = '#f97316'; mtStroke = '#c2410c'; // Arancione Pesca
+        } else if (tNum === 31 || tNum === 32 || (tNum >= 50 && tNum <= 59) || nameUpper.includes('TUG') || nameUpper.includes('PILOT')) {
+          mtFill = '#06b6d4'; mtStroke = '#0e7490'; // Ciano Rimorchiatori / Servizio
+        }
+      }
+
+      const color = mtFill;
       const rotation = t.cog || 0;
       const isMoored = Boolean(t.isMoored || t.anchorState === 'MOORED');
       const isDragging = t.anchorState === 'ANCHOR_DRAGGING';
       const isAnchored = Boolean((t.isAnchored || t.anchorState === 'ANCHORED' || isDragging) && !isMoored);
+      const isClusterStationary = Boolean(t.inCluster && !t.isMoving && !isDragging);
 
       let iconSvg = '';
       if (isDragging) {
@@ -387,25 +532,15 @@ export const AisView: React.FC<AisViewProps> = ({
             <path d="M7 17a5 5 0 0 0 10 0" />
           </svg>
         `;
-      } else if (isMoored) {
-        iconSvg = `
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="${color}" stroke-width="2">
-            <rect x="4" y="6" width="16" height="12" rx="2" fill="rgba(0,0,0,0.4)" />
-            <path d="M8 6V4M16 6V4M4 12h16" />
-          </svg>
-        `;
-      } else if (isAnchored) {
-        iconSvg = `
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="${color}" stroke-width="2">
-            <circle cx="12" cy="12" r="8" fill="rgba(0,0,0,0.4)" />
-            <path d="M12 6v8M8 10h8M6 14a6 6 0 0 0 12 0" />
-          </svg>
-        `;
+      } else if (isClusterStationary || isMoored || isAnchored || !t.isMoving) {
+        const dotBorder = isSelected ? '2px solid #22d3ee' : `1.5px solid ${mtStroke}`;
+        const dotBg = isSelected ? '#22d3ee' : mtFill;
+        iconSvg = `<div style="width:10px;height:10px;border-radius:50%;background:${dotBg};border:${dotBorder};box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>`;
       } else {
-        // Arrow/Vessel polygon
+        // Freccia direzionale affilata MarineTraffic
         iconSvg = `
-          <svg viewBox="0 0 30 30" width="26" height="26">
-            <path d="M 15,3 L 23,24 L 15,20 L 7,24 Z" fill="${color}" stroke="#000" stroke-width="1.2" />
+          <svg viewBox="0 0 30 30" width="28" height="28">
+            <path d="M 15,2 L 25,25 L 15,19 L 5,25 Z" fill="${mtFill}" stroke="${mtStroke}" stroke-width="1.8" stroke-linejoin="round" />
           </svg>
         `;
       }
@@ -414,28 +549,33 @@ export const AisView: React.FC<AisViewProps> = ({
       const selectionRing = isSelected ? `<div class="target-selection-ring"></div>` : '';
 
       const targetDivHtml = `
-        <div class="ais-target-icon-wrap ${isRed ? 'is-danger-threat' : ''} ${isOrange ? 'is-warning-threat' : ''}" style="transform: rotate(${rotation}deg);">
+        <div class="ais-target-icon-wrap ${isRed ? 'is-danger-threat' : ''} ${isOrange ? 'is-warning-threat' : ''}" style="transform: rotate(${isClusterStationary ? 0 : rotation}deg);">
           ${pulseHtml}
           ${selectionRing}
           ${iconSvg}
         </div>
-        <div class="ais-target-quick-label ${isRed ? 'label-red' : isOrange ? 'label-orange' : ''}">
-          <span class="label-name">${t.name.slice(0, 12)}</span>
-          <span class="label-sog">${t.sog.toFixed(1)}kn</span>
-        </div>
       `;
 
+      const isDimmed = Boolean(selectedTarget && selectedTarget.id !== t.id);
+
       const targetMarker = L.marker([t.lat, t.lon], {
+        opacity: isDimmed ? 0.35 : 1.0,
         icon: L.divIcon({
           className: 'ais-target-marker',
           html: targetDivHtml,
           iconSize: [28, 28],
           iconAnchor: [14, 14],
         }),
-        zIndexOffset: isRed ? 800 : isOrange ? 600 : 200,
+        zIndexOffset: isSelected ? 1000 : isRed ? 800 : isOrange ? 600 : 200,
       });
 
       targetMarker.on('click', () => {
+        setAckedLabels(prev => {
+          if (!prev[t.id]) return prev;
+          const next = { ...prev };
+          delete next[t.id];
+          return next;
+        });
         setSelectedTarget(t);
         onSelectTarget(t.id);
         setShowListDrawer(true);
@@ -443,6 +583,45 @@ export const AisView: React.FC<AisViewProps> = ({
       });
 
       markersLayerRef.current?.addLayer(targetMarker);
+
+      // Etichetta flottante laterale (stile rotevista-webapp xB convertito a fondo bianco)
+      const ackedRisk = ackedLabels[t.id];
+      const isAcked = Boolean(ackedRisk && !(ackedRisk === 'ORANGE' && isRed));
+      const shouldShowFloatingLabel = !isAcked && !(t.inCluster && !t.isMoving && !isSelected) && (isRed || isOrange || isSelected);
+
+      if (shouldShowFloatingLabel) {
+        const titleColor = isRed ? '#dc2626' : isOrange ? '#ea580c' : '#0f172a';
+        const metricColor = isRed ? '#dc2626' : isOrange ? '#ea580c' : '#0284c7';
+        const borderColor = isRed ? 'rgba(220,38,38,0.55)' : isOrange ? 'rgba(234,88,12,0.55)' : 'rgba(2,132,199,0.55)';
+        const isTargetMoving = t.isMoving !== undefined ? t.isMoving : (!t.isAnchored && !isMoored && t.sog >= 0.3);
+        const statusLine = isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : (t.inCluster || isMoored ? 'IN PORTO' : "ALL'ANCORA");
+        const tcpaTxt = t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` in ${Math.round(t.tcpa)}m` : '';
+        const cpaOrDistLine = isRed
+          ? `🚨 ${t.riskMsg || 'COLLISIONE!'}${t.cpa !== null && t.cpa !== undefined ? ` • CPA: ${formatDist(t.cpa)}` : ''}${tcpaTxt}`
+          : `${isOrange ? '⚠️ ' : ''}${t.cpa !== null && t.cpa !== undefined ? `CPA: ${formatDist(t.cpa)}` : `Dist: ${formatDist(t.dist)}`}${tcpaTxt}`;
+
+        const labelMarker = L.marker([t.lat, t.lon], {
+          opacity: isDimmed ? 0.35 : 1.0,
+          icon: L.divIcon({
+            className: 'ais-threat-floating-label',
+            html: `<div style="display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);backdrop-filter:blur(6px);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tocca per nascondere etichetta (Acknowledge)"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${t.name || 'Sconosciuto'}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${cpaOrDistLine}</span></div></div>`,
+            iconSize: [320, 56],
+            iconAnchor: [-14, 28],
+          }),
+          zIndexOffset: (isSelected ? 1000 : isRed ? 800 : isOrange ? 600 : 200) + 100,
+          interactive: true,
+        });
+
+        labelMarker.on('click', (ev: L.LeafletMouseEvent) => {
+          if (ev.originalEvent) {
+            L.DomEvent.stopPropagation(ev.originalEvent);
+            L.DomEvent.preventDefault(ev.originalEvent);
+          }
+          setAckedLabels(prev => ({ ...prev, [t.id]: t.risk || 'ORANGE' }));
+        });
+
+        markersLayerRef.current?.addLayer(labelMarker);
+      }
 
       // Swing Circle & Anchor rode for anchored vessels (solo se in rada, non in banchina)
       if (isAnchored && !isMoored && (t.anchorCenter || t.swingRadius)) {
@@ -458,6 +637,7 @@ export const AisView: React.FC<AisViewProps> = ({
           dashArray: isDragging ? '2, 3' : '3, 4',
           fillColor: isSelected ? '#38bdf8' : (isDragging ? 'rgba(255,45,85,0.1)' : 'transparent'),
           fillOpacity: isSelected || isDragging ? 0.08 : 0,
+          opacity: isDimmed ? 0.25 : 0.8,
           interactive: false,
         });
         markersLayerRef.current?.addLayer(swingCircle);
@@ -467,7 +647,7 @@ export const AisView: React.FC<AisViewProps> = ({
             color: isDragging ? '#ff2d55' : '#94a3b8',
             weight: isDragging ? 1.8 : 1.2,
             dashArray: '2, 3',
-            opacity: 0.8,
+            opacity: isDimmed ? 0.25 : 0.8,
             interactive: false,
           });
           markersLayerRef.current?.addLayer(rodeLine);
@@ -492,12 +672,12 @@ export const AisView: React.FC<AisViewProps> = ({
             color: '#ff2d55',
             weight: 2,
             dashArray: '3, 3',
-            opacity: 0.9,
+            opacity: isDimmed ? 0.3 : 0.9,
             interactive: false,
           }
         );
         markersLayerRef.current?.addLayer(driftLine);
-      } else if (!isAnchored && !isMoored && t.sog >= 1.0) {
+      } else if (!isAnchored && !isMoored && t.sog >= 0.3) {
         const projDist = (t.sog * 1852) * (6 / 60);
         const projLat = t.lat + (projDist * Math.cos((rotation * Math.PI) / 180)) / 111139;
         const projLon =
@@ -512,8 +692,8 @@ export const AisView: React.FC<AisViewProps> = ({
           ],
           {
             color: color,
-            weight: 1.5,
-            opacity: 0.8,
+            weight: isSelected ? 2.2 : 1.5,
+            opacity: isDimmed ? 0.25 : 0.85,
             interactive: false,
           }
         );
@@ -525,26 +705,48 @@ export const AisView: React.FC<AisViewProps> = ({
         const trailPts = t.trail.map(pt => [pt.lat, pt.lon] as [number, number]);
         const trailLine = L.polyline(trailPts, {
           color: color,
-          weight: 1,
+          weight: isSelected ? 1.8 : 1.2,
           dashArray: '2, 4',
-          opacity: 0.5,
+          opacity: isDimmed ? 0.15 : 0.55,
           interactive: false,
         });
         markersLayerRef.current?.addLayer(trailLine);
       }
     });
-  }, [targets, ownShipPosition, ownShipCourse, selectedTarget, onSelectTarget, handleCenterOnTarget]);
+  }, [targets, ownShipPosition, ownShipCourse, selectedTarget, ackedLabels, onSelectTarget, handleCenterOnTarget]);
 
-  // Zoom handlers
+  // Zoom handlers (ancorati al bersaglio/propria barca se selezionati, altrimenti al centro dello schermo)
   const handleZoomIn = useCallback(() => {
     if (!mapRef.current) return;
-    mapRef.current.zoomIn();
-  }, []);
+    const currentZoom = mapRef.current.getZoom();
+    const newZoom = Math.min(mapRef.current.getMaxZoom() || 18, currentZoom + 1);
+
+    if (selectedTarget) {
+      const newCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon], newZoom);
+      mapRef.current.setView(newCenter, newZoom, { animate: true });
+    } else if (followMode === 'own') {
+      const newCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], newZoom);
+      mapRef.current.setView(newCenter, newZoom, { animate: true });
+    } else {
+      mapRef.current.zoomIn();
+    }
+  }, [selectedTarget, followMode, ownShipPosition, getOffsetCenter]);
 
   const handleZoomOut = useCallback(() => {
     if (!mapRef.current) return;
-    mapRef.current.zoomOut();
-  }, []);
+    const currentZoom = mapRef.current.getZoom();
+    const newZoom = Math.max(mapRef.current.getMinZoom() || 3, currentZoom - 1);
+
+    if (selectedTarget) {
+      const newCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon], newZoom);
+      mapRef.current.setView(newCenter, newZoom, { animate: true });
+    } else if (followMode === 'own') {
+      const newCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], newZoom);
+      mapRef.current.setView(newCenter, newZoom, { animate: true });
+    } else {
+      mapRef.current.zoomOut();
+    }
+  }, [selectedTarget, followMode, ownShipPosition, getOffsetCenter]);
 
   // Target summary stats
   const stats = useMemo(() => {
@@ -618,10 +820,7 @@ export const AisView: React.FC<AisViewProps> = ({
             className={`ais-tool-btn ${showListDrawer || selectedTarget ? 'btn-active' : ''}`}
             onClick={() => {
               if (selectedTarget) {
-                setSelectedTarget(null);
-                onSelectTarget(null);
-                setShowListDrawer(true);
-                setFollowMode('own');
+                handleReturnToList();
               } else {
                 setShowListDrawer(prev => !prev);
               }
@@ -643,28 +842,32 @@ export const AisView: React.FC<AisViewProps> = ({
 
       {/* FLOATING TARGETS DROPDOWN CARD (Screenshot 1, 2, 3) */}
       {(showListDrawer || selectedTarget) && (
-        <div ref={cardRef} className="ais-dropdown-card">
-          {selectedTarget ? (
+        <div
+          ref={cardRef}
+          className="ais-dropdown-card"
+          onWheelCapture={e => e.stopPropagation()}
+          onTouchMoveCapture={e => e.stopPropagation()}
+        >
+          {selectedTarget && (
             /* TARGET DETAIL VIEW (Screenshot 2 & 3) */
             <div className="ais-card-detail">
               <div className="ais-detail-header">
                 <button
                   type="button"
                   className="btn-back-lista"
-                  onClick={() => {
-                    setSelectedTarget(null);
-                    onSelectTarget(null);
-                    setShowListDrawer(true);
-                    setFollowMode('own');
-                  }}
+                  onClick={handleReturnToList}
                 >
                   ← LISTA
                 </button>
                 <div
                   className="detail-header-center"
-                  onClick={() => handleCenterOnTarget(selectedTarget)}
+                  onClick={() =>
+                    setTargetDetailTab(prev =>
+                      prev === 'telemetry' ? 'info' : 'telemetry'
+                    )
+                  }
                   style={{ cursor: 'pointer' }}
-                  title="Centra e insegui bersaglio"
+                  title="Tocca per cambiare scheda (Telemetria / Info)"
                 >
                   <span className="detail-vessel-icon">
                     {getVesselTypeIcon(selectedTarget.type, selectedTarget.name)}
@@ -730,7 +933,17 @@ export const AisView: React.FC<AisViewProps> = ({
                   {copiedMmsi ? '✓' : ''}
                 </button>
                 <span>•</span>
-                <span>⏱️ {formatAge(selectedTarget.age)}</span>
+                <span
+                  onClick={() =>
+                    setTargetDetailTab(prev =>
+                      prev === 'telemetry' ? 'info' : 'telemetry'
+                    )
+                  }
+                  style={{ cursor: 'pointer' }}
+                  title="Tocca per cambiare scheda"
+                >
+                  ⏱️ {formatAge(selectedTarget.age)}
+                </span>
               </div>
 
               {targetDetailTab === 'telemetry' ? (
@@ -811,13 +1024,13 @@ export const AisView: React.FC<AisViewProps> = ({
                         {selectedTarget.eta ? `(ETA ${selectedTarget.eta})` : ''}
                       </span>
                     </div>
-                    <div className="ais-detail-cell">
+                    <div className="ais-detail-cell cell-wide">
                       <span className="ais-cell-label">STATO AIS (CLASSE)</span>
                       <span className="ais-cell-val">
                         {getVesselStatusLabel(selectedTarget)} ({selectedTarget.aisClass || 'B'})
                       </span>
                     </div>
-                    <div className="ais-detail-cell">
+                    <div className="ais-detail-cell cell-wide">
                       <span className="ais-cell-label">RADIO & BANDIERA</span>
                       <span className="ais-cell-val">
                         📻 {selectedTarget.callsign || '--'} • {selectedTarget.flag || '--'}
@@ -836,27 +1049,34 @@ export const AisView: React.FC<AisViewProps> = ({
                 </div>
               )}
             </div>
-          ) : (
-            /* TARGETS LIST VIEW (Screenshot 1) */
-            <div className="ais-card-list">
-              <div className="ais-card-header">
-                <div className="ais-card-title-group">
-                  <svg className="ais-card-icon-arrow" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2L19 21L12 17L5 21L12 2Z" />
-                  </svg>
-                  <span className="ais-card-title">BERSAGLI ({targets.length})</span>
-                </div>
-                <button
-                  type="button"
-                  className="ais-card-close-btn"
-                  onClick={() => setShowListDrawer(false)}
-                  title="Chiudi"
-                >
-                  ✕
-                </button>
-              </div>
+          )}
 
-              <div className="ais-card-body">
+          {/* TARGETS LIST VIEW (Screenshot 1) - Mantenuto nel DOM per preservare lo scroll */}
+          <div className="ais-card-list" style={{ display: selectedTarget ? 'none' : 'flex' }}>
+            <div className="ais-card-header">
+              <div className="ais-card-title-group">
+                <svg className="ais-card-icon-arrow" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2L19 21L12 17L5 21L12 2Z" />
+                </svg>
+                <span className="ais-card-title">BERSAGLI ({targets.length})</span>
+              </div>
+              <button
+                type="button"
+                className="ais-card-close-btn"
+                onClick={() => setShowListDrawer(false)}
+                title="Chiudi"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div
+              ref={listBodyRef}
+              className="ais-card-body"
+              onScroll={e => {
+                listScrollTopRef.current = e.currentTarget.scrollTop;
+              }}
+            >
                 {/* 1. LA MIA BARCA (Highlight Cyan) */}
                 <div
                   className="ais-target-item-own"
@@ -866,7 +1086,7 @@ export const AisView: React.FC<AisViewProps> = ({
                   <div className="target-left-group">
                     <span className="target-speaking-icon">⛵</span>
                     <div className="target-text-col">
-                      <span className="target-item-name">ROTEVISTA (LA TUA BARCA)</span>
+                      <span className="target-item-name">ROTEVISTA</span>
                       <span className="target-item-sub">
                         {ownShipCourse.sog < 0.5 ? 'IN PORTO' : 'IN NAVIGAZIONE'} • HDG: {Math.round(ownShipCourse.hdg)}°
                       </span>
@@ -885,6 +1105,9 @@ export const AisView: React.FC<AisViewProps> = ({
                       key={item.id}
                       className={`ais-target-item ${item.risk === 'RED' ? 'risk-red' : item.risk === 'ORANGE' ? 'risk-orange' : ''}`}
                       onClick={() => {
+                        if (listBodyRef.current) {
+                          listScrollTopRef.current = listBodyRef.current.scrollTop;
+                        }
                         setSelectedTarget(item);
                         onSelectTarget(item.id);
                         handleCenterOnTarget(item);
@@ -915,7 +1138,6 @@ export const AisView: React.FC<AisViewProps> = ({
                 )}
               </div>
             </div>
-          )}
         </div>
       )}
 
