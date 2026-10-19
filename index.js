@@ -1126,23 +1126,41 @@ module.exports = function (app) {
 
     /**
      * plugin.uiSchema: Organizza l'interfaccia Signal K Admin con sezioni collassabili ad albero.
+     * Signal K Server richiede che uiSchema sia una funzione con 'field: ObjectField'.
      */
-    plugin.uiSchema = {
+    const pluginUiSchema = {
         aisAlerter: {
             pleasureCraft: {
                 'ui:field': 'collapsible',
-                collapse: { collapsed: true }
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group',
+                    collapsed: true
+                }
             },
             commercialShips: {
                 'ui:field': 'collapsible',
-                collapse: { collapsed: true }
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group',
+                    collapsed: true
+                }
             },
             workboats: {
                 'ui:field': 'collapsible',
-                collapse: { collapsed: true }
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group',
+                    collapsed: true
+                }
             }
         }
     };
+
+    plugin.uiSchema = function () {
+        return pluginUiSchema;
+    };
+    Object.assign(plugin.uiSchema, pluginUiSchema);
         
     /**
         * freeze30mSlot: Consolida e congela i dati di una specifica mezz'ora.
