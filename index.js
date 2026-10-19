@@ -1560,6 +1560,7 @@ module.exports = function (app) {
      * processAisEngine: Motore ARPA in memoria e calcolo incroci COLREGs a 15s.
      */
     function processAisEngine() {
+        try {
         const now = Date.now();
 
         // 1. Lettura posizione e cinematica nave propria
@@ -1725,11 +1726,14 @@ module.exports = function (app) {
                 }
             }
 
+            let rawVesselName = (v.name && typeof v.name === 'object' && v.name.value !== undefined) ? v.name.value : v.name;
+            let safeVesselName = (typeof rawVesselName === 'string') ? rawVesselName.trim() : "";
+
             const isOwnVessel = key === "self" || key === selfId ||
                 (ignoreOwnTarget !== "" && (
                     callsign.toLowerCase() === ignoreOwnTarget ||
                     key.toLowerCase().includes(ignoreOwnTarget) ||
-                    (v.name && v.name.toLowerCase() === ignoreOwnTarget)
+                    (safeVesselName && safeVesselName.toLowerCase() === ignoreOwnTarget)
                 ));
 
             if (isOwnVessel) {
@@ -1747,7 +1751,7 @@ module.exports = function (app) {
             let dist = distanceMeters(myGps.lat, myGps.lon, vLat, vLon);
             if (dist <= MAX_DISTANCE_METERS) {
                 let cachedName = (aisPersistentCache[key] && aisPersistentCache[key].name && !aisPersistentCache[key].name.startsWith("MMSI ") && aisPersistentCache[key].name !== "Barca Sconosciuta") ? aisPersistentCache[key].name : "";
-                let name = v.name || cachedName;
+                let name = safeVesselName || cachedName;
                 if (!name && key.includes("mmsi:")) {
                     let mmsiMatch = key.match(/mmsi:(\d+)/);
                     name = mmsiMatch ? "MMSI " + mmsiMatch[1] : "Barca Sconosciuta";
@@ -2168,6 +2172,10 @@ module.exports = function (app) {
 
             let isTargetStationary = (v.sog < 0.8) || isAnchored || isMoored;
 
+            let baseRedCpa = yachtRedCpa;
+            let baseOrangeCpa = yachtOrangeCpa;
+            let maxTcpaWindow = yachtMaxTcpa;
+
             if (isCommercial) {
                 // Moltiplicatore dinamico di velocità: +3.5% per nodo sopra 12kn (clamp a 1.75x)
                 let speedFactor = Math.min(1.75, 1.0 + Math.max(0, v.sog - 12.0) * 0.035);
@@ -2500,6 +2508,14 @@ module.exports = function (app) {
                     }
                 ]
             });
+        }
+        aisDiagnostics.lastError = null;
+        } catch (err) {
+            aisDiagnostics.status = 'ERROR';
+            aisDiagnostics.lastError = err && err.message ? err.message : String(err);
+            if (typeof app.error === 'function') {
+                app.error('processAisEngine error: ' + aisDiagnostics.lastError);
+            }
         }
     }
 
