@@ -1125,11 +1125,93 @@ module.exports = function (app) {
     };
 
     /**
-     * plugin.uiSchema: Schema UI per ordinamento dei campi in Signal K Admin.
+     * plugin.uiSchema: Schema UI per ordinamento dei campi e sezioni collassabili in Signal K Admin.
      */
     plugin.uiSchema = {
+        alarms: {
+            'ui:field': 'collapsible',
+            collapse: {
+                field: 'ObjectField',
+                wrapClassName: 'panel-group'
+            }
+        },
+        graphs: {
+            'ui:field': 'collapsible',
+            collapse: {
+                field: 'ObjectField',
+                wrapClassName: 'panel-group'
+            }
+        },
+        averaging: {
+            'ui:field': 'collapsible',
+            collapse: {
+                field: 'ObjectField',
+                wrapClassName: 'panel-group'
+            }
+        },
+        scales: {
+            'ui:field': 'collapsible',
+            collapse: {
+                field: 'ObjectField',
+                wrapClassName: 'panel-group'
+            },
+            stw: {
+                'ui:field': 'collapsible',
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group'
+                }
+            },
+            sog: {
+                'ui:field': 'collapsible',
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group'
+                }
+            },
+            tws: {
+                'ui:field': 'collapsible',
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group'
+                }
+            },
+            depth: {
+                'ui:field': 'collapsible',
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group'
+                }
+            }
+        },
         aisAlerter: {
-            'ui:order': ['enabled', 'ignoreOwnTarget', 'criticalProximity', 'pleasureCraft', 'commercialShips', 'workboats']
+            'ui:field': 'collapsible',
+            collapse: {
+                field: 'ObjectField',
+                wrapClassName: 'panel-group'
+            },
+            'ui:order': ['enabled', 'ignoreOwnTarget', 'criticalProximity', 'pleasureCraft', 'commercialShips', 'workboats'],
+            pleasureCraft: {
+                'ui:field': 'collapsible',
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group'
+                }
+            },
+            commercialShips: {
+                'ui:field': 'collapsible',
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group'
+                }
+            },
+            workboats: {
+                'ui:field': 'collapsible',
+                collapse: {
+                    field: 'ObjectField',
+                    wrapClassName: 'panel-group'
+                }
+            }
         }
     };
         
