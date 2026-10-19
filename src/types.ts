@@ -104,6 +104,10 @@ export interface AisTarget {
   sog: number;
   dist: number;
   isAnchored: boolean;
+  isMoored?: boolean;
+  anchorState?: 'UNDERWAY' | 'POSSIBLE_ANCHOR' | 'ANCHORED' | 'MOORED' | 'ANCHOR_DRAGGING' | 'WEIGHING_ANCHOR';
+  swingRadius?: number | null;
+  anchorCenter?: { lat: number; lon: number; radius?: number } | null;
   isMoving: boolean;
   risk: 'RED' | 'ORANGE' | 'GREY';
   riskMsg: string;

@@ -245,10 +245,27 @@ export const AisView: React.FC<AisViewProps> = ({
       else if (isOrange) color = '#ff9500';
 
       const rotation = t.cog || 0;
-      const isAnchored = t.isAnchored || t.sog < 0.5;
+      const isMoored = Boolean(t.isMoored || t.anchorState === 'MOORED');
+      const isDragging = t.anchorState === 'ANCHOR_DRAGGING';
+      const isAnchored = Boolean((t.isAnchored || t.anchorState === 'ANCHORED' || isDragging) && !isMoored);
 
       let iconSvg = '';
-      if (isAnchored) {
+      if (isDragging) {
+        iconSvg = `
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#ff2d55" stroke-width="2.2">
+            <circle cx="12" cy="12" r="9" fill="rgba(255,45,85,0.25)" stroke="#ff2d55" />
+            <path d="M12 7v5M12 16h.01" stroke-linecap="round" />
+            <path d="M7 17a5 5 0 0 0 10 0" />
+          </svg>
+        `;
+      } else if (isMoored) {
+        iconSvg = `
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="${color}" stroke-width="2">
+            <rect x="4" y="6" width="16" height="12" rx="2" fill="rgba(0,0,0,0.4)" />
+            <path d="M8 6V4M16 6V4M4 12h16" />
+          </svg>
+        `;
+      } else if (isAnchored) {
         iconSvg = `
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="${color}" stroke-width="2">
             <circle cx="12" cy="12" r="8" fill="rgba(0,0,0,0.4)" />
@@ -296,8 +313,60 @@ export const AisView: React.FC<AisViewProps> = ({
 
       markersLayerRef.current?.addLayer(targetMarker);
 
-      // Target Velocity Vector line (6 min projection if moving)
-      if (t.sog >= 1.0) {
+      // Swing Circle & Anchor rode for anchored vessels (solo se in rada, non in banchina)
+      if (isAnchored && !isMoored && (t.anchorCenter || t.swingRadius)) {
+        const anchorPt: [number, number] = t.anchorCenter
+          ? [t.anchorCenter.lat, t.anchorCenter.lon]
+          : [t.lat, t.lon];
+        const sRadius = t.anchorCenter?.radius || t.swingRadius || 35;
+
+        const swingCircle = L.circle(anchorPt, {
+          radius: sRadius,
+          color: isSelected ? '#38bdf8' : (isDragging ? '#ff2d55' : (isRed ? '#ff2d55' : isOrange ? '#ff9500' : '#64748b')),
+          weight: isSelected || isDragging ? 1.5 : 1,
+          dashArray: isDragging ? '2, 3' : '3, 4',
+          fillColor: isSelected ? '#38bdf8' : (isDragging ? 'rgba(255,45,85,0.1)' : 'transparent'),
+          fillOpacity: isSelected || isDragging ? 0.08 : 0,
+          interactive: false,
+        });
+        markersLayerRef.current?.addLayer(swingCircle);
+
+        if (t.anchorCenter && (t.anchorCenter.lat !== t.lat || t.anchorCenter.lon !== t.lon)) {
+          const rodeLine = L.polyline([[t.anchorCenter.lat, t.anchorCenter.lon], [t.lat, t.lon]], {
+            color: isDragging ? '#ff2d55' : '#94a3b8',
+            weight: isDragging ? 1.8 : 1.2,
+            dashArray: '2, 3',
+            opacity: 0.8,
+            interactive: false,
+          });
+          markersLayerRef.current?.addLayer(rodeLine);
+        }
+      }
+
+      // Target Velocity Vector line (or Dragging Vector line)
+      if (isDragging && t.sog >= 0.3) {
+        const projDist = (t.sog * 1852) * (10 / 60); // Vettore deriva 10 min
+        const projLat = t.lat + (projDist * Math.cos((rotation * Math.PI) / 180)) / 111139;
+        const projLon =
+          t.lon +
+          (projDist * Math.sin((rotation * Math.PI) / 180)) /
+            (111139 * Math.cos((t.lat * Math.PI) / 180));
+
+        const driftLine = L.polyline(
+          [
+            [t.lat, t.lon],
+            [projLat, projLon],
+          ],
+          {
+            color: '#ff2d55',
+            weight: 2,
+            dashArray: '3, 3',
+            opacity: 0.9,
+            interactive: false,
+          }
+        );
+        markersLayerRef.current?.addLayer(driftLine);
+      } else if (!isAnchored && !isMoored && t.sog >= 1.0) {
         const projDist = (t.sog * 1852) * (6 / 60);
         const projLat = t.lat + (projDist * Math.cos((rotation * Math.PI) / 180)) / 111139;
         const projLon =
@@ -511,6 +580,31 @@ export const AisView: React.FC<AisViewProps> = ({
               <span className="d-label">RILEVAMENTO</span>
               <span className="d-val">{selectedTarget.sightingTxt || '--'}</span>
             </div>
+            {selectedTarget.anchorState === 'ANCHOR_DRAGGING' && (
+              <div className="drawer-cell drawer-wide bg-red-950/40 border border-red-500/60 rounded p-1.5">
+                <span className="d-label text-red-400 font-bold">ALLARME SPEDO ANCORA</span>
+                <span className="d-val text-red-200">
+                  Bersaglio in scarroccio ({selectedTarget.sog.toFixed(1)} kn rot. {selectedTarget.cog}°)
+                </span>
+              </div>
+            )}
+            {selectedTarget.anchorState === 'MOORED' && (
+              <div className="drawer-cell drawer-wide bg-blue-950/20 border border-blue-500/30 rounded p-1.5">
+                <span className="d-label text-blue-400">ORMEGGIO BANCHINA</span>
+                <span className="d-val text-blue-200">
+                  Unità ormeggiata in banchina / finger [MOORED]
+                </span>
+              </div>
+            )}
+            {selectedTarget.isAnchored && selectedTarget.anchorState !== 'ANCHOR_DRAGGING' && !selectedTarget.isMoored && (
+              <div className="drawer-cell drawer-wide bg-amber-950/20 border border-amber-600/30 rounded p-1.5">
+                <span className="d-label text-amber-400">BRANDEGGIO ANCORAGGIO</span>
+                <span className="d-val text-amber-200">
+                  {selectedTarget.swingRadius ? `Raggio: ${selectedTarget.swingRadius} m` : 'All\'ancora'}
+                  {selectedTarget.anchorState ? ` • [${selectedTarget.anchorState}]` : ''}
+                </span>
+              </div>
+            )}
             {(selectedTarget.length || selectedTarget.beam) && (
               <div className="drawer-cell drawer-wide">
                 <span className="d-label">DIMENSIONI</span>
