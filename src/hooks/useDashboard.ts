@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   AppConfig,
   HistoryPoint,
@@ -10,6 +10,9 @@ import {
   ActiveInstrument,
   GraphMode,
   BoxType,
+  AppView,
+  AisTarget,
+  HarborCluster,
 } from '../types';
 import {
   radToDeg,
@@ -87,6 +90,40 @@ export function useDashboard() {
     text: 'CONNESSIONE...',
     className: 'offline',
   });
+
+  // AIS View & ARPA Collision States
+  const [appView, setAppView] = useState<AppView>('wind');
+  const [aisTargets, setAisTargets] = useState<AisTarget[]>([]);
+  const [harborClusters, setHarborClusters] = useState<HarborCluster[]>([]);
+  const [topThreat, setTopThreat] = useState<AisTarget | null>(null);
+  const [selectedAisTargetId, setSelectedAisTargetId] = useState<string | null>(null);
+  const [snoozedThreats, setSnoozedThreats] = useState<Record<string, { until: number; initialRisk: string }>>({});
+  const [ownShipPosition, setOwnShipPosition] = useState<{ lat: number; lon: number }>({ lat: 43.5528, lon: 10.3015 });
+  const [ownShipCourse, setOwnShipCourse] = useState<{ hdg: number; cog: number; sog: number }>({ hdg: 45, cog: 45, sog: 5.2 });
+
+  const snoozeThreat = useCallback((targetId: string) => {
+    setTopThreat(currentTop => {
+      const initialRisk = currentTop?.id === targetId ? currentTop.risk : 'ORANGE';
+      setSnoozedThreats(prev => ({
+        ...prev,
+        [targetId]: { until: Date.now() + 10 * 60 * 1000, initialRisk },
+      }));
+      return currentTop;
+    });
+  }, []);
+
+  const activeThreat = useMemo(() => {
+    if (!topThreat || topThreat.risk === 'GREY') return null;
+    const snoozed = snoozedThreats[topThreat.id];
+    if (snoozed) {
+      const isSnoozed = Date.now() < snoozed.until;
+      const dangerEscalated = snoozed.initialRisk === 'ORANGE' && topThreat.risk === 'RED';
+      if (isSnoozed && !dangerEscalated) {
+        return null;
+      }
+    }
+    return topThreat;
+  }, [topThreat, snoozedThreats]);
 
   // Display values for UI
   const [displayValues, setDisplayValues] = useState({
@@ -398,6 +435,33 @@ export function useDashboard() {
         store.lastTWCompute = now;
       }
     }
+
+    // Navigation Position & AIS updates
+    if (path === 'navigation.position') {
+      if (val && typeof val === 'object' && val.latitude !== undefined && val.longitude !== undefined) {
+        const lat = parseFloat(val.latitude);
+        const lon = parseFloat(val.longitude);
+        if (!isNaN(lat) && !isNaN(lon)) {
+          setOwnShipPosition({ lat, lon });
+        }
+      }
+    }
+
+    if (path === 'environment.ais_targets') {
+      if (Array.isArray(val)) {
+        setAisTargets(val);
+      }
+    }
+
+    if (path === 'environment.ais_top_threat') {
+      setTopThreat(val || null);
+    }
+
+    if (path === 'environment.harbor_clusters') {
+      if (Array.isArray(val)) {
+        setHarborClusters(val);
+      }
+    }
   }, []);
 
   // Load configuration from Signal K plugin or settings.json
@@ -624,7 +688,102 @@ export function useDashboard() {
         const simCog = (sim.hdg - leewaySimDeg + 360) % 360;
         processIncomingData('navigation.courseOverGroundTrue', degToRad(simCog));
       }, 1000);
+
+      // Popola bersagli AIS dimostrativi per testing offline
+      const simTargets: AisTarget[] = [
+        {
+          id: 'mmsi:247000111',
+          name: 'GRIMALDI LINES',
+          type: 60,
+          lat: 43.565,
+          lon: 10.32,
+          cog: 215,
+          sog: 18.2,
+          dist: 2200,
+          isAnchored: false,
+          isMoving: true,
+          risk: 'ORANGE',
+          riskMsg: 'ATTENZIONE INCROCIO',
+          cpa: 680,
+          tcpa: 5.4,
+          crossDir: 'Passa a Prua\n👉 DAI PRECEDENZA (Nave commerciale)',
+          crossOutcome: 'Passa a Prua',
+          crossRule: 'DAI PRECEDENZA (Nave commerciale)',
+          sightingTxt: '35° a Dritta (ore 1)',
+          age: 4,
+          callsign: 'IBKL',
+          length: 195,
+          beam: 26,
+          draft: 6.8,
+          destination: 'LIVORNO',
+          eta: '18:30',
+          aisClass: 'A',
+          flag: '🇮🇹',
+        },
+        {
+          id: 'mmsi:247999222',
+          name: 'OCEANIS 45',
+          type: 36,
+          lat: 43.548,
+          lon: 10.292,
+          cog: 0,
+          sog: 0.1,
+          dist: 450,
+          isAnchored: true,
+          isMoving: false,
+          risk: 'GREY',
+          riskMsg: '',
+          cpa: null,
+          tcpa: null,
+          crossDir: "All'ancora",
+          crossOutcome: "All'ancora",
+          crossRule: '',
+          sightingTxt: 'Al Traverso di Sinistra (ore 9)',
+          age: 12,
+          callsign: 'IZ458',
+          length: 13.8,
+          beam: 4.5,
+          draft: 2.1,
+          destination: 'CALA DE MEDICI',
+          eta: '',
+          aisClass: 'B',
+          flag: '🇮🇹',
+        },
+        {
+          id: 'mmsi:247333444',
+          name: 'MAESTRALE II',
+          type: 30,
+          lat: 43.57,
+          lon: 10.285,
+          cog: 120,
+          sog: 3.5,
+          dist: 1600,
+          isAnchored: false,
+          isMoving: true,
+          risk: 'GREY',
+          riskMsg: '',
+          cpa: 1100,
+          tcpa: 12.0,
+          crossDir: 'Sfila a Sinistra',
+          crossOutcome: 'Sfila a Sinistra',
+          crossRule: 'Peschereccio in pesca',
+          sightingTxt: '60° a Sinistra (ore 10)',
+          age: 8,
+          callsign: 'IM772',
+          length: 22,
+          beam: 6,
+          draft: 2.8,
+          destination: 'PESCA',
+          eta: '',
+          aisClass: 'B',
+          flag: '🇮🇹',
+        },
+      ];
+      setAisTargets(simTargets);
+      setTopThreat(simTargets[0]);
     };
+
+    let aisPollInterval: ReturnType<typeof setInterval> | null = null;
 
     const connectWs = () => {
       if (isDisposed) return;
@@ -649,7 +808,7 @@ export function useDashboard() {
           const subscriptionPayload = {
             context: 'vessels.self',
             subscribe: [
-              { path: 'navigation.position', minPeriod: 60000 },
+              { path: 'navigation.position', minPeriod: 5000 },
               { path: 'navigation.magneticVariation', minPeriod: 60000 },
               { path: 'environment.depth.belowTransducer', minPeriod: 1000 },
               { path: 'navigation.speedThroughWater', minPeriod: 333 },
@@ -662,6 +821,9 @@ export function useDashboard() {
               { path: 'environment.wind.speedTrue', minPeriod: 333 },
               { path: 'environment.wind.angleTrueWater', minPeriod: 333 },
               { path: 'environment.wind.directionTrue', minPeriod: 333 },
+              { path: 'environment.ais_targets', minPeriod: 5000 },
+              { path: 'environment.ais_top_threat', minPeriod: 5000 },
+              { path: 'environment.harbor_clusters', minPeriod: 15000 },
             ],
           };
           try {
@@ -669,6 +831,22 @@ export function useDashboard() {
           } catch (e) {}
 
           fetchHistory();
+
+          if (aisPollInterval) clearInterval(aisPollInterval);
+          aisPollInterval = setInterval(() => {
+            if (!isDisposed && storeRef.current.hasEverConnectedToSignalK) {
+              fetch('/rotevista-ais')
+                .then(res => (res.ok ? res.json() : null))
+                .then(d => {
+                  if (d) {
+                    if (Array.isArray(d.targets)) setAisTargets(d.targets);
+                    if (Array.isArray(d.harborClusters)) setHarborClusters(d.harborClusters);
+                    if (d.topThreat !== undefined) setTopThreat(d.topThreat);
+                  }
+                })
+                .catch(() => {});
+            }
+          }, 10000);
         };
 
         const fetchHistory = () => {
@@ -690,6 +868,17 @@ export function useDashboard() {
                 }
                 if (data.futureForecast) {
                   setFutureForecast(data.futureForecast);
+                }
+
+                // AIS targets & threats da storico
+                if (Array.isArray(data.ais_targets) && data.ais_targets.length > 0) {
+                  setAisTargets(data.ais_targets);
+                }
+                if (data.ais_top_threat !== undefined) {
+                  setTopThreat(data.ais_top_threat);
+                }
+                if (Array.isArray(data.harbor_clusters)) {
+                  setHarborClusters(data.harbor_clusters);
                 }
 
                 // Idratazione istantanea dei buffer rolling per azzerare il warm-up iniziale
@@ -842,6 +1031,7 @@ export function useDashboard() {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (handshakeTimeout) clearTimeout(handshakeTimeout);
       if (simTimer) clearInterval(simTimer);
+      if (aisPollInterval) clearInterval(aisPollInterval);
     };
   }, [processIncomingData, seedDemoHistory]);
 
@@ -1291,6 +1481,17 @@ export function useDashboard() {
           className: 'offline',
         });
       }
+      const curHdgDeg = store.raw['navigation.headingTrue'] !== undefined
+        ? radToDeg(store.raw['navigation.headingTrue'])
+        : (store.raw['navigation.courseOverGroundTrue'] !== undefined ? radToDeg(store.raw['navigation.courseOverGroundTrue']) : 0);
+      const curCogDeg = store.raw['navigation.courseOverGroundTrue'] !== undefined
+        ? radToDeg(store.raw['navigation.courseOverGroundTrue'])
+        : curHdgDeg;
+      setOwnShipCourse({
+        hdg: Math.round((curHdgDeg + 360) % 360),
+        cog: Math.round((curCogDeg + 360) % 360),
+        sog: sogKts,
+      });
     }, 1000);
 
     return () => clearInterval(interval);
@@ -1331,5 +1532,15 @@ export function useDashboard() {
     futureForecast,
     toggleFocusMode,
     toggleGraphMode,
+    appView,
+    setAppView,
+    aisTargets,
+    harborClusters,
+    topThreat: activeThreat,
+    snoozeThreat,
+    selectedAisTargetId,
+    setSelectedAisTargetId,
+    ownShipPosition,
+    ownShipCourse,
   };
 }

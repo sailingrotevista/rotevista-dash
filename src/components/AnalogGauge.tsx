@@ -48,9 +48,9 @@ export const AnalogGauge: React.FC<AnalogGaugeProps> = ({
   }, []);
 
   const clampedLeeway = Math.max(-20, Math.min(20, leewayDeg));
-  const c = 125;
-  const px = 125 / 20;
-  const leewayWidth = Math.min(Math.abs(clampedLeeway) * px, 125);
+  const c = 150;
+  const px = 150 / 20;
+  const leewayWidth = Math.min(Math.abs(clampedLeeway) * px, 150);
   const leewayX = clampedLeeway >= 0 ? c : c - leewayWidth;
 
   const handlePointerDown = () => {
@@ -217,25 +217,25 @@ export const AnalogGauge: React.FC<AnalogGaugeProps> = ({
       </g>
 
       {/* Leeway Bar Indicator */}
-      <g transform="translate(75, 395)">
-        <text x="125" y="-12" id="leeway-val" fill="#aaa" fontSize="11" textAnchor="middle" fontWeight="bold">
+      <g transform="translate(50, 395)">
+        <text x="150" y="-12" id="leeway-val" fill="#aaa" fontSize="11" textAnchor="middle" fontWeight="bold">
           {`LEEWAY: ${clampedLeeway.toFixed(1)}°`}
         </text>
-        <rect x="0" y="0" width="250" height="12" fill="#222" rx="3" />
-        <rect x="0" y="0" width="250" height="12" fill="url(#leeway-grad)" clipPath="url(#leeway-clip)" rx="3" />
+        <rect x="0" y="0" width="300" height="12" fill="#222" rx="3" />
+        <rect x="0" y="0" width="300" height="12" fill="url(#leeway-grad)" clipPath="url(#leeway-clip)" rx="3" />
         <g stroke="#555" strokeWidth="1">
           <line x1="0" y1="-2" x2="0" y2="14" />
-          <line x1="62.5" y1="2" x2="62.5" y2="10" />
-          <line x1="125" y1="-2" x2="125" y2="14" />
-          <line x1="187.5" y1="2" x2="187.5" y2="10" />
-          <line x1="250" y1="-2" x2="250" y2="14" />
+          <line x1="75" y1="2" x2="75" y2="10" />
+          <line x1="150" y1="-2" x2="150" y2="14" />
+          <line x1="225" y1="2" x2="225" y2="10" />
+          <line x1="300" y1="-2" x2="300" y2="14" />
         </g>
         <g fill="#555" fontSize="8" textAnchor="middle" fontWeight="bold">
           <text x="0" y="24">-20°</text>
-          <text x="62.5" y="24">-10</text>
-          <text x="125" y="24">0°</text>
-          <text x="187.5" y="24">10</text>
-          <text x="250" y="24">20°</text>
+          <text x="75" y="24">-10</text>
+          <text x="150" y="24">0°</text>
+          <text x="225" y="24">10</text>
+          <text x="300" y="24">20°</text>
         </g>
       </g>
     </svg>

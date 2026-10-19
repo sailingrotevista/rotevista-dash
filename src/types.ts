@@ -86,3 +86,52 @@ export type DisplayModeTws = 'TWS' | 'AWS';
 export type ActiveInstrument = 'gauge' | 'radar';
 export type GraphMode = 'standard' | 'hercules';
 export type BoxType = 'stw' | 'sog' | 'hdg' | 'cog' | 'tack' | 'depth' | 'tws' | 'twa' | 'awa' | 'twd';
+export type AppView = 'wind' | 'ais';
+
+export interface AisTrailPoint {
+  lat: number;
+  lon: number;
+  t: number;
+}
+
+export interface AisTarget {
+  id: string;
+  name: string;
+  type: number | string;
+  lat: number;
+  lon: number;
+  cog: number;
+  sog: number;
+  dist: number;
+  isAnchored: boolean;
+  isMoving: boolean;
+  risk: 'RED' | 'ORANGE' | 'GREY';
+  riskMsg: string;
+  cpa: number | null;
+  tcpa: number | null;
+  crossDir: string;
+  crossOutcome: string;
+  crossRule: string;
+  sightingTxt: string;
+  age: number;
+  callsign?: string;
+  length?: number | null;
+  beam?: number | null;
+  draft?: number | null;
+  destination?: string;
+  eta?: string;
+  aisClass?: string;
+  flag?: string;
+  inCluster?: boolean;
+  trail?: AisTrailPoint[];
+}
+
+export interface HarborCluster {
+  id: string;
+  lat: number;
+  lon: number;
+  dist: number;
+  count: number;
+  hull: Array<[number, number]>;
+}
+

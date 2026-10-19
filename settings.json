@@ -23,14 +23,21 @@
   },
   "aisAlerter": {
     "enabled": true,
-    "yachtRedCpa": 300,
-    "yachtOrangeCpa": 700,
-    "yachtMaxTcpa": 10,
-    "commercialRedCpa": 800,
-    "commercialOrangeCpa": 1852,
-    "commercialMaxTcpa": 15,
-    "workRedCpa": 500,
-    "workMaxTcpa": 12,
+    "ignoreOwnTarget": "106125",
+    "pleasureCraft": {
+      "redCpa": 300,
+      "orangeCpa": 700,
+      "maxTcpa": 10
+    },
+    "commercialShips": {
+      "redCpa": 800,
+      "orangeCpa": 1852,
+      "maxTcpa": 15
+    },
+    "workboats": {
+      "redCpa": 500,
+      "maxTcpa": 12
+    },
     "criticalProximity": 45
   }
 }

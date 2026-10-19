@@ -1,11 +1,13 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { useDashboard } from './hooks/useDashboard';
 import { DataBox } from './components/DataBox';
 import { Sparkline } from './components/Sparkline';
 import { AnalogGauge } from './components/AnalogGauge';
 import { WeatherRadar } from './components/WeatherRadar';
 import { MiniCompass } from './components/MiniCompass';
-import { BoxType } from './types';
+import { AisView } from './components/AisView';
+import { AisTacticalBanner } from './components/AisTacticalBanner';
+import { BoxType, AisTarget } from './types';
 
 export const App: React.FC = () => {
   const {
@@ -28,6 +30,16 @@ export const App: React.FC = () => {
     futureForecast,
     toggleFocusMode,
     toggleGraphMode,
+    appView,
+    setAppView,
+    aisTargets,
+    harborClusters,
+    topThreat,
+    snoozeThreat,
+    selectedAisTargetId,
+    setSelectedAisTargetId,
+    ownShipPosition,
+    ownShipCourse,
   } = useDashboard();
 
   // Fullscreen toggle on center hotspot tap
@@ -65,6 +77,65 @@ export const App: React.FC = () => {
     }
   }, [activeInstrument, setActiveInstrument]);
 
+  // Toggle tra Bussola del Vento e Radar Meteo dal pulsante interno alla bussola
+  const handleToggleRadar = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveInstrument(prev => (prev === 'radar' ? 'gauge' : 'radar'));
+  }, [setActiveInstrument]);
+
+  // Calcolo del rischio AIS prioritario per il badge lampeggiante sul pulsante AIS
+  const highestAisRisk = useMemo<'RED' | 'ORANGE' | null>(() => {
+    if (aisTargets.some(t => t.risk === 'RED')) return 'RED';
+    if (aisTargets.some(t => t.risk === 'ORANGE')) return 'ORANGE';
+    return null;
+  }, [aisTargets]);
+
+  // Ispezione bersaglio dal Banner Tattico: apre direttamente la schermata AIS e seleziona il target
+  const handleInspectThreat = useCallback(
+    (threat: AisTarget) => {
+      setSelectedAisTargetId(threat.id);
+      setAppView('ais');
+    },
+    [setSelectedAisTargetId, setAppView]
+  );
+
+  // Navigazione a gesture: Two-finger horizontal swipe per passare tra Vento e AIS senza interferire con la mappa
+  useEffect(() => {
+    let startX = 0;
+    let startY = 0;
+    let isTwoFingerTouch = false;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        isTwoFingerTouch = true;
+        startX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        startY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      } else {
+        isTwoFingerTouch = false;
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!isTwoFingerTouch) return;
+      isTwoFingerTouch = false;
+      const endX = e.changedTouches[0]?.clientX ?? startX;
+      const endY = e.changedTouches[0]?.clientY ?? startY;
+      const dx = endX - startX;
+      const dy = endY - startY;
+
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+        setAppView(prev => (prev === 'wind' ? 'ais' : 'wind'));
+      }
+    };
+
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [setAppView]);
+
   const isLeftFocused = focusedBox && ['stw', 'sog', 'hdg', 'cog', 'tack'].includes(focusedBox);
   const containerClasses = [
     'main-container',
@@ -76,7 +147,17 @@ export const App: React.FC = () => {
     .join(' ');
 
   return (
-    <div className={containerClasses}>
+    <div className={`app-root-wrapper ${isNightMode ? 'night-theme' : ''}`}>
+      {/* Banner Allarme Tattico ARPA (Visibile sia in Vento che in AIS) */}
+      <AisTacticalBanner
+        threat={topThreat}
+        onInspect={handleInspectThreat}
+        onSnooze={snoozeThreat}
+        isNightMode={isNightMode}
+      />
+
+      {appView === 'wind' ? (
+        <div className={containerClasses}>
       {/* ================= COLONNA SINISTRA ================= */}
       {/* 1. STW */}
       <DataBox
@@ -203,30 +284,72 @@ export const App: React.FC = () => {
           {connectionStatus.text}
         </div>
 
-        {activeInstrument === 'gauge' ? (
-          <AnalogGauge
-            awsVal={parseFloat(displayValues.awsSvg) || 0}
-            awaDeg={displayValues.awaPointerDeg}
-            twaDeg={displayValues.twaPointerDeg}
-            leewayDeg={displayValues.leewayDeg}
-            trackDeg={displayValues.trackRotDeg}
-            tacticCwDot={displayValues.tacticCwDot}
-            tacticCcwDot={displayValues.tacticCcwDot}
-            onCenterHotspotLongPress={handleToggleNightMode}
-            onCenterHotspotClick={handleToggleFullscreen}
-          />
-        ) : (
-          <WeatherRadar
-            twdHistory={histories.twd}
-            twsHistory={histories.tws}
-            windRadarSlots={windRadarSlots}
-            futureForecast={futureForecast}
-            headingTrueDeg={displayValues.boatCompassRotDeg}
-            config={config}
-            meteoLed={displayValues.meteoLed}
-            onSwitchToGauge={() => setActiveInstrument('gauge')}
-          />
-        )}
+        <div className="gauge-viewport-wrapper">
+          <div className="gauge-inner-frame">
+            {activeInstrument === 'gauge' ? (
+              <AnalogGauge
+                awsVal={parseFloat(displayValues.awsSvg) || 0}
+                awaDeg={displayValues.awaPointerDeg}
+                twaDeg={displayValues.twaPointerDeg}
+                leewayDeg={displayValues.leewayDeg}
+                trackDeg={displayValues.trackRotDeg}
+                tacticCwDot={displayValues.tacticCwDot}
+                tacticCcwDot={displayValues.tacticCcwDot}
+                onCenterHotspotLongPress={handleToggleNightMode}
+                onCenterHotspotClick={handleToggleFullscreen}
+              />
+            ) : (
+              <WeatherRadar
+                twdHistory={histories.twd}
+                twsHistory={histories.tws}
+                windRadarSlots={windRadarSlots}
+                futureForecast={futureForecast}
+                headingTrueDeg={displayValues.boatCompassRotDeg}
+                config={config}
+                meteoLed={displayValues.meteoLed}
+                onSwitchToGauge={() => setActiveInstrument('gauge')}
+              />
+            )}
+
+            {/* Comando Sinistro: Toggle Radar Meteo / Bussola */}
+            <button
+              type="button"
+              className={`compass-inner-btn compass-btn-left ${activeInstrument === 'radar' ? 'active-radar' : ''}`}
+              onClick={handleToggleRadar}
+              title={activeInstrument === 'radar' ? 'Torna alla Bussola del Vento' : 'Attiva Radar Meteo'}
+              aria-label="Toggle Radar Meteo"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="9" strokeOpacity="0.75" />
+                <circle cx="12" cy="12" r="5" strokeOpacity="0.85" />
+                <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+                <line x1="12" y1="12" x2="18" y2="6" strokeLinecap="round" />
+              </svg>
+            </button>
+
+            {/* Comando Destro: Mappa Tattica AIS con pallino dinamico Rosso / Arancione */}
+            <button
+              type="button"
+              className="compass-inner-btn compass-btn-right"
+              onClick={e => {
+                e.stopPropagation();
+                setAppView('ais');
+              }}
+              title="Apri Mappa Tattica AIS e Bersagli"
+              aria-label="Mappa Tattica AIS"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2L19 21L12 17L5 21L12 2Z" fill="rgba(255,255,255,0.25)" stroke="currentColor" />
+              </svg>
+              {highestAisRisk && (
+                <span
+                  className={`ais-threat-badge-pulse ${highestAisRisk === 'RED' ? 'pulse-red' : 'pulse-orange'}`}
+                  aria-label={`Allarme collisione AIS: ${highestAisRisk}`}
+                />
+              )}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* ================= COLONNA DESTRA ================= */}
@@ -342,6 +465,20 @@ export const App: React.FC = () => {
           </span>
         </div>
       </DataBox>
+    </div>
+      ) : (
+        <AisView
+          targets={aisTargets}
+          harborClusters={harborClusters}
+          ownShipPosition={ownShipPosition}
+          ownShipCourse={ownShipCourse}
+          isNightMode={isNightMode}
+          onSwitchToWind={() => setAppView('wind')}
+          onSnoozeThreat={snoozeThreat}
+          selectedTargetId={selectedAisTargetId}
+          onSelectTarget={setSelectedAisTargetId}
+        />
+      )}
     </div>
   );
 };
