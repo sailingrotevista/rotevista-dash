@@ -1044,27 +1044,33 @@ module.exports = function (app) {
                         description: 'Your own vessel MMSI, Callsign, or Name to ignore from incoming AIS targets, preventing self-collision false alarms.',
                         default: '106125'
                     },
+                    criticalProximity: {
+                        type: 'number',
+                        title: 'Emergency Proximity Bubble (Meters)',
+                        description: 'Physical proximity bubble (e.g. 45m). Triggers alert if any hull enters this radius. Silenced when anchored/moored.',
+                        default: 45
+                    },
                     pleasureCraft: {
                         type: 'object',
                         title: 'Pleasure Craft (Sailboats & Yachts)',
-                        description: 'Collision thresholds for pleasure craft (<25m).',
+                        description: 'Thresholds for pleasure craft (<25m). Halved automatically on parallel courses.',
                         properties: {
                             redCpa: {
                                 type: 'number',
-                                title: 'Pleasure Craft Danger CPA (Meters)',
-                                description: 'Critical collision distance for sailboats and yachts (<25m). Triggers RED emergency alarm. Automatically halved (50%) on parallel courses (|COG diff| <= 20°) to avoid false alarms when sailing in company.',
+                                title: 'Danger CPA (Meters)',
+                                description: 'Critical collision distance. Triggers RED emergency alarm.',
                                 default: 300
                             },
                             orangeCpa: {
                                 type: 'number',
-                                title: 'Pleasure Craft Warning CPA (Meters)',
-                                description: 'Advisory distance for pleasure craft. Triggers ORANGE tactical banner and COLREGs crossing evaluation. Automatically halved on parallel courses.',
+                                title: 'Warning CPA (Meters)',
+                                description: 'Advisory distance. Triggers ORANGE tactical banner and COLREGs crossing calculation.',
                                 default: 700
                             },
                             maxTcpa: {
                                 type: 'number',
-                                title: 'Pleasure Craft Time Horizon (Minutes)',
-                                description: 'Maximum Time-to-CPA window. Targets with TCPA beyond this limit are considered non-threatening.',
+                                title: 'Time Horizon (Minutes)',
+                                description: 'Maximum Time-to-CPA window to consider target.',
                                 default: 10
                             }
                         }
@@ -1072,24 +1078,24 @@ module.exports = function (app) {
                     commercialShips: {
                         type: 'object',
                         title: 'Commercial Ships (Cargo, Tankers, Ferries)',
-                        description: 'Collision thresholds for large commercial vessels.',
+                        description: 'Thresholds for large vessels. Danger CPA automatically widens with target SOG above 12kn.',
                         properties: {
                             redCpa: {
                                 type: 'number',
-                                title: 'Commercial Ships Base Danger CPA (Meters)',
-                                description: 'Base critical CPA for Cargo, Tankers, Ferries and High-Speed Craft at or below 12 knots. Automatically widens by +3.5% per knot above 12kn (e.g. 1024m at 20kn, 1360m at 32kn) to account for blind spots, slow maneuvers, and severe wake.',
+                                title: 'Base Danger CPA (Meters)',
+                                description: 'Base critical CPA at 12 knots (scales up to 1360m at 32kn).',
                                 default: 800
                             },
                             orangeCpa: {
                                 type: 'number',
-                                title: 'Commercial Ships Base Warning CPA (Meters)',
-                                description: 'Base advisory distance for commercial vessels at 12 knots (default 1.0 NM). Automatically expands up to 3150m for high-speed craft and fast ferries based on target SOG.',
+                                title: 'Base Warning CPA (Meters)',
+                                description: 'Base advisory distance at 12 knots (scales up to 3150m for fast ferries).',
                                 default: 1852
                             },
                             maxTcpa: {
                                 type: 'number',
-                                title: 'Commercial Ships Lookahead (Minutes)',
-                                description: 'Time window for commercial traffic, allowing early course adjustments before entering their restricted maneuvering zone.',
+                                title: 'Lookahead Horizon (Minutes)',
+                                description: 'Time window for commercial traffic early maneuver warning.',
                                 default: 15
                             }
                         }
@@ -1097,27 +1103,21 @@ module.exports = function (app) {
                     workboats: {
                         type: 'object',
                         title: 'Fishing & Workboats (Trawlers, Tugs)',
-                        description: 'Collision thresholds for vessels with restricted maneuverability and towed gear.',
+                        description: 'Thresholds for vessels with restricted maneuverability and towed nets/cables.',
                         properties: {
                             redCpa: {
                                 type: 'number',
-                                title: 'Fishing & Workboats Danger CPA (Meters)',
-                                description: 'Critical clearance for trawlers, tugboats, and vessels with restricted maneuverability. Protects against submerged tow cables and wide fishing nets. Warning distance is automatically doubled.',
+                                title: 'Danger CPA (Meters)',
+                                description: 'Critical clearance. Warning distance is automatically doubled.',
                                 default: 500
                             },
                             maxTcpa: {
                                 type: 'number',
-                                title: 'Fishing & Workboats Lookahead (Minutes)',
-                                description: 'Time window for fishing boats and tugs. Accounts for their slow maneuverability and towed gear.',
+                                title: 'Lookahead Horizon (Minutes)',
+                                description: 'Time window for fishing boats and tugs.',
                                 default: 12
                             }
                         }
-                    },
-                    criticalProximity: {
-                        type: 'number',
-                        title: 'Emergency Proximity Bubble (Meters)',
-                        description: 'Universal physical proximity bubble. Triggers an alert if any hull enters this radius. Automatically silenced in harbors and marinas for stationary moored vessels.',
-                        default: 45
                     }
                 }
             }
@@ -1125,42 +1125,13 @@ module.exports = function (app) {
     };
 
     /**
-     * plugin.uiSchema: Organizza l'interfaccia Signal K Admin con sezioni collassabili ad albero.
-     * Signal K Server richiede che uiSchema sia una funzione con 'field: ObjectField'.
+     * plugin.uiSchema: Schema UI per ordinamento dei campi in Signal K Admin.
      */
-    const pluginUiSchema = {
+    plugin.uiSchema = {
         aisAlerter: {
-            pleasureCraft: {
-                'ui:field': 'collapsible',
-                collapse: {
-                    field: 'ObjectField',
-                    wrapClassName: 'panel-group',
-                    collapsed: true
-                }
-            },
-            commercialShips: {
-                'ui:field': 'collapsible',
-                collapse: {
-                    field: 'ObjectField',
-                    wrapClassName: 'panel-group',
-                    collapsed: true
-                }
-            },
-            workboats: {
-                'ui:field': 'collapsible',
-                collapse: {
-                    field: 'ObjectField',
-                    wrapClassName: 'panel-group',
-                    collapsed: true
-                }
-            }
+            'ui:order': ['enabled', 'ignoreOwnTarget', 'criticalProximity', 'pleasureCraft', 'commercialShips', 'workboats']
         }
     };
-
-    plugin.uiSchema = function () {
-        return pluginUiSchema;
-    };
-    Object.assign(plugin.uiSchema, pluginUiSchema);
         
     /**
         * freeze30mSlot: Consolida e congela i dati di una specifica mezz'ora.
