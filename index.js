@@ -53,6 +53,7 @@ module.exports = function (app) {
     let vesselStatTimes = {};    // Registro durata stazionamento scafi
     let vesselHdgHist = {};      // Storico prua bersagli per rilevamento ormeggio
     let lastOwnGps = { lat: null, lon: null, t: 0 }; // Ultimo punto GPS proprio per cinematica
+    let aisDiagnostics = { status: 'INITIALIZING', myGps: null, vesselsCount: 0, extractionMethod: 'none', lastRun: null };
 
     // ==========================================================================
     // COSTANTI DI SVILUPPO (DEVELOPER CONFIG)
@@ -144,7 +145,13 @@ module.exports = function (app) {
                 res.json({
                     targets: lastNearbyVessels,
                     harborClusters: lastHarborClusters,
-                    topThreat: topThreat
+                    topThreat: topThreat,
+                    diagnostics: {
+                        ...aisDiagnostics,
+                        cacheCount: Object.keys(aisPersistentCache).length,
+                        nearbyCount: lastNearbyVessels.length,
+                        serverTime: new Date().toISOString()
+                    }
                 });
             });
             app.get('/rotevista-tile', (req, res) => {
@@ -1571,6 +1578,13 @@ module.exports = function (app) {
                 myGps = { lat: parseFloat(p.latitude), lon: parseFloat(p.longitude) };
             }
         }
+        if (!myGps && typeof app.getPath === 'function') {
+            let pos = app.getPath('vessels.self.navigation.position');
+            let p = (pos && pos.value) ? pos.value : pos;
+            if (p && p.latitude != null && p.longitude != null) {
+                myGps = { lat: parseFloat(p.latitude), lon: parseFloat(p.longitude) };
+            }
+        }
         if (myGps && !isNaN(myGps.lat) && !isNaN(myGps.lon)) {
             lastOwnGps = { lat: myGps.lat, lon: myGps.lon, t: now };
         } else if (lastOwnGps.lat !== null && lastOwnGps.lon !== null) {
@@ -1578,8 +1592,16 @@ module.exports = function (app) {
         }
 
         if (!myGps || isNaN(myGps.lat) || isNaN(myGps.lon)) {
+            aisDiagnostics = {
+                status: 'WAITING_OWN_GPS',
+                myGps: null,
+                vesselsCount: 0,
+                extractionMethod: 'none',
+                lastRun: new Date(now).toISOString()
+            };
             return; // In attesa di GPS proprio valido
         }
+        aisDiagnostics.myGps = { lat: myGps.lat, lon: myGps.lon };
 
         let mySpeedKn = 0;
         if (raw['navigation.speedOverGround'] !== undefined) {
@@ -1650,16 +1672,42 @@ module.exports = function (app) {
 
         // 3. Estrazione albero navi da Signal K (in-memory)
         let vesselsData = {};
+        let extractionMethod = 'none';
+
         if (typeof app.getPath === 'function') {
-            vesselsData = app.getPath('vessels') || {};
+            try {
+                vesselsData = app.getPath('vessels') || app.getPath('/vessels') || {};
+                if (vesselsData && Object.keys(vesselsData).length > 0) {
+                    extractionMethod = 'app.getPath';
+                }
+            } catch (e) {}
         }
         if (!vesselsData || Object.keys(vesselsData).length === 0) {
             if (app.signalk && app.signalk.root && app.signalk.root.vessels) {
                 vesselsData = app.signalk.root.vessels;
+                extractionMethod = 'app.signalk.root.vessels';
             } else if (app.signalk && app.signalk.vessels) {
                 vesselsData = app.signalk.vessels;
+                extractionMethod = 'app.signalk.vessels';
+            } else if (app.signalk && typeof app.signalk.retrieve === 'function') {
+                try {
+                    const skRoot = app.signalk.retrieve();
+                    if (skRoot && skRoot.vessels) {
+                        vesselsData = skRoot.vessels;
+                        extractionMethod = 'app.signalk.retrieve().vessels';
+                    }
+                } catch (e) {}
             }
         }
+        if (vesselsData && vesselsData.value && typeof vesselsData.value === 'object' && !vesselsData.navigation) {
+            vesselsData = vesselsData.value;
+            extractionMethod += ' (.value unwrap)';
+        }
+
+        aisDiagnostics.vesselsCount = vesselsData ? Object.keys(vesselsData).length : 0;
+        aisDiagnostics.extractionMethod = extractionMethod;
+        aisDiagnostics.lastRun = new Date(now).toISOString();
+        aisDiagnostics.status = 'RUNNING';
 
         const selfId = app.selfId || 'self';
 
@@ -1745,7 +1793,10 @@ module.exports = function (app) {
                 let realAisTime = now;
                 if (v.navigation.position.timestamp) {
                     let parsedTime = Date.parse(v.navigation.position.timestamp);
-                    if (!isNaN(parsedTime)) realAisTime = parsedTime;
+                    if (!isNaN(parsedTime)) {
+                        // Tolleranza clock-skew (se l'orologio di bordo differisce da UTC di oltre 5 min, usa now)
+                        realAisTime = Math.abs(now - parsedTime) < 300000 ? parsedTime : now;
+                    }
                 }
 
                 let shipType = 0;
@@ -1828,6 +1879,11 @@ module.exports = function (app) {
         for (let key in aisPersistentCache) {
             let v = aisPersistentCache[key];
             let age = now - v.lastSeen;
+            if (age < -30000) {
+                // Orologio di sistema andato indietro, risincronizza con now
+                v.lastSeen = now;
+                age = 0;
+            }
             let maxAgeAllowed = (v.sog >= 0.8) ? 360000 : 900000;
             if (age > maxAgeAllowed) {
                 delete aisPersistentCache[key];
@@ -2433,6 +2489,7 @@ module.exports = function (app) {
         // 10. Emissione Delta WebSocket verso la Dashboard
         if (typeof app.handleMessage === 'function') {
             app.handleMessage(plugin.id, {
+                context: 'vessels.self',
                 updates: [
                     {
                         values: [
