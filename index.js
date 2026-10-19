@@ -56,8 +56,21 @@ module.exports = function (app) {
         * Viene chiamato all'avvio e OGNI VOLTA che si salva nella configurazione.
         */
     plugin.start = function (options) {
-        // 1. Aggiorna la configurazione in memoria
-        currentConfig = options;
+        // 1. Aggiorna la configurazione in memoria con fallback per aisAlerter
+        const defaultAisConfig = {
+            enabled: true,
+            yachtRedCpa: 300,
+            yachtOrangeCpa: 700,
+            yachtMaxTcpa: 10,
+            commercialRedCpa: 800,
+            commercialOrangeCpa: 1852,
+            commercialMaxTcpa: 15,
+            workRedCpa: 500,
+            workMaxTcpa: 12,
+            criticalProximity: 45
+        };
+        currentConfig = options || {};
+        currentConfig.aisAlerter = Object.assign({}, defaultAisConfig, currentConfig.aisAlerter || {});
         app.debug(`${plugin.name} started/updated with new options`);
 
         // Rimosso il reset distruttivo per garantire la conservazione dei dati in RAM
@@ -730,6 +743,74 @@ module.exports = function (app) {
                                 default: 2
                             }
                         }
+                    }
+                }
+            },
+            // --- SEZIONE MONITORAGGIO INCROCI ED EMERGENZA AIS ---
+            aisAlerter: {
+                type: 'object',
+                title: 'AIS Collision & Crossing Monitor (ARPA)',
+                description: 'Real-time tactical collision avoidance, COLREGs-72 crossing advisor, and smart anchoring guard.',
+                properties: {
+                    enabled: {
+                        type: 'boolean',
+                        title: 'Enable AIS Collision Alerter',
+                        description: 'Activate real-time ARPA collision calculations, crossing advisor, and dashboard tactical alert banners.',
+                        default: true
+                    },
+                    yachtRedCpa: {
+                        type: 'number',
+                        title: 'Pleasure Craft Danger CPA (Meters)',
+                        description: 'Critical collision distance for sailboats and yachts (<25m). Triggers RED emergency alarm. Automatically halved (50%) on parallel courses (|COG diff| <= 20°) to avoid false alarms when sailing in company.',
+                        default: 300
+                    },
+                    yachtOrangeCpa: {
+                        type: 'number',
+                        title: 'Pleasure Craft Warning CPA (Meters)',
+                        description: 'Advisory distance for pleasure craft. Triggers ORANGE tactical banner and COLREGs crossing evaluation. Automatically halved on parallel courses.',
+                        default: 700
+                    },
+                    yachtMaxTcpa: {
+                        type: 'number',
+                        title: 'Pleasure Craft Time Horizon (Minutes)',
+                        description: 'Maximum Time-to-CPA window. Targets with TCPA beyond this limit are considered non-threatening.',
+                        default: 10
+                    },
+                    commercialRedCpa: {
+                        type: 'number',
+                        title: 'Commercial Ships Base Danger CPA (Meters)',
+                        description: 'Base critical CPA for Cargo, Tankers, Ferries and High-Speed Craft at or below 12 knots. Automatically widens by +3.5% per knot above 12kn (e.g. 1024m at 20kn, 1360m at 32kn) to account for blind spots, slow maneuvers, and severe wake.',
+                        default: 800
+                    },
+                    commercialOrangeCpa: {
+                        type: 'number',
+                        title: 'Commercial Ships Base Warning CPA (Meters)',
+                        description: 'Base advisory distance for commercial vessels at 12 knots (default 1.0 NM). Automatically expands up to 3150m for high-speed craft and fast ferries based on target SOG.',
+                        default: 1852
+                    },
+                    commercialMaxTcpa: {
+                        type: 'number',
+                        title: 'Commercial Ships Lookahead (Minutes)',
+                        description: 'Time window for commercial traffic, allowing early course adjustments before entering their restricted maneuvering zone.',
+                        default: 15
+                    },
+                    workRedCpa: {
+                        type: 'number',
+                        title: 'Fishing & Workboats Danger CPA (Meters)',
+                        description: 'Critical clearance for trawlers, tugboats, and vessels with restricted maneuverability. Protects against submerged tow cables and wide fishing nets. Warning distance is automatically doubled.',
+                        default: 500
+                    },
+                    workMaxTcpa: {
+                        type: 'number',
+                        title: 'Fishing & Workboats Lookahead (Minutes)',
+                        description: 'Time window for fishing boats and tugs. Accounts for their slow maneuverability and towed gear.',
+                        default: 12
+                    },
+                    criticalProximity: {
+                        type: 'number',
+                        title: 'Emergency Proximity Bubble (Meters)',
+                        description: 'Universal physical proximity bubble. Triggers an alert if any hull enters this radius. Automatically silenced in harbors and marinas for stationary moored vessels.',
+                        default: 45
                     }
                 }
             }

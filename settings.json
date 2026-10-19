@@ -20,5 +20,17 @@
     "sog": { "stdMax": 12, "step": 2, "hercSpan": 4 },
     "tws": { "stdMax": 25, "step": 5, "hercSpan": 10 },
     "depth": { "stdMax": 20, "step": 10, "hercSpan": 10 }
+  },
+  "aisAlerter": {
+    "enabled": true,
+    "yachtRedCpa": 300,
+    "yachtOrangeCpa": 700,
+    "yachtMaxTcpa": 10,
+    "commercialRedCpa": 800,
+    "commercialOrangeCpa": 1852,
+    "commercialMaxTcpa": 15,
+    "workRedCpa": 500,
+    "workMaxTcpa": 12,
+    "criticalProximity": 45
   }
 }
