@@ -730,9 +730,19 @@ body.night-mode,
     fill: #050000 !important;
     stroke: #330000 !important;
 }
-.night-mode #radar-tick-labels {
+.night-mode #radar-tick-labels,
+.night-theme #radar-tick-labels,
+body.night-mode #radar-tick-labels {
     fill: #800000 !important;
 }
+
+/* Tacche radar in Modalità Notte (tutte uniformate al colore notturno della bussola tattica) */
+.night-mode #radar-ticks line,
+.night-theme #radar-ticks line,
+body.night-mode #radar-ticks line {
+    stroke: #550000 !important;
+}
+
 .night-mode #radar-boat-icon {
     fill: #220000 !important;
     stroke: #ff0000 !important;
@@ -953,14 +963,14 @@ body.night-mode,
     aspect-ratio: 1 / 1;
     height: auto;
     border-radius: 50%;
-    background: rgba(18, 22, 28, 0.88);
-    border: 1.5px solid rgba(255, 255, 255, 0.85);
-    color: #ffffff;
+    background: #ffffff;
+    border: 1.5px solid #000000;
+    color: #000000;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3), inset 0 0 2px rgba(255, 255, 255, 0.2);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
     backdrop-filter: blur(4px);
     transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
     padding: 0;
@@ -977,7 +987,8 @@ body.night-mode,
 .compass-inner-btn:hover,
 .compass-inner-btn:active {
     transform: translate(-50%, -50%) scale(1.08);
-    background: rgba(30, 36, 46, 0.98);
+    background: #ffffff;
+    color: #000000;
 }
 
 .compass-btn-left {
@@ -993,10 +1004,10 @@ body.night-mode,
 }
 
 .compass-inner-btn.active-radar {
-    background: rgba(0, 195, 255, 0.28);
-    border-color: #00c3ff;
-    color: #00c3ff;
-    box-shadow: 0 0 12px rgba(0, 195, 255, 0.55);
+    background: #ffffff;
+    border-color: #0284c7;
+    color: #0284c7;
+    box-shadow: 0 0 10px rgba(2, 132, 199, 0.4);
 }
 
 .ais-threat-badge-pulse {
@@ -1025,21 +1036,33 @@ body.night-mode,
     50% { transform: scale(1.35); opacity: 0.65; }
 }
 
-/* Modalità Notte (Tactical Red) */
+/* Modalità Notte (Tactical Red) Pulsanti Bussola Vento */
 body.night-mode .compass-inner-btn,
-.night-theme .compass-inner-btn {
-    background: rgba(22, 0, 0, 0.88);
-    border-color: #ff3333;
-    color: #ff3333;
-    box-shadow: 0 0 8px rgba(255, 0, 0, 0.35);
+.night-theme .compass-inner-btn,
+.night-mode .compass-inner-btn {
+    background: #1a0000 !important;
+    border-color: #ff3333 !important;
+    color: #ff3333 !important;
+    box-shadow: 0 0 8px rgba(255, 0, 0, 0.35) !important;
 }
 
 body.night-mode .compass-inner-btn.active-radar,
-.night-theme .compass-inner-btn.active-radar {
-    background: rgba(255, 51, 51, 0.35);
-    border-color: #ff3333;
-    color: #ffffff;
-    box-shadow: 0 0 14px rgba(255, 51, 51, 0.7);
+.night-theme .compass-inner-btn.active-radar,
+.night-mode .compass-inner-btn.active-radar {
+    background: rgba(60, 0, 0, 0.95) !important;
+    border-color: #ff3333 !important;
+    color: #ff3333 !important;
+    box-shadow: 0 0 14px rgba(255, 51, 51, 0.7) !important;
+}
+
+body.night-mode .compass-inner-btn:hover,
+body.night-mode .compass-inner-btn:active,
+.night-theme .compass-inner-btn:hover,
+.night-theme .compass-inner-btn:active,
+.night-mode .compass-inner-btn:hover,
+.night-mode .compass-inner-btn:active {
+    background: #2b0000 !important;
+    color: #ff3333 !important;
 }
 
 /* ==========================================================================
@@ -1144,30 +1167,52 @@ body.night-mode .compass-inner-btn.active-radar,
 }
 
 .ais-tool-btn {
-    width: 36px;
-    height: 36px;
-    background: rgba(15, 23, 42, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 8px;
-    color: #ffffff;
-    font-size: 1rem;
+    width: clamp(40px, 12vw, 48px);
+    height: clamp(40px, 12vw, 48px);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 1.5px solid #000000;
+    color: #000000;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    backdrop-filter: blur(8px);
-    transition: background 0.15s, transform 0.15s;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(4px);
+    transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+    padding: 0;
 }
 
 .ais-tool-btn.btn-active {
-    background: #00c3ff;
-    color: #0f172a;
-    border-color: #00c3ff;
+    background: #ffffff;
+    color: #0284c7;
+    border-color: #0284c7;
+    box-shadow: 0 0 10px rgba(2, 132, 199, 0.4);
 }
 
+.ais-tool-btn:hover,
 .ais-tool-btn:active {
-    transform: scale(0.95);
+    transform: scale(1.08);
+}
+
+/* Modalità Notte (Tactical Red) Pulsante Lista Bersagli */
+body.night-mode .ais-tool-btn,
+.night-theme .ais-tool-btn,
+.night-mode .ais-tool-btn {
+    background: #1a0000 !important;
+    border-color: #ff3333 !important;
+    color: #ff3333 !important;
+    box-shadow: 0 0 8px rgba(255, 0, 0, 0.4) !important;
+}
+
+body.night-mode .ais-tool-btn.btn-active,
+.night-theme .ais-tool-btn.btn-active,
+.night-mode .ais-tool-btn.btn-active {
+    background: rgba(60, 0, 0, 0.95) !important;
+    border-color: #ff3333 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 14px rgba(255, 51, 51, 0.8) !important;
 }
 
 /* Range Ring Distance Label */
@@ -1259,275 +1304,661 @@ body.night-mode .compass-inner-btn.active-radar,
     color: #ff9500;
 }
 
-/* Telemetry Drawer */
-.ais-telemetry-drawer {
+/* ==========================================================================
+   14. AIS FLOATING DROPDOWN CARD (Screenshot 1, 2, 3)
+   ========================================================================== */
+.ais-dropdown-card {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 2000;
-    background: rgba(15, 23, 42, 0.95);
-    border-top: 1.5px solid rgba(255, 255, 255, 0.15);
-    padding: 12px 16px;
-    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(12px);
-    animation: drawerSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    max-height: 55vh;
-    overflow-y: auto;
+    top: 10px;
+    right: 68px;
+    width: 360px;
+    max-width: calc(100vw - 84px);
+    max-height: calc(100vh - 24px);
+    background: #ffffff;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 20px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16);
+    backdrop-filter: blur(16px);
+    z-index: 2200;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: cardDropdown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes drawerSlideUp {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
+@keyframes cardDropdown {
+    from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-.drawer-header {
+/* Card Header (Screenshot 1) */
+.ais-card-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 8px;
+    padding: 14px 16px 12px 16px;
+    border-bottom: 1px solid #f1f5f9;
 }
 
-.drawer-title-group {
+.ais-card-title-group {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
 }
 
-.drawer-name {
-    font-size: 1rem;
+.ais-card-icon-arrow {
+    color: #0284c7;
+    width: 18px;
+    height: 18px;
+}
+
+.ais-card-title {
+    font-size: 0.95rem;
     font-weight: 800;
-    color: #ffffff;
-}
-
-.drawer-callsign {
-    font-size: 0.75rem;
-    font-family: monospace;
-    color: #94a3b8;
-}
-
-.drawer-risk-badge {
-    font-size: 0.7rem;
-    font-weight: 800;
-    padding: 2px 6px;
-    border-radius: 4px;
+    color: #0f172a;
+    letter-spacing: 0.5px;
     text-transform: uppercase;
 }
 
-.risk-red {
-    background: #ff2d55;
-    color: #ffffff;
-}
-
-.risk-orange {
-    background: #ff9500;
-    color: #ffffff;
-}
-
-.risk-grey {
-    background: rgba(255, 255, 255, 0.15);
-    color: #cbd5e1;
-}
-
-.drawer-close-btn {
+.ais-card-close-btn {
     background: transparent;
     border: none;
-    color: #94a3b8;
-    font-size: 1.1rem;
+    color: #64748b;
+    font-size: 1.2rem;
     cursor: pointer;
     padding: 4px;
-}
-
-.drawer-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-    margin-bottom: 10px;
-}
-
-.drawer-cell {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
-    padding: 6px 8px;
-    display: flex;
-    flex-direction: column;
-}
-
-.drawer-wide {
-    grid-column: span 2;
-}
-
-.drawer-cell .d-label {
-    font-size: 0.65rem;
-    color: #94a3b8;
-    font-weight: 700;
-}
-
-.drawer-cell .d-val {
-    font-size: 0.85rem;
-    font-weight: 800;
-    color: #ffffff;
-    font-family: monospace;
-}
-
-.drawer-cell .d-val.highlight {
-    color: #00c3ff;
-}
-
-.drawer-colregs-box {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 6px;
-    padding: 8px 10px;
-    margin-bottom: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.colregs-title {
-    font-size: 0.7rem;
-    font-weight: 800;
-    color: #ff9500;
-    text-transform: uppercase;
-}
-
-.colregs-desc {
-    font-size: 0.78rem;
-    color: #f1f5f9;
-    white-space: pre-line;
-}
-
-.drawer-actions {
+    line-height: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
 }
 
-.drawer-btn {
-    flex: 1;
-    border: none;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-weight: 800;
-    font-size: 0.75rem;
-    cursor: pointer;
-}
-
-.btn-center {
-    background: #00c3ff;
+.ais-card-close-btn:hover {
     color: #0f172a;
 }
 
-/* Register List Drawer */
-.ais-register-drawer {
-    position: absolute;
-    top: 55px;
-    bottom: 0;
-    right: 0;
-    width: 320px;
-    max-width: 90vw;
-    z-index: 2000;
-    background: rgba(15, 23, 42, 0.95);
-    border-left: 1.5px solid rgba(255, 255, 255, 0.15);
+/* Card Body - Target List (Screenshot 1) */
+.ais-card-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
     display: flex;
     flex-direction: column;
-    backdrop-filter: blur(12px);
-    animation: drawerSlideRight 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    gap: 8px;
 }
 
-@keyframes drawerSlideRight {
-    from { transform: translateX(100%); }
-    to { transform: translateX(0); }
-}
-
-.register-header {
+/* Own Ship Item (Top highlighted cyan) */
+.ais-target-item-own {
+    background: #f0f9ff;
+    border: 1.5px solid #0284c7;
+    border-radius: 14px;
+    padding: 10px 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.register-header h3 {
-    margin: 0;
-    font-size: 0.85rem;
-    color: #ffffff;
-}
-
-.register-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.register-item {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
-    padding: 8px 10px;
     cursor: pointer;
     transition: background 0.15s;
 }
 
-.register-item:active {
-    background: rgba(255, 255, 255, 0.1);
+.ais-target-item-own:hover {
+    background: #e0f2fe;
 }
 
-.item-danger {
-    border-color: #ff2d55;
-    background: rgba(255, 45, 85, 0.1);
-}
-
-.item-warning {
-    border-color: #ff9500;
-    background: rgba(255, 149, 0, 0.1);
-}
-
-.reg-row-top {
+/* Target List Items */
+.ais-target-item {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 10px 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: #ffffff;
-    margin-bottom: 3px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
 }
 
-.reg-row-bottom {
+.ais-target-item:active,
+.ais-target-item:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+}
+
+.ais-target-item.risk-red {
+    border-color: #f43f5e;
+    background: #fff1f2;
+}
+
+.ais-target-item.risk-red .target-item-name {
+    color: #9f1239;
+}
+
+.ais-target-item.risk-red .target-dist-val {
+    color: #e11d48;
+}
+
+.ais-target-item.risk-orange {
+    border-color: #f59e0b;
+    background: #fffbeb;
+}
+
+.ais-target-item.risk-orange .target-item-name {
+    color: #92400e;
+}
+
+.ais-target-item.risk-orange .target-dist-val {
+    color: #d97706;
+}
+
+.target-left-group {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.72rem;
-    color: #94a3b8;
+    gap: 10px;
+    min-width: 0;
+}
+
+.target-speaking-icon {
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.target-text-col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.target-item-name {
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: 0.3px;
+}
+
+.ais-target-item-own .target-item-name {
+    color: #0284c7;
+}
+
+.target-item-sub {
+    font-size: 0.7rem;
+    color: #64748b;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.target-right-group {
+    text-align: right;
+    flex-shrink: 0;
+    margin-left: 8px;
+}
+
+.target-dist-val {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #0284c7;
     font-family: monospace;
 }
 
-.reg-badge {
-    margin-left: auto;
-    font-size: 0.65rem;
+.target-sog-val {
+    font-size: 1.05rem;
     font-weight: 800;
-    padding: 1px 4px;
-    border-radius: 3px;
+    color: #0284c7;
+    font-family: monospace;
 }
 
-.badge-red {
-    background: #ff2d55;
-    color: #ffffff;
+.target-sog-lbl {
+    font-size: 0.65rem;
+    color: #64748b;
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
-.badge-orange {
-    background: #ff9500;
-    color: #ffffff;
+/* Detail Card View (Screenshot 2 & 3) */
+.ais-card-detail {
+    display: flex;
+    flex-direction: column;
 }
 
-.badge-grey {
-    background: rgba(255, 255, 255, 0.15);
-    color: #94a3b8;
+.ais-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px 8px 14px;
+    border-bottom: 1px solid #f1f5f9;
 }
+
+.btn-back-lista {
+    background: transparent;
+    border: none;
+    color: #0284c7;
+    font-size: 0.82rem;
+    font-weight: 800;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 6px;
+    border-radius: 6px;
+}
+
+.btn-back-lista:hover {
+    background: #e0f2fe;
+}
+
+.detail-header-center {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.detail-vessel-icon {
+    font-size: 1.15rem;
+}
+
+.detail-vessel-name {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+.btn-detail-tab-toggle {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: #f0f9ff;
+    border: 1px solid #0284c7;
+    color: #0284c7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 800;
+}
+
+.btn-detail-tab-toggle:hover {
+    background: #e0f2fe;
+}
+
+.ais-detail-sub {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 14px 10px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 0.72rem;
+    color: #64748b;
+    font-weight: 700;
+}
+
+.mmsi-pill {
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    color: #0284c7;
+    padding: 2px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: monospace;
+    font-size: 0.72rem;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mmsi-pill:active {
+    background: #e0f2fe;
+}
+
+.ais-card-body-detail {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Detail Grid (4 cells - Screenshot 2 & 3) */
+.ais-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 12px 14px;
+}
+
+.ais-detail-cell {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ais-detail-cell.cell-wide {
+    grid-column: span 2;
+}
+
+.ais-cell-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+}
+
+.ais-cell-val {
+    font-size: 0.9rem;
+    font-weight: 800;
+    color: #0f172a;
+    font-family: monospace;
+}
+
+.ais-cell-val.cyan {
+    color: #0284c7;
+}
+
+/* Sight / View bottom box (Screenshot 3) */
+.ais-sight-box {
+    margin: 0 14px 12px 14px;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 12px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #0284c7;
+}
+
+.ais-detail-alert-box {
+    margin: 0 14px 10px 14px;
+    border-radius: 10px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ais-detail-alert-box.red {
+    background: #fff1f2;
+    border: 1px solid #f43f5e;
+    color: #9f1239;
+}
+
+.ais-detail-alert-box.orange {
+    background: #fffbeb;
+    border: 1px solid #f59e0b;
+    color: #92400e;
+}
+
+.ais-detail-alert-box .alert-title {
+    font-size: 0.68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.ais-detail-alert-box .alert-desc {
+    font-size: 0.75rem;
+    color: #0f172a;
+}
+
+/* VesselFinder Button (Screenshot 2) */
+.btn-vesselfinder {
+    margin: 0 14px 14px 14px;
+    background: #f0f9ff;
+    border: 1.5px solid #0284c7;
+    border-radius: 12px;
+    padding: 10px;
+    color: #0284c7;
+    font-size: 0.85rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    text-decoration: none;
+}
+
+.btn-vesselfinder:hover,
+.btn-vesselfinder:active {
+    background: #e0f2fe;
+}
+
+/* ==========================================================================
+   MODALITÀ NOTTE (TACTICAL RED) - CARTA BERSAGLI E DETTAGLIO TARGET
+   ========================================================================== */
+body.night-mode .ais-dropdown-card,
+.night-theme .ais-dropdown-card,
+.night-mode .ais-dropdown-card {
+    background: #140202 !important;
+    border-color: #ff3333 !important;
+    box-shadow: 0 12px 36px rgba(255, 0, 0, 0.35) !important;
+}
+
+body.night-mode .ais-card-header,
+body.night-mode .ais-detail-header,
+body.night-mode .ais-detail-sub,
+.night-theme .ais-card-header,
+.night-theme .ais-detail-header,
+.night-theme .ais-detail-sub {
+    background: #1a0303 !important;
+    border-color: rgba(255, 51, 51, 0.25) !important;
+}
+
+body.night-mode .ais-card-title,
+body.night-mode .detail-vessel-name,
+body.night-mode .target-item-name,
+body.night-mode .ais-cell-val,
+.night-theme .ais-card-title,
+.night-theme .detail-vessel-name,
+.night-theme .target-item-name,
+.night-theme .ais-cell-val {
+    color: #ff3333 !important;
+}
+
+body.night-mode .ais-card-close-btn,
+.night-theme .ais-card-close-btn,
+.night-mode .ais-card-close-btn {
+    color: #ff3333 !important;
+}
+
+body.night-mode .ais-card-body,
+body.night-mode .ais-card-body-detail,
+.night-theme .ais-card-body,
+.night-theme .ais-card-body-detail {
+    background: #140202 !important;
+}
+
+body.night-mode .ais-target-item,
+body.night-mode .ais-detail-cell,
+.night-theme .ais-target-item,
+.night-theme .ais-detail-cell {
+    background: rgba(35, 0, 0, 0.55) !important;
+    border-color: rgba(255, 51, 51, 0.3) !important;
+}
+
+body.night-mode .ais-target-item:hover,
+body.night-mode .ais-target-item:active,
+.night-theme .ais-target-item:hover,
+.night-theme .ais-target-item:active {
+    background: rgba(60, 0, 0, 0.65) !important;
+    border-color: #ff3333 !important;
+}
+
+body.night-mode .ais-target-item-own,
+.night-theme .ais-target-item-own {
+    border-color: #ff3333 !important;
+    background: rgba(255, 51, 51, 0.16) !important;
+}
+
+body.night-mode .target-item-sub,
+body.night-mode .ais-cell-label,
+body.night-mode .target-sog-lbl,
+.night-theme .target-item-sub,
+.night-theme .ais-cell-label,
+.night-theme .target-sog-lbl {
+    color: #b94040 !important;
+}
+
+body.night-mode .ais-card-icon-arrow,
+body.night-mode .ais-target-item-own .target-item-name,
+body.night-mode .target-dist-val,
+body.night-mode .target-sog-val,
+body.night-mode .btn-back-lista,
+body.night-mode .btn-detail-tab-toggle,
+body.night-mode .mmsi-pill,
+body.night-mode .ais-cell-val.cyan,
+body.night-mode .ais-sight-box,
+body.night-mode .btn-vesselfinder,
+.night-theme .ais-card-icon-arrow,
+.night-theme .ais-target-item-own .target-item-name,
+.night-theme .target-dist-val,
+.night-theme .target-sog-val,
+.night-theme .btn-back-lista,
+.night-theme .btn-detail-tab-toggle,
+.night-theme .mmsi-pill,
+.night-theme .ais-cell-val.cyan,
+.night-theme .ais-sight-box,
+.night-theme .btn-vesselfinder {
+    color: #ff3333 !important;
+    border-color: #ff3333 !important;
+    background: rgba(40, 0, 0, 0.45) !important;
+}
+
+body.night-mode .btn-back-lista:hover,
+body.night-mode .btn-detail-tab-toggle:hover,
+body.night-mode .btn-vesselfinder:hover,
+.night-theme .btn-back-lista:hover,
+.night-theme .btn-detail-tab-toggle:hover,
+.night-theme .btn-vesselfinder:hover {
+    background: rgba(70, 0, 0, 0.6) !important;
+}
+
+/* Floating Action Button: Switch to Wind Dashboard (Bottom Right, Round style) */
+.ais-floating-wind-btn {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    z-index: 2100;
+    width: clamp(40px, 12vw, 48px);
+    height: clamp(40px, 12vw, 48px);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 1.5px solid #000000;
+    color: #000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(4px);
+    transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+    padding: 0;
+}
+
+.ais-floating-wind-btn svg {
+    width: 54%;
+    height: 54%;
+    flex-shrink: 0;
+}
+
+.ais-floating-wind-btn:hover,
+.ais-floating-wind-btn:active {
+    transform: scale(1.08);
+    background: #ffffff;
+    color: #000000;
+}
+
+/* Modalità Notte (Tactical Red) Pulsante Fluttuante Vento */
+body.night-mode .ais-floating-wind-btn,
+.night-theme .ais-floating-wind-btn,
+.night-mode .ais-floating-wind-btn {
+    background: #1a0000 !important;
+    border-color: #ff3333 !important;
+    color: #ff3333 !important;
+    box-shadow: 0 0 8px rgba(255, 0, 0, 0.4) !important;
+}
+
+/* Dock Controlli Mappa (Centro Bordo Destro, Allineato a 12px) */
+.ais-map-controls-dock {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1500;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: auto;
+}
+
+.ais-map-btn {
+    width: clamp(40px, 12vw, 48px);
+    height: clamp(40px, 12vw, 48px);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 1.5px solid #000000;
+    color: #000000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(4px);
+    transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    padding: 0;
+}
+
+.ais-map-btn svg {
+    width: 52%;
+    height: 52%;
+    flex-shrink: 0;
+}
+
+.ais-map-btn:hover,
+.ais-map-btn:active {
+    transform: scale(1.08);
+    background: #ffffff;
+    color: #000000;
+}
+
+.ais-map-btn.active-center {
+    background: #ffffff;
+    border-color: #0284c7;
+    color: #0284c7;
+    box-shadow: 0 0 10px rgba(2, 132, 199, 0.4);
+}
+
+/* Modalità Notte (Tactical Red) Controlli Mappa */
+body.night-mode .ais-map-btn,
+.night-theme .ais-map-btn,
+.night-mode .ais-map-btn {
+    background: #1a0000 !important;
+    border-color: #ff3333 !important;
+    color: #ff3333 !important;
+    box-shadow: 0 0 8px rgba(255, 0, 0, 0.4) !important;
+}
+
+body.night-mode .ais-map-btn.active-center,
+.night-theme .ais-map-btn.active-center,
+.night-mode .ais-map-btn.active-center {
+    background: rgba(60, 0, 0, 0.95) !important;
+    border-color: #ff3333 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 14px rgba(255, 51, 51, 0.8) !important;
+}
+
+
 

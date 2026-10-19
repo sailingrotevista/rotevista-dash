@@ -339,7 +339,7 @@ export const App: React.FC = () => {
               aria-label="Mappa Tattica AIS"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 2L19 21L12 17L5 21L12 2Z" fill="rgba(255,255,255,0.25)" stroke="currentColor" />
+                <path d="M12 2L19 21L12 17L5 21L12 2Z" fill="rgba(0,0,0,0.12)" stroke="currentColor" />
               </svg>
               {highestAisRisk && (
                 <span
