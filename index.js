@@ -228,11 +228,9 @@ module.exports = function (app) {
             clearInterval(aisInterval);
             aisInterval = null;
         }
-        if (currentConfig.aisAlerter && currentConfig.aisAlerter.enabled !== false) {
-            const intervalMs = (currentConfig.aisAlerter.checkIntervalSec || 15) * 1000;
-            aisInterval = setInterval(processAisEngine, intervalMs);
-            setTimeout(processAisEngine, 2500); // Primo calcolo a caldo
-        }
+        const intervalMs = ((currentConfig.aisAlerter && currentConfig.aisAlerter.checkIntervalSec) || 15) * 1000;
+        aisInterval = setInterval(processAisEngine, intervalMs);
+        setTimeout(processAisEngine, 1000); // Primo calcolo a caldo entro 1s
         // Inizializza la cache cartografica locale LRU su disco per Cerbo GX
         initTileCache();
     };
@@ -1559,16 +1557,24 @@ module.exports = function (app) {
 
         // 1. Lettura posizione e cinematica nave propria
         let myGps = null;
-        if (raw['navigation.position'] && raw['navigation.position'].latitude != null && raw['navigation.position'].longitude != null) {
-            myGps = {
-                lat: parseFloat(raw['navigation.position'].latitude),
-                lon: parseFloat(raw['navigation.position'].longitude)
-            };
-        } else if (typeof app.getSelfPath === 'function') {
-            const pos = app.getSelfPath('navigation.position.value');
-            if (pos && pos.latitude != null && pos.longitude != null) {
-                myGps = { lat: parseFloat(pos.latitude), lon: parseFloat(pos.longitude) };
+        if (raw['navigation.position']) {
+            let p = raw['navigation.position'].value || raw['navigation.position'];
+            if (p && p.latitude != null && p.longitude != null) {
+                myGps = { lat: parseFloat(p.latitude), lon: parseFloat(p.longitude) };
             }
+        }
+        if (!myGps && typeof app.getSelfPath === 'function') {
+            let pos = app.getSelfPath('navigation.position');
+            if (!pos) pos = app.getSelfPath('navigation.position.value');
+            let p = (pos && pos.value) ? pos.value : pos;
+            if (p && p.latitude != null && p.longitude != null) {
+                myGps = { lat: parseFloat(p.latitude), lon: parseFloat(p.longitude) };
+            }
+        }
+        if (myGps && !isNaN(myGps.lat) && !isNaN(myGps.lon)) {
+            lastOwnGps = { lat: myGps.lat, lon: myGps.lon, t: now };
+        } else if (lastOwnGps.lat !== null && lastOwnGps.lon !== null) {
+            myGps = { lat: lastOwnGps.lat, lon: lastOwnGps.lon };
         }
 
         if (!myGps || isNaN(myGps.lat) || isNaN(myGps.lon)) {
@@ -1579,8 +1585,9 @@ module.exports = function (app) {
         if (raw['navigation.speedOverGround'] !== undefined) {
             mySpeedKn = raw['navigation.speedOverGround'] * 1.94384;
         } else if (typeof app.getSelfPath === 'function') {
-            const sog = app.getSelfPath('navigation.speedOverGround.value');
-            if (sog !== undefined && !isNaN(sog)) mySpeedKn = sog * 1.94384;
+            const sog = app.getSelfPath('navigation.speedOverGround');
+            const sogVal = (sog && sog.value !== undefined) ? sog.value : sog;
+            if (sogVal !== undefined && !isNaN(sogVal)) mySpeedKn = parseFloat(sogVal) * 1.94384;
         }
         const mySpeedMs = mySpeedKn / 1.94384;
 
@@ -1645,8 +1652,13 @@ module.exports = function (app) {
         let vesselsData = {};
         if (typeof app.getPath === 'function') {
             vesselsData = app.getPath('vessels') || {};
-        } else if (app.signalk && app.signalk.root && app.signalk.root.vessels) {
-            vesselsData = app.signalk.root.vessels;
+        }
+        if (!vesselsData || Object.keys(vesselsData).length === 0) {
+            if (app.signalk && app.signalk.root && app.signalk.root.vessels) {
+                vesselsData = app.signalk.root.vessels;
+            } else if (app.signalk && app.signalk.vessels) {
+                vesselsData = app.signalk.vessels;
+            }
         }
 
         const selfId = app.selfId || 'self';
@@ -1677,8 +1689,9 @@ module.exports = function (app) {
                 continue;
             }
 
-            if (!v.navigation || !v.navigation.position || !v.navigation.position.value) continue;
-            let pos = v.navigation.position.value;
+            if (!v.navigation || !v.navigation.position) continue;
+            let pos = v.navigation.position.value || v.navigation.position;
+            if (!pos || pos.latitude == null || pos.longitude == null) continue;
             let vLat = parseFloat(pos.latitude);
             let vLon = parseFloat(pos.longitude);
             if (isNaN(vLat) || isNaN(vLon)) continue;
@@ -1695,20 +1708,24 @@ module.exports = function (app) {
                 }
 
                 let cog = 0;
-                if (v.navigation.courseOverGroundTrue && v.navigation.courseOverGroundTrue.value !== undefined) {
-                    cog = r2d(parseFloat(v.navigation.courseOverGroundTrue.value));
-                } else if (v.navigation.headingTrue && v.navigation.headingTrue.value !== undefined) {
-                    cog = r2d(parseFloat(v.navigation.headingTrue.value));
+                let cogNode = (v.navigation.courseOverGroundTrue !== undefined) ? v.navigation.courseOverGroundTrue : v.navigation.headingTrue;
+                let cogVal = (cogNode && typeof cogNode === 'object' && cogNode.value !== undefined) ? cogNode.value : cogNode;
+                if (cogVal !== undefined && cogVal !== null && !isNaN(cogVal)) {
+                    cog = r2d(parseFloat(cogVal));
                 }
 
                 let hdg = null;
-                if (v.navigation.headingTrue && v.navigation.headingTrue.value !== undefined) {
-                    hdg = r2d(parseFloat(v.navigation.headingTrue.value));
+                let hdgNode = v.navigation.headingTrue;
+                let hdgVal = (hdgNode && typeof hdgNode === 'object' && hdgNode.value !== undefined) ? hdgNode.value : hdgNode;
+                if (hdgVal !== undefined && hdgVal !== null && !isNaN(hdgVal)) {
+                    hdg = r2d(parseFloat(hdgVal));
                 }
 
                 let sog = 0;
-                if (v.navigation.speedOverGround && v.navigation.speedOverGround.value !== undefined) {
-                    sog = parseFloat(v.navigation.speedOverGround.value) * 1.94384;
+                let sogNode = v.navigation.speedOverGround;
+                let sogVal = (sogNode && typeof sogNode === 'object' && sogNode.value !== undefined) ? sogNode.value : sogNode;
+                if (sogVal !== undefined && sogVal !== null && !isNaN(sogVal)) {
+                    sog = parseFloat(sogVal) * 1.94384;
                 }
 
                 let navStateRaw = "";

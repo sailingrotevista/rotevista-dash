@@ -63,6 +63,8 @@ const formatAge = (seconds: number): string => {
   return `${hours}H FA`;
 };
 
+type FollowMode = 'own' | 'target' | 'none';
+
 export const AisView: React.FC<AisViewProps> = ({
   targets,
   harborClusters,
@@ -84,7 +86,7 @@ export const AisView: React.FC<AisViewProps> = ({
   const ownShipMarkerRef = useRef<L.Marker | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
 
-  const [isFollowBoat, setIsFollowBoat] = useState<boolean>(true);
+  const [followMode, setFollowMode] = useState<FollowMode>('own');
   const [showListDrawer, setShowListDrawer] = useState<boolean>(false);
   const [selectedTarget, setSelectedTarget] = useState<AisTarget | null>(null);
   const [targetDetailTab, setTargetDetailTab] = useState<'telemetry' | 'info'>('telemetry');
@@ -137,7 +139,7 @@ export const AisView: React.FC<AisViewProps> = ({
     markersLayerRef.current = markersGroup;
 
     map.on('dragstart', () => {
-      setIsFollowBoat(false);
+      setFollowMode('none');
     });
 
     mapRef.current = map;
@@ -182,15 +184,65 @@ export const AisView: React.FC<AisViewProps> = ({
       const offsetCenterPoint = targetPoint.add([pixelOffsetX, 0]);
       return mapRef.current.unproject(offsetCenterPoint, zoom);
     },
-    [showListDrawer, selectedTarget]
+    [showListDrawer, Boolean(selectedTarget)]
   );
 
-  // Follow boat center (centrato nella porzione di schermo libera)
+  // Center on Target handler (centrato nella porzione di schermo libera con follow attivo)
+  const handleCenterOnTarget = useCallback(
+    (target: AisTarget) => {
+      if (!mapRef.current) return;
+      setFollowMode('target');
+      const targetCenter = getOffsetCenter([target.lat, target.lon]);
+      mapRef.current.panTo(targetCenter, { animate: true });
+    },
+    [getOffsetCenter]
+  );
+
+  // Center on Own Ship & Contextual Standard Zoom
+  const handleCenterOnOwnShip = useCallback(() => {
+    if (!mapRef.current) return;
+    const currentCenter = mapRef.current.getCenter();
+    const currentZoom = mapRef.current.getZoom();
+    const targetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], currentZoom);
+    const dLat = Math.abs(currentCenter.lat - targetCenter.lat);
+    const dLon = Math.abs(currentCenter.lng - targetCenter.lng);
+    const isAlreadyCentered = followMode === 'own' && dLat < 0.0002 && dLon < 0.0002;
+
+    if (!isAlreadyCentered) {
+      // 1° Click: ripristina followMode = 'own' e centra mantenendo lo zoom corrente
+      setFollowMode('own');
+      mapRef.current.panTo(targetCenter, { animate: true });
+    } else {
+      // 2° Click: zoom standard contestuale alla velocità (fermi/ancora: 16, navigazione: 13)
+      const isStoppedOrAnchored = ownShipCourse.sog < 1.0;
+      const standardZoom = isStoppedOrAnchored ? 16 : 13;
+      const targetZoom = currentZoom === standardZoom ? (standardZoom === 16 ? 13 : 16) : standardZoom;
+      const newTargetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], targetZoom);
+      mapRef.current.setView(newTargetCenter, targetZoom, { animate: true });
+    }
+  }, [ownShipPosition, ownShipCourse, followMode, getOffsetCenter]);
+
+  // Follow Mode: dinamico per propria barca ('own') o bersaglio attivo ('target')
   useEffect(() => {
-    if (!mapRef.current || !isFollowBoat) return;
-    const targetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon]);
-    mapRef.current.panTo(targetCenter, { animate: true });
-  }, [ownShipPosition, isFollowBoat, getOffsetCenter]);
+    if (!mapRef.current || followMode === 'none') return;
+    if (followMode === 'own') {
+      const targetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon]);
+      mapRef.current.panTo(targetCenter, { animate: true });
+    } else if (followMode === 'target' && selectedTarget) {
+      const targetCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon]);
+      mapRef.current.panTo(targetCenter, { animate: true });
+    }
+  }, [ownShipPosition, selectedTarget, followMode, getOffsetCenter]);
+
+  // Seleziona e insegue il bersaglio quando viene passato o modificato selectedTargetId dall'esterno
+  useEffect(() => {
+    if (selectedTargetId) {
+      const found = targets.find(t => t.id === selectedTargetId);
+      if (found) {
+        handleCenterOnTarget(found);
+      }
+    }
+  }, [selectedTargetId, handleCenterOnTarget]);
 
   // Render Range Rings (0.5 NM, 1.0 NM, 2.0 NM, 5.0 NM) around own ship
   useEffect(() => {
@@ -387,6 +439,7 @@ export const AisView: React.FC<AisViewProps> = ({
         setSelectedTarget(t);
         onSelectTarget(t.id);
         setShowListDrawer(true);
+        handleCenterOnTarget(t);
       });
 
       markersLayerRef.current?.addLayer(targetMarker);
@@ -480,15 +533,7 @@ export const AisView: React.FC<AisViewProps> = ({
         markersLayerRef.current?.addLayer(trailLine);
       }
     });
-  }, [targets, ownShipPosition, ownShipCourse, selectedTarget, onSelectTarget]);
-
-  // Center on Target handler (centrato nella porzione di schermo libera)
-  const handleCenterOnTarget = useCallback((target: AisTarget) => {
-    if (!mapRef.current) return;
-    setIsFollowBoat(false);
-    const targetCenter = getOffsetCenter([target.lat, target.lon]);
-    mapRef.current.panTo(targetCenter, { animate: true });
-  }, [getOffsetCenter]);
+  }, [targets, ownShipPosition, ownShipCourse, selectedTarget, onSelectTarget, handleCenterOnTarget]);
 
   // Zoom handlers
   const handleZoomIn = useCallback(() => {
@@ -500,30 +545,6 @@ export const AisView: React.FC<AisViewProps> = ({
     if (!mapRef.current) return;
     mapRef.current.zoomOut();
   }, []);
-
-  // Center on Own Ship & Contextual Standard Zoom
-  const handleCenterOnOwnShip = useCallback(() => {
-    if (!mapRef.current) return;
-    const currentCenter = mapRef.current.getCenter();
-    const currentZoom = mapRef.current.getZoom();
-    const targetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], currentZoom);
-    const dLat = Math.abs(currentCenter.lat - targetCenter.lat);
-    const dLon = Math.abs(currentCenter.lng - targetCenter.lng);
-    const isAlreadyCentered = isFollowBoat && dLat < 0.0002 && dLon < 0.0002;
-
-    if (!isAlreadyCentered) {
-      // 1° Click: centra mantenendo lo zoom corrente nella porzione libera
-      setIsFollowBoat(true);
-      mapRef.current.panTo(targetCenter, { animate: true });
-    } else {
-      // 2° Click: zoom standard contestuale alla velocità (fermi/ancora: 16, navigazione: 13)
-      const isStoppedOrAnchored = ownShipCourse.sog < 1.0;
-      const standardZoom = isStoppedOrAnchored ? 16 : 13;
-      const targetZoom = currentZoom === standardZoom ? (standardZoom === 16 ? 13 : 16) : standardZoom;
-      const newTargetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], targetZoom);
-      mapRef.current.setView(newTargetCenter, targetZoom, { animate: true });
-    }
-  }, [ownShipPosition, ownShipCourse, isFollowBoat, getOffsetCenter]);
 
   // Target summary stats
   const stats = useMemo(() => {
@@ -600,6 +621,7 @@ export const AisView: React.FC<AisViewProps> = ({
                 setSelectedTarget(null);
                 onSelectTarget(null);
                 setShowListDrawer(true);
+                setFollowMode('own');
               } else {
                 setShowListDrawer(prev => !prev);
               }
@@ -633,11 +655,17 @@ export const AisView: React.FC<AisViewProps> = ({
                     setSelectedTarget(null);
                     onSelectTarget(null);
                     setShowListDrawer(true);
+                    setFollowMode('own');
                   }}
                 >
                   ← LISTA
                 </button>
-                <div className="detail-header-center">
+                <div
+                  className="detail-header-center"
+                  onClick={() => handleCenterOnTarget(selectedTarget)}
+                  style={{ cursor: 'pointer' }}
+                  title="Centra e insegui bersaglio"
+                >
                   <span className="detail-vessel-icon">
                     {getVesselTypeIcon(selectedTarget.type, selectedTarget.name)}
                   </span>
@@ -647,11 +675,12 @@ export const AisView: React.FC<AisViewProps> = ({
                   <button
                     type="button"
                     className="btn-detail-tab-toggle"
-                    onClick={() =>
+                    onClick={e => {
+                      e.stopPropagation();
                       setTargetDetailTab(prev =>
                         prev === 'telemetry' ? 'info' : 'telemetry'
-                      )
-                    }
+                      );
+                    }}
                     title={
                       targetDetailTab === 'telemetry'
                         ? 'Mostra Info e Dimensioni'
@@ -668,6 +697,7 @@ export const AisView: React.FC<AisViewProps> = ({
                     setSelectedTarget(null);
                     setShowListDrawer(false);
                     onSelectTarget(null);
+                    setFollowMode('own');
                   }}
                   title="Chiudi"
                 >
@@ -849,32 +879,40 @@ export const AisView: React.FC<AisViewProps> = ({
                 </div>
 
                 {/* 2. ALTRI BERSAGLI ORDINATI */}
-                {sortedTargets.map(item => (
-                  <div
-                    key={item.id}
-                    className={`ais-target-item ${item.risk === 'RED' ? 'risk-red' : item.risk === 'ORANGE' ? 'risk-orange' : ''}`}
-                    onClick={() => {
-                      setSelectedTarget(item);
-                      onSelectTarget(item.id);
-                      handleCenterOnTarget(item);
-                    }}
-                  >
-                    <div className="target-left-group">
-                      <span className="target-speaking-icon">
-                        {getVesselTypeIcon(item.type, item.name)}
-                      </span>
-                      <div className="target-text-col">
-                        <span className="target-item-name">{item.name || item.id}</span>
-                        <span className="target-item-sub">
-                          {getVesselTypeLabel(item.type, item.name)} • {getVesselStatusLabel(item)}
+                {sortedTargets.length > 0 ? (
+                  sortedTargets.map(item => (
+                    <div
+                      key={item.id}
+                      className={`ais-target-item ${item.risk === 'RED' ? 'risk-red' : item.risk === 'ORANGE' ? 'risk-orange' : ''}`}
+                      onClick={() => {
+                        setSelectedTarget(item);
+                        onSelectTarget(item.id);
+                        handleCenterOnTarget(item);
+                      }}
+                    >
+                      <div className="target-left-group">
+                        <span className="target-speaking-icon">
+                          {getVesselTypeIcon(item.type, item.name)}
                         </span>
+                        <div className="target-text-col">
+                          <span className="target-item-name">{item.name || item.id}</span>
+                          <span className="target-item-sub">
+                            {getVesselTypeLabel(item.type, item.name)} • {getVesselStatusLabel(item)}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="target-right-group">
+                        <span className="target-dist-val">{formatDist(item.dist)}</span>
                       </div>
                     </div>
-                    <div className="target-right-group">
-                      <span className="target-dist-val">{formatDist(item.dist)}</span>
-                    </div>
+                  ))
+                ) : (
+                  <div className="ais-empty-targets">
+                    <span className="ais-empty-icon">📡</span>
+                    <span className="ais-empty-title">Nessun bersaglio AIS rilevato</span>
+                    <span className="ais-empty-sub">In ascolto nel raggio di 20 NM...</span>
                   </div>
-                ))}
+                )}
               </div>
             </div>
           )}
@@ -910,9 +948,9 @@ export const AisView: React.FC<AisViewProps> = ({
 
         <button
           type="button"
-          className={`ais-map-btn ${isFollowBoat ? 'active-center' : ''}`}
+          className={`ais-map-btn ${followMode === 'own' ? 'active-center' : ''}`}
           onClick={handleCenterOnOwnShip}
-          title="Centra e Zoom Standard"
+          title={followMode === 'own' ? 'Centrato su Barca (Click: Zoom Standard)' : 'Ripristina Centro su Tua Barca'}
           aria-label="Centra Mappa"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

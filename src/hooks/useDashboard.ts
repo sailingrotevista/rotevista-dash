@@ -785,6 +785,21 @@ export function useDashboard() {
 
     let aisPollInterval: ReturnType<typeof setInterval> | null = null;
 
+    const fetchAisTargets = () => {
+      if (!isDisposed && storeRef.current.hasEverConnectedToSignalK) {
+        fetch('/rotevista-ais')
+          .then(res => (res.ok ? res.json() : null))
+          .then(d => {
+            if (d) {
+              if (Array.isArray(d.targets)) setAisTargets(d.targets);
+              if (Array.isArray(d.harborClusters)) setHarborClusters(d.harborClusters);
+              if (d.topThreat !== undefined) setTopThreat(d.topThreat);
+            }
+          })
+          .catch(() => {});
+      }
+    };
+
     const connectWs = () => {
       if (isDisposed) return;
       const addr = window.location.host;
@@ -831,22 +846,10 @@ export function useDashboard() {
           } catch (e) {}
 
           fetchHistory();
+          fetchAisTargets();
 
           if (aisPollInterval) clearInterval(aisPollInterval);
-          aisPollInterval = setInterval(() => {
-            if (!isDisposed && storeRef.current.hasEverConnectedToSignalK) {
-              fetch('/rotevista-ais')
-                .then(res => (res.ok ? res.json() : null))
-                .then(d => {
-                  if (d) {
-                    if (Array.isArray(d.targets)) setAisTargets(d.targets);
-                    if (Array.isArray(d.harborClusters)) setHarborClusters(d.harborClusters);
-                    if (d.topThreat !== undefined) setTopThreat(d.topThreat);
-                  }
-                })
-                .catch(() => {});
-            }
-          }, 10000);
+          aisPollInterval = setInterval(fetchAisTargets, 5000);
         };
 
         const fetchHistory = () => {
@@ -873,6 +876,8 @@ export function useDashboard() {
                 // AIS targets & threats da storico
                 if (Array.isArray(data.ais_targets) && data.ais_targets.length > 0) {
                   setAisTargets(data.ais_targets);
+                } else {
+                  fetchAisTargets();
                 }
                 if (data.ais_top_threat !== undefined) {
                   setTopThreat(data.ais_top_threat);
