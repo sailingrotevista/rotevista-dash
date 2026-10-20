@@ -47,7 +47,26 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 3000,
-    strictPort: true
+    strictPort: true,
+    proxy: {
+      '/signalk': {
+        target: 'http://venus.local:3000',
+        ws: true,
+        changeOrigin: true
+      },
+      '/rotevista-config': {
+        target: 'http://venus.local:3000',
+        changeOrigin: true
+      },
+      '/rotevista-history': {
+        target: 'http://venus.local:3000',
+        changeOrigin: true
+      },
+      '/rotevista-ais': {
+        target: 'http://venus.local:3000',
+        changeOrigin: true
+      }
+    }
   },
   preview: {
     host: '0.0.0.0',

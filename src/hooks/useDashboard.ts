@@ -532,10 +532,12 @@ export function useDashboard() {
   // Load configuration from Signal K plugin or settings.json
   useEffect(() => {
     fetch('/rotevista-config')
-      .then(res => {
-        if (!res.ok) throw new Error('Not available');
+      .then(async res => {
+        const contentType = res.headers.get('content-type') || '';
+        if (!res.ok || !contentType.includes('application/json')) throw new Error('Not available');
+        const json = await res.json();
         storeRef.current.hasEverConnectedToSignalK = true;
-        return res.json();
+        return json;
       })
       .catch(() => {
         return fetch('/settings.json').then(r => (r.ok ? r.json() : null));
@@ -1008,6 +1010,7 @@ export function useDashboard() {
         };
 
         ws.onclose = () => {
+          if (isDisposed) return;
           storeRef.current.isSocketOpen = false;
           if (!storeRef.current.hasEverConnectedToSignalK) {
             if (!storeRef.current.isSimulating) {
@@ -1015,23 +1018,22 @@ export function useDashboard() {
             }
           } else {
             // Connessione reale interrotta: riprova senza inquinare con simulazione
-            if (!isDisposed) {
-              reconnectTimeout = setTimeout(connectWs, 3000);
-            }
+            reconnectTimeout = setTimeout(connectWs, 3000);
           }
         };
 
         ws.onerror = () => {
+          if (isDisposed) return;
           if (!storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating) {
             handshakeTimeout = setTimeout(() => {
-              if (!storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating && !storeRef.current.isSocketOpen) {
+              if (!isDisposed && !storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating && !storeRef.current.isSocketOpen) {
                 startSimulation();
               }
             }, 3000);
           }
         };
       } catch (err) {
-        if (!storeRef.current.hasEverConnectedToSignalK) {
+        if (!isDisposed && !storeRef.current.hasEverConnectedToSignalK) {
           startSimulation();
         }
       }
@@ -1039,7 +1041,7 @@ export function useDashboard() {
 
     // Timeout handshake iniziale: se entro 4000ms Signal K non è raggiungibile e non abbiamo ricevuto segnale, avvia la simulazione
     handshakeTimeout = setTimeout(() => {
-      if (!storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSocketOpen) {
+      if (!isDisposed && !storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSocketOpen) {
         startSimulation();
       }
     }, 4000);
@@ -1084,7 +1086,22 @@ export function useDashboard() {
     return () => {
       isDisposed = true;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (ws) ws.close();
+      if (ws) {
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        if (ws.readyState === WebSocket.CONNECTING) {
+          const closingWs = ws;
+          closingWs.onopen = () => {
+            try {
+              closingWs.close();
+            } catch {}
+          };
+        } else if (ws.readyState === WebSocket.OPEN) {
+          ws.onopen = null;
+          ws.close();
+        }
+      }
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (handshakeTimeout) clearTimeout(handshakeTimeout);
       if (simTimer) clearInterval(simTimer);
