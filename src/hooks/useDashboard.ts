@@ -65,6 +65,16 @@ function safePush(buffer: AngleBufferItem[], val: number, time: number, isTwd = 
   if (buffer.length > 36000) buffer.shift();
 }
 
+function getInitialSavedDashState() {
+  try {
+    const saved = localStorage.getItem('rotevista_dash_state');
+    if (saved) return JSON.parse(saved);
+  } catch (e) {
+    // Ignore error
+  }
+  return null;
+}
+
 export function useDashboard() {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
   const configRef = useRef(config);
@@ -72,20 +82,32 @@ export function useDashboard() {
     configRef.current = config;
   }, [config]);
 
-  const [displayModeSog, setDisplayModeSog] = useState<DisplayModeSog>('SOG');
-  const [displayModeTws, setDisplayModeTws] = useState<DisplayModeTws>('TWS');
-  const [activeInstrument, setActiveInstrument] = useState<ActiveInstrument>('gauge');
-  const [isNightMode, setIsNightMode] = useState<boolean>(false);
+  const savedState = getInitialSavedDashState();
+
+  const [displayModeSog, setDisplayModeSog] = useState<DisplayModeSog>(
+    () => savedState?.displayModeSog || 'SOG'
+  );
+  const [displayModeTws, setDisplayModeTws] = useState<DisplayModeTws>(
+    () => savedState?.displayModeTws || 'TWS'
+  );
+  const [activeInstrument, setActiveInstrument] = useState<ActiveInstrument>(
+    () => savedState?.activeInstrument || 'gauge'
+  );
+  const [isNightMode, setIsNightMode] = useState<boolean>(
+    () => savedState?.isNightMode ?? false
+  );
   const isNightModeRef = useRef<boolean>(isNightMode);
   isNightModeRef.current = isNightMode;
   const [isFocusActive, setIsFocusActive] = useState<boolean>(false);
   const [focusedBox, setFocusedBox] = useState<BoxType | null>(null);
-  const [graphModes, setGraphModes] = useState<Record<string, GraphMode>>({
-    stw: 'standard',
-    sog: 'standard',
-    tws: 'standard',
-    depth: 'standard',
-  });
+  const [graphModes, setGraphModes] = useState<Record<string, GraphMode>>(
+    () => savedState?.graphModes || {
+      stw: 'standard',
+      sog: 'standard',
+      tws: 'standard',
+      depth: 'standard',
+    }
+  );
 
   const [connectionStatus, setConnectionStatus] = useState<{ text: string; className: string }>({
     text: 'CONNESSIONE...',
@@ -93,7 +115,9 @@ export function useDashboard() {
   });
 
   // AIS View & ARPA Collision States
-  const [appView, setAppView] = useState<AppView>('wind');
+  const [appView, setAppView] = useState<AppView>(
+    () => savedState?.appView || 'wind'
+  );
   const [aisTargets, setAisTargets] = useState<AisTarget[]>([]);
   const [harborClusters, setHarborClusters] = useState<HarborCluster[]>([]);
   const [topThreat, setTopThreat] = useState<AisTarget | null>(null);
@@ -490,20 +514,24 @@ export function useDashboard() {
       })
       .catch(() => {});
 
-    // Load saved dashboard state
-    const saved = localStorage.getItem('rotevista_dash_state');
-    if (saved) {
-      try {
-        const state = JSON.parse(saved);
-        if (state.displayModeSog) setDisplayModeSog(state.displayModeSog);
-        if (state.displayModeTws) setDisplayModeTws(state.displayModeTws);
-        if (state.graphModes) setGraphModes(state.graphModes);
-        if (state.isNightMode) setIsNightMode(state.isNightMode);
-      } catch (e) {
-        // Ignore
-      }
-    }
   }, []);
+
+  // Save layout state to localStorage on changes
+  useEffect(() => {
+    try {
+      const state = {
+        displayModeSog,
+        displayModeTws,
+        activeInstrument,
+        graphModes,
+        isNightMode,
+        appView,
+      };
+      localStorage.setItem('rotevista_dash_state', JSON.stringify(state));
+    } catch (e) {
+      // Ignore
+    }
+  }, [displayModeSog, displayModeTws, activeInstrument, graphModes, isNightMode, appView]);
 
   // Sync Night Mode class with body
   useEffect(() => {

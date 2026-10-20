@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { AisTarget, HarborCluster } from '../types';
 
 interface AisViewProps {
+  isActive?: boolean;
   targets: AisTarget[];
   harborClusters: HarborCluster[];
   ownShipPosition: { lat: number; lon: number };
@@ -13,6 +14,7 @@ interface AisViewProps {
   onSnoozeThreat: (targetId: string) => void;
   selectedTargetId: string | null;
   onSelectTarget: (targetId: string | null) => void;
+  ownShipName?: string;
 }
 
 const getVesselTypeIcon = (type: number | string, name?: string): string => {
@@ -31,20 +33,20 @@ const getVesselTypeIcon = (type: number | string, name?: string): string => {
 const getVesselTypeLabel = (type: number | string, name?: string): string => {
   const tNum = typeof type === 'number' ? type : parseInt(String(type), 10) || 0;
   const n = (name || '').toUpperCase();
-  if (tNum === 36 || n.startsWith('S/Y') || n.includes('SAIL') || n.includes('VELA')) return 'Vela';
-  if (tNum === 30 || n.includes('PESCA') || n.includes('FISH')) return 'Pesca';
+  if (tNum === 36 || n.startsWith('S/Y') || n.includes('SAIL') || n.includes('VELA')) return 'Sailing';
+  if (tNum === 30 || n.includes('PESCA') || n.includes('FISH')) return 'Fishing';
   if (tNum >= 70 && tNum <= 79) return 'Cargo';
   if (tNum >= 80 && tNum <= 89) return 'Tanker';
-  if (tNum >= 60 && tNum <= 69) return 'Passeggeri';
-  if (tNum === 37 || n.startsWith('M/Y') || n.includes('YACHT')) return 'Yacht / Motore';
-  return 'Motore';
+  if (tNum >= 60 && tNum <= 69) return 'Passenger';
+  if (tNum === 37 || n.startsWith('M/Y') || n.includes('YACHT')) return 'Yacht / Power';
+  return 'Powerboat';
 };
 
 const getVesselStatusLabel = (t: AisTarget): string => {
-  if (t.anchorState === 'ANCHOR_DRAGGING') return 'IN SPEDO';
-  if (t.isMoored || t.anchorState === 'MOORED') return 'IN PORTO';
-  if (t.isAnchored || t.anchorState === 'ANCHORED') return 'ALL\'ANCORA';
-  if (t.sog < 0.5) return 'FERMO';
+  if (t.anchorState === 'ANCHOR_DRAGGING') return 'DRAGGING ANCHOR';
+  if (t.isMoored || t.anchorState === 'MOORED') return 'IN PORT';
+  if (t.isAnchored || t.anchorState === 'ANCHORED') return 'AT ANCHOR';
+  if (t.sog < 0.5) return 'STOPPED';
   return `${t.sog.toFixed(1)} kn`;
 };
 
@@ -55,17 +57,18 @@ const formatDist = (meters: number | null | undefined): string => {
 };
 
 const formatAge = (seconds: number): string => {
-  if (seconds < 10) return 'ADESSO';
-  if (seconds < 60) return `${seconds}S FA`;
+  if (seconds < 10) return 'NOW';
+  if (seconds < 60) return `${seconds}S AGO`;
   const mins = Math.floor(seconds / 60);
-  if (mins < 60) return `${mins}M FA`;
+  if (mins < 60) return `${mins}M AGO`;
   const hours = Math.floor(mins / 3600);
-  return `${hours}H FA`;
+  return `${hours}H AGO`;
 };
 
 type FollowMode = 'own' | 'target' | 'none';
 
 export const AisView: React.FC<AisViewProps> = ({
+  isActive = true,
   targets,
   harborClusters,
   ownShipPosition,
@@ -75,6 +78,7 @@ export const AisView: React.FC<AisViewProps> = ({
   onSnoozeThreat,
   selectedTargetId,
   onSelectTarget,
+  ownShipName = 'MY VESSEL',
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -100,6 +104,44 @@ export const AisView: React.FC<AisViewProps> = ({
   const [targetDetailTab, setTargetDetailTab] = useState<'telemetry' | 'info'>('telemetry');
   const [copiedMmsi, setCopiedMmsi] = useState<boolean>(false);
   const [ackedLabels, setAckedLabels] = useState<Record<string, string>>({});
+
+  const selectedTargetRef = useRef<AisTarget | null>(null);
+  selectedTargetRef.current = selectedTarget;
+  const followModeRef = useRef<FollowMode>('own');
+  followModeRef.current = followMode;
+
+  // Calcola il centro geografico corretto adattandosi a Desktop (Orizzontale) e Mobile (Verticale)
+  const getOffsetCenter = useCallback(
+    (latLng: [number, number], zoomOverride?: number): L.LatLng => {
+      if (!mapRef.current) return L.latLng(latLng[0], latLng[1]);
+      const isCardOpen = showListDrawer || Boolean(selectedTarget);
+      if (!isCardOpen) {
+        return L.latLng(latLng[0], latLng[1]);
+      }
+
+      const zoom = zoomOverride !== undefined ? zoomOverride : mapRef.current.getZoom();
+      const rect = cardRef.current?.getBoundingClientRect();
+      const isMobilePortrait = window.innerWidth < 640 || window.innerWidth < window.innerHeight;
+
+      let pixelOffsetX = 0;
+      let pixelOffsetY = 0;
+
+      if (isMobilePortrait) {
+        // Mobile Portrait: la scheda è in alto, posiziona il target al centro della fascia libera inferiore
+        const cardBottom = rect ? rect.bottom : 320;
+        pixelOffsetY = -Math.max(0, cardBottom / 2);
+      } else {
+        // Desktop / Landscape: la scheda è a destra, posiziona il target al centro della fascia libera sinistra
+        const cardLeft = rect ? rect.left : Math.max(80, window.innerWidth - (360 + 68));
+        pixelOffsetX = Math.max(0, (window.innerWidth - cardLeft) / 2);
+      }
+
+      const targetPoint = mapRef.current.project(latLng, zoom);
+      const offsetCenterPoint = targetPoint.add([pixelOffsetX, pixelOffsetY]);
+      return mapRef.current.unproject(offsetCenterPoint, zoom);
+    },
+    [showListDrawer, Boolean(selectedTarget)]
+  );
 
   // Sync selectedTarget with selectedTargetId or targets updates
   useEffect(() => {
@@ -152,7 +194,13 @@ export const AisView: React.FC<AisViewProps> = ({
     });
 
     map.on('click', () => {
-      setFollowMode('none');
+      if (selectedTargetRef.current && followModeRef.current === 'none') {
+        setSelectedTarget(null);
+        onSelectTargetRef.current(null);
+        setShowListDrawer(false);
+      } else {
+        setFollowMode('none');
+      }
     });
 
     map.on('zoomend', () => {
@@ -179,38 +227,35 @@ export const AisView: React.FC<AisViewProps> = ({
     }
   }, [isNightMode]);
 
-  // Calcola il centro geografico corretto adattandosi a Desktop (Orizzontale) e Mobile (Verticale)
-  const getOffsetCenter = useCallback(
-    (latLng: [number, number], zoomOverride?: number): L.LatLng => {
-      if (!mapRef.current) return L.latLng(latLng[0], latLng[1]);
-      const isCardOpen = showListDrawer || Boolean(selectedTarget);
-      if (!isCardOpen) {
-        return L.latLng(latLng[0], latLng[1]);
+  // Gestione rientro da altra vista e reset dopo 5 minuti di inattività
+  const lastLeaveTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    if (isActive) {
+      mapRef.current.invalidateSize();
+      const now = Date.now();
+      const elapsedMs = lastLeaveTimeRef.current ? now - lastLeaveTimeRef.current : 0;
+
+      if (elapsedMs >= 5 * 60 * 1000) {
+        // Trascorsi 5 minuti o più: Reset centro barca e zoom contestuale
+        setSelectedTarget(null);
+        onSelectTarget(null);
+        setShowListDrawer(false);
+        setFollowMode('own');
+
+        const isInHarbor = harborClusters.some(c => c.dist < 500);
+        const isStoppedOrAnchored = ownShipCourse.sog < 1.0 || isInHarbor;
+        const standardZoom = isStoppedOrAnchored ? 16 : 13;
+        const center = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], standardZoom);
+        mapRef.current.setView(center, standardZoom, { animate: false });
       }
-
-      const zoom = zoomOverride !== undefined ? zoomOverride : mapRef.current.getZoom();
-      const rect = cardRef.current?.getBoundingClientRect();
-      const isMobilePortrait = window.innerWidth < 640 || window.innerWidth < window.innerHeight;
-
-      let pixelOffsetX = 0;
-      let pixelOffsetY = 0;
-
-      if (isMobilePortrait) {
-        // Mobile Portrait: la scheda è in alto, posiziona il target al centro della fascia libera inferiore
-        const cardBottom = rect ? rect.bottom : 320;
-        pixelOffsetY = -Math.max(0, cardBottom / 2);
-      } else {
-        // Desktop / Landscape: la scheda è a destra, posiziona il target al centro della fascia libera sinistra
-        const cardLeft = rect ? rect.left : Math.max(80, window.innerWidth - (360 + 68));
-        pixelOffsetX = Math.max(0, (window.innerWidth - cardLeft) / 2);
-      }
-
-      const targetPoint = mapRef.current.project(latLng, zoom);
-      const offsetCenterPoint = targetPoint.add([pixelOffsetX, pixelOffsetY]);
-      return mapRef.current.unproject(offsetCenterPoint, zoom);
-    },
-    [showListDrawer, Boolean(selectedTarget)]
-  );
+      lastLeaveTimeRef.current = null;
+    } else {
+      lastLeaveTimeRef.current = Date.now();
+    }
+  }, [isActive, harborClusters, ownShipCourse.sog, ownShipPosition.lat, ownShipPosition.lon, getOffsetCenter, onSelectTarget]);
 
   // Center on Target handler (centrato nella porzione di schermo libera con follow attivo)
   const handleCenterOnTarget = useCallback(
@@ -232,6 +277,7 @@ export const AisView: React.FC<AisViewProps> = ({
 
   // Ripristina inquadratura mappa e posizione scroll lista al ritorno dal dettaglio
   const handleReturnToList = useCallback(() => {
+    const prevTargetId = selectedTarget?.id;
     setSelectedTarget(null);
     onSelectTarget(null);
     setShowListDrawer(true);
@@ -244,11 +290,18 @@ export const AisView: React.FC<AisViewProps> = ({
       setFollowMode('own');
     }
     requestAnimationFrame(() => {
+      if (prevTargetId) {
+        const targetEl = document.getElementById(`target-item-${prevTargetId}`);
+        if (targetEl) {
+          targetEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          return;
+        }
+      }
       if (listBodyRef.current) {
         listBodyRef.current.scrollTop = listScrollTopRef.current;
       }
     });
-  }, [onSelectTarget]);
+  }, [selectedTarget, onSelectTarget]);
 
   // Center on Own Ship & Contextual Standard Zoom
   const handleCenterOnOwnShip = useCallback(() => {
@@ -331,6 +384,59 @@ export const AisView: React.FC<AisViewProps> = ({
     }
     prevSelectedTargetIdRef.current = selectedTargetId;
   }, [selectedTargetId, targets, handleCenterOnTarget]);
+
+  // Deselezione automatica con debounce di 2s se il bersaglio esce dalla mappa visibile e follow non è attivo
+  const outOfBoundsTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (!selectedTarget || followMode !== 'none' || !mapRef.current) {
+      if (outOfBoundsTimerRef.current) {
+        clearTimeout(outOfBoundsTimerRef.current);
+        outOfBoundsTimerRef.current = null;
+      }
+      return;
+    }
+
+    const map = mapRef.current;
+    const targetPos: [number, number] = [selectedTarget.lat, selectedTarget.lon];
+
+    const checkOutOfBounds = () => {
+      if (!mapRef.current) return;
+      const bounds = mapRef.current.getBounds();
+      const isTargetInBounds = bounds.contains(targetPos);
+
+      if (!isTargetInBounds) {
+        // Avvia il timer solo se non è già attivo
+        if (!outOfBoundsTimerRef.current) {
+          outOfBoundsTimerRef.current = setTimeout(() => {
+            outOfBoundsTimerRef.current = null;
+            if (!mapRef.current || !selectedTarget) return;
+            const currentBounds = mapRef.current.getBounds();
+            if (!currentBounds.contains([selectedTarget.lat, selectedTarget.lon])) {
+              setSelectedTarget(null);
+              onSelectTarget(null);
+              setShowListDrawer(false);
+            }
+          }, 2000);
+        }
+      } else {
+        // Se il bersaglio rientra nei confini visibili, annulla il timer
+        if (outOfBoundsTimerRef.current) {
+          clearTimeout(outOfBoundsTimerRef.current);
+          outOfBoundsTimerRef.current = null;
+        }
+      }
+    };
+
+    checkOutOfBounds();
+    map.on('moveend', checkOutOfBounds);
+
+    return () => {
+      map.off('moveend', checkOutOfBounds);
+    };
+  }, [selectedTarget?.id, selectedTarget?.lat, selectedTarget?.lon, followMode, onSelectTarget]);
+
+
 
   // Render Dynamic Range Rings (scaling from 15m at zoom 19+ up to unlimited NM on zoom out)
   useEffect(() => {
@@ -415,7 +521,7 @@ export const AisView: React.FC<AisViewProps> = ({
         const badgeMarker = L.marker(centerPt, {
           icon: L.divIcon({
             className: 'harbor-cluster-badge-marker',
-            html: `<div style="background:rgba(15,23,42,0.88);backdrop-filter:blur(8px);border:1px solid rgba(56,189,248,0.45);border-radius:8px;padding:2px 7px;font-size:9.5px;font-weight:900;font-family:monospace;color:#38bdf8;box-shadow:0 4px 12px rgba(0,0,0,0.6);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;pointer-events:none;text-transform:uppercase;"><span>🏛️</span><span>Porto (${cluster.count})</span></div>`,
+            html: `<div style="background:rgba(15,23,42,0.88);backdrop-filter:blur(8px);border:1px solid rgba(56,189,248,0.45);border-radius:8px;padding:2px 7px;font-size:9.5px;font-weight:900;font-family:monospace;color:#38bdf8;box-shadow:0 4px 12px rgba(0,0,0,0.6);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;pointer-events:none;text-transform:uppercase;"><span>🏛️</span><span>Port (${cluster.count})</span></div>`,
             iconSize: [96, 22],
             iconAnchor: [48, 11],
           }),
@@ -584,7 +690,7 @@ export const AisView: React.FC<AisViewProps> = ({
 
       markersLayerRef.current?.addLayer(targetMarker);
 
-      // Etichetta flottante laterale (stile rotevista-webapp xB convertito a fondo bianco)
+      // Etichetta flottante laterale
       const ackedRisk = ackedLabels[t.id];
       const isAcked = Boolean(ackedRisk && !(ackedRisk === 'ORANGE' && isRed));
       const shouldShowFloatingLabel = !isAcked && !(t.inCluster && !t.isMoving && !isSelected) && (isRed || isOrange || isSelected);
@@ -594,17 +700,17 @@ export const AisView: React.FC<AisViewProps> = ({
         const metricColor = isRed ? '#dc2626' : isOrange ? '#ea580c' : '#0284c7';
         const borderColor = isRed ? 'rgba(220,38,38,0.55)' : isOrange ? 'rgba(234,88,12,0.55)' : 'rgba(2,132,199,0.55)';
         const isTargetMoving = t.isMoving !== undefined ? t.isMoving : (!t.isAnchored && !isMoored && t.sog >= 0.3);
-        const statusLine = isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : (t.inCluster || isMoored ? 'IN PORTO' : "ALL'ANCORA");
-        const tcpaTxt = t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` in ${Math.round(t.tcpa)}m` : '';
+        const statusLine = isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : (t.inCluster || isMoored ? 'IN PORT' : "AT ANCHOR");
+        const tcpaTxt = t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` in ${Math.round(t.tcpa)} min` : '';
         const cpaOrDistLine = isRed
-          ? `🚨 ${t.riskMsg || 'COLLISIONE!'}${t.cpa !== null && t.cpa !== undefined ? ` • CPA: ${formatDist(t.cpa)}` : ''}${tcpaTxt}`
+          ? `🚨 ${t.riskMsg || 'COLLISION!'}${t.cpa !== null && t.cpa !== undefined ? ` • CPA: ${formatDist(t.cpa)}` : ''}${tcpaTxt}`
           : `${isOrange ? '⚠️ ' : ''}${t.cpa !== null && t.cpa !== undefined ? `CPA: ${formatDist(t.cpa)}` : `Dist: ${formatDist(t.dist)}`}${tcpaTxt}`;
 
         const labelMarker = L.marker([t.lat, t.lon], {
           opacity: isDimmed ? 0.35 : 1.0,
           icon: L.divIcon({
             className: 'ais-threat-floating-label',
-            html: `<div style="display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);backdrop-filter:blur(6px);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tocca per nascondere etichetta (Acknowledge)"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${t.name || 'Sconosciuto'}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${cpaOrDistLine}</span></div></div>`,
+            html: `<div style="display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);backdrop-filter:blur(6px);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to hide label (Acknowledge)"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${t.name || 'Unknown'}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${cpaOrDistLine}</span></div></div>`,
             iconSize: [320, 56],
             iconAnchor: [-14, 28],
           }),
@@ -790,26 +896,26 @@ export const AisView: React.FC<AisViewProps> = ({
         <div className="ais-status-counters">
           <span className="counter-item counter-total">
             <span className="counter-val">{stats.total}</span>
-            <span className="counter-lbl">Navi</span>
+            <span className="counter-lbl">Vessels</span>
           </span>
 
           {stats.red > 0 && (
             <span className="counter-item counter-danger">
               <span className="counter-val">{stats.red}</span>
-              <span className="counter-lbl">Collisione</span>
+              <span className="counter-lbl">Collision</span>
             </span>
           )}
 
           {stats.orange > 0 && (
             <span className="counter-item counter-warning">
               <span className="counter-val">{stats.orange}</span>
-              <span className="counter-lbl">Incrocio</span>
+              <span className="counter-lbl">Crossing</span>
             </span>
           )}
 
           <span className="counter-item counter-anchored">
             <span className="counter-val">{stats.anchored}</span>
-            <span className="counter-lbl">Fonde</span>
+            <span className="counter-lbl">Anchored</span>
           </span>
         </div>
 
@@ -825,8 +931,8 @@ export const AisView: React.FC<AisViewProps> = ({
                 setShowListDrawer(prev => !prev);
               }
             }}
-            title="Registro Bersagli AIS"
-            aria-label="Registro Bersagli AIS"
+            title="AIS Target Register"
+            aria-label="AIS Target Register"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: '50%', height: '50%' }}>
               <line x1="8" y1="6" x2="21" y2="6" />
@@ -840,7 +946,7 @@ export const AisView: React.FC<AisViewProps> = ({
         </div>
       </div>
 
-      {/* FLOATING TARGETS DROPDOWN CARD (Screenshot 1, 2, 3) */}
+      {/* FLOATING TARGETS DROPDOWN CARD */}
       {(showListDrawer || selectedTarget) && (
         <div
           ref={cardRef}
@@ -849,7 +955,7 @@ export const AisView: React.FC<AisViewProps> = ({
           onTouchMoveCapture={e => e.stopPropagation()}
         >
           {selectedTarget && (
-            /* TARGET DETAIL VIEW (Screenshot 2 & 3) */
+            /* TARGET DETAIL VIEW */
             <div className="ais-card-detail">
               <div className="ais-detail-header">
                 <button
@@ -857,7 +963,7 @@ export const AisView: React.FC<AisViewProps> = ({
                   className="btn-back-lista"
                   onClick={handleReturnToList}
                 >
-                  ← LISTA
+                  ← LIST
                 </button>
                 <div
                   className="detail-header-center"
@@ -867,7 +973,7 @@ export const AisView: React.FC<AisViewProps> = ({
                     )
                   }
                   style={{ cursor: 'pointer' }}
-                  title="Tocca per cambiare scheda (Telemetria / Info)"
+                  title="Tap to switch tab (Telemetry / Info)"
                 >
                   <span className="detail-vessel-icon">
                     {getVesselTypeIcon(selectedTarget.type, selectedTarget.name)}
@@ -886,8 +992,8 @@ export const AisView: React.FC<AisViewProps> = ({
                     }}
                     title={
                       targetDetailTab === 'telemetry'
-                        ? 'Mostra Info e Dimensioni'
-                        : 'Mostra Telemetria Cinematica'
+                        ? 'Show Info & Dimensions'
+                        : 'Show Kinematic Telemetry'
                     }
                   >
                     {targetDetailTab === 'telemetry' ? 'ℹ' : '🧭'}
@@ -902,7 +1008,7 @@ export const AisView: React.FC<AisViewProps> = ({
                     onSelectTarget(null);
                     setFollowMode('own');
                   }}
-                  title="Chiudi"
+                  title="Close"
                 >
                   ✕
                 </button>
@@ -927,7 +1033,7 @@ export const AisView: React.FC<AisViewProps> = ({
                       setTimeout(() => setCopiedMmsi(false), 2000);
                     }
                   }}
-                  title="Clicca per copiare MMSI"
+                  title="Click to copy MMSI"
                 >
                   📋 MMSI {selectedTarget.id.split(':').pop()}{' '}
                   {copiedMmsi ? '✓' : ''}
@@ -940,14 +1046,14 @@ export const AisView: React.FC<AisViewProps> = ({
                     )
                   }
                   style={{ cursor: 'pointer' }}
-                  title="Tocca per cambiare scheda"
+                  title="Tap to switch tab"
                 >
                   ⏱️ {formatAge(selectedTarget.age)}
                 </span>
               </div>
 
               {targetDetailTab === 'telemetry' ? (
-                /* TELEMETRIA CINEMATICA (Screenshot 3) */
+                /* KINEMATIC TELEMETRY */
                 <div className="ais-card-body-detail">
                   <div className="ais-detail-grid">
                     <div className="ais-detail-cell">
@@ -957,19 +1063,19 @@ export const AisView: React.FC<AisViewProps> = ({
                       </span>
                     </div>
                     <div className="ais-detail-cell">
-                      <span className="ais-cell-label">DISTANZA</span>
+                      <span className="ais-cell-label">DISTANCE</span>
                       <span className="ais-cell-val">
                         {formatDist(selectedTarget.dist)}
                       </span>
                     </div>
                     <div className="ais-detail-cell">
-                      <span className="ais-cell-label">CPA MINIMO</span>
+                      <span className="ais-cell-label">MINIMUM CPA</span>
                       <span className="ais-cell-val cyan">
                         {formatDist(selectedTarget.cpa)}
                       </span>
                     </div>
                     <div className="ais-detail-cell">
-                      <span className="ais-cell-label">TEMPO A CPA</span>
+                      <span className="ais-cell-label">TIME TO CPA</span>
                       <span className="ais-cell-val cyan">
                         {selectedTarget.tcpa !== null && selectedTarget.tcpa >= 0
                           ? `${selectedTarget.tcpa.toFixed(1)} min`
@@ -978,17 +1084,17 @@ export const AisView: React.FC<AisViewProps> = ({
                     </div>
                   </div>
 
-                  {/* SIGHT / RILEVAMENTO A ORE */}
+                  {/* SIGHT / BEARING */}
                   <div className="ais-sight-box">
                     <span>👀</span>
-                    <span>VISTA: {selectedTarget.sightingTxt || '--'}</span>
+                    <span>SIGHT: {selectedTarget.sightingTxt || '--'}</span>
                   </div>
 
                   {selectedTarget.anchorState === 'ANCHOR_DRAGGING' && (
                     <div className="ais-detail-alert-box red">
-                      <span className="alert-title">ALLARME SPEDO ANCORA</span>
+                      <span className="alert-title">ANCHOR DRAG ALARM</span>
                       <span className="alert-desc">
-                        Bersaglio in scarroccio ({selectedTarget.sog.toFixed(1)} kn rot. {selectedTarget.cog}°)
+                        Target dragging ({selectedTarget.sog.toFixed(1)} kn cog {selectedTarget.cog}°)
                       </span>
                     </div>
                   )}
@@ -1001,37 +1107,37 @@ export const AisView: React.FC<AisViewProps> = ({
                   )}
                 </div>
               ) : (
-                /* ANAGRAFICA STATICA & DIMENSIONI (Screenshot 2) */
+                /* STATIC INFO & DIMENSIONS */
                 <div className="ais-card-body-detail">
                   <div className="ais-detail-grid">
                     <div className="ais-detail-cell">
-                      <span className="ais-cell-label">DIMENSIONI (L × B)</span>
+                      <span className="ais-cell-label">DIMENSIONS (L × W)</span>
                       <span className="ais-cell-val">
                         {selectedTarget.length ? `${selectedTarget.length.toFixed(0)}m` : '--'} ×{' '}
                         {selectedTarget.beam ? `${selectedTarget.beam.toFixed(0)}m` : '--'}
                       </span>
                     </div>
                     <div className="ais-detail-cell">
-                      <span className="ais-cell-label">PESCAGGIO (DRAFT)</span>
+                      <span className="ais-cell-label">DRAFT</span>
                       <span className="ais-cell-val">
                         {selectedTarget.draft ? `${selectedTarget.draft.toFixed(1)}m` : '--'}
                       </span>
                     </div>
                     <div className="ais-detail-cell cell-wide">
-                      <span className="ais-cell-label">DESTINAZIONE & ETA</span>
+                      <span className="ais-cell-label">DESTINATION & ETA</span>
                       <span className="ais-cell-val cyan">
-                        {selectedTarget.destination || 'NON DICHIARATA'}{' '}
+                        {selectedTarget.destination || 'NOT DECLARED'}{' '}
                         {selectedTarget.eta ? `(ETA ${selectedTarget.eta})` : ''}
                       </span>
                     </div>
                     <div className="ais-detail-cell cell-wide">
-                      <span className="ais-cell-label">STATO AIS (CLASSE)</span>
+                      <span className="ais-cell-label">AIS STATUS (CLASS)</span>
                       <span className="ais-cell-val">
                         {getVesselStatusLabel(selectedTarget)} ({selectedTarget.aisClass || 'B'})
                       </span>
                     </div>
                     <div className="ais-detail-cell cell-wide">
-                      <span className="ais-cell-label">RADIO & BANDIERA</span>
+                      <span className="ais-cell-label">RADIO & FLAG</span>
                       <span className="ais-cell-val">
                         📻 {selectedTarget.callsign || '--'} • {selectedTarget.flag || '--'}
                       </span>
@@ -1044,27 +1150,27 @@ export const AisView: React.FC<AisViewProps> = ({
                     rel="noopener noreferrer"
                     className="btn-vesselfinder"
                   >
-                    🌐 Vedi Foto su VesselFinder
+                    🌐 View Photo on VesselFinder
                   </a>
                 </div>
               )}
             </div>
           )}
 
-          {/* TARGETS LIST VIEW (Screenshot 1) - Mantenuto nel DOM per preservare lo scroll */}
+          {/* TARGETS LIST VIEW */}
           <div className="ais-card-list" style={{ display: selectedTarget ? 'none' : 'flex' }}>
             <div className="ais-card-header">
               <div className="ais-card-title-group">
                 <svg className="ais-card-icon-arrow" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2L19 21L12 17L5 21L12 2Z" />
                 </svg>
-                <span className="ais-card-title">BERSAGLI ({targets.length})</span>
+                <span className="ais-card-title">TARGETS ({targets.length})</span>
               </div>
               <button
                 type="button"
                 className="ais-card-close-btn"
                 onClick={() => setShowListDrawer(false)}
-                title="Chiudi"
+                title="Close"
               >
                 ✕
               </button>
@@ -1077,18 +1183,18 @@ export const AisView: React.FC<AisViewProps> = ({
                 listScrollTopRef.current = e.currentTarget.scrollTop;
               }}
             >
-                {/* 1. LA MIA BARCA (Highlight Cyan) */}
+                {/* 1. OWN SHIP */}
                 <div
                   className="ais-target-item-own"
                   onClick={handleCenterOnOwnShip}
-                  title="Centra su Rotavista"
+                  title={`Center on ${ownShipName}`}
                 >
                   <div className="target-left-group">
                     <span className="target-speaking-icon">⛵</span>
                     <div className="target-text-col">
-                      <span className="target-item-name">ROTEVISTA</span>
+                      <span className="target-item-name">{ownShipName}</span>
                       <span className="target-item-sub">
-                        {ownShipCourse.sog < 0.5 ? 'IN PORTO' : 'IN NAVIGAZIONE'} • HDG: {Math.round(ownShipCourse.hdg)}°
+                        {ownShipCourse.sog < 0.5 ? 'IN PORT' : 'UNDERWAY'} • HDG: {Math.round(ownShipCourse.hdg)}°
                       </span>
                     </div>
                   </div>
@@ -1098,11 +1204,12 @@ export const AisView: React.FC<AisViewProps> = ({
                   </div>
                 </div>
 
-                {/* 2. ALTRI BERSAGLI ORDINATI */}
+                {/* 2. OTHER SORTED TARGETS */}
                 {sortedTargets.length > 0 ? (
                   sortedTargets.map(item => (
                     <div
                       key={item.id}
+                      id={`target-item-${item.id}`}
                       className={`ais-target-item ${item.risk === 'RED' ? 'risk-red' : item.risk === 'ORANGE' ? 'risk-orange' : ''}`}
                       onClick={() => {
                         if (listBodyRef.current) {
@@ -1132,8 +1239,8 @@ export const AisView: React.FC<AisViewProps> = ({
                 ) : (
                   <div className="ais-empty-targets">
                     <span className="ais-empty-icon">📡</span>
-                    <span className="ais-empty-title">Nessun bersaglio AIS rilevato</span>
-                    <span className="ais-empty-sub">In ascolto nel raggio di 20 NM...</span>
+                    <span className="ais-empty-title">No AIS targets detected</span>
+                    <span className="ais-empty-sub">Listening within 20 NM...</span>
                   </div>
                 )}
               </div>
@@ -1147,7 +1254,7 @@ export const AisView: React.FC<AisViewProps> = ({
           type="button"
           className="ais-map-btn"
           onClick={handleZoomIn}
-          title="Zoom Avanti (+)"
+          title="Zoom In (+)"
           aria-label="Zoom In"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -1160,7 +1267,7 @@ export const AisView: React.FC<AisViewProps> = ({
           type="button"
           className="ais-map-btn"
           onClick={handleZoomOut}
-          title="Zoom Indietro (-)"
+          title="Zoom Out (-)"
           aria-label="Zoom Out"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -1172,8 +1279,8 @@ export const AisView: React.FC<AisViewProps> = ({
           type="button"
           className={`ais-map-btn ${followMode === 'own' ? 'active-center' : ''}`}
           onClick={handleCenterOnOwnShip}
-          title={followMode === 'own' ? 'Centrato su Barca (Click: Zoom Standard)' : 'Ripristina Centro su Tua Barca'}
-          aria-label="Centra Mappa"
+          title={followMode === 'own' ? 'Centered on Boat (Click: Standard Zoom)' : 'Recenter on Your Boat'}
+          aria-label="Center Map"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="7" />
@@ -1191,8 +1298,8 @@ export const AisView: React.FC<AisViewProps> = ({
         type="button"
         className="ais-floating-wind-btn"
         onClick={onSwitchToWind}
-        title="Torna alla Dashboard Vento"
-        aria-label="Torna alla Dashboard Vento"
+        title="Return to Wind Dashboard"
+        aria-label="Return to Wind Dashboard"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2" />

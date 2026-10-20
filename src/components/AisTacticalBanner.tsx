@@ -31,7 +31,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
       <div className="banner-content">
         <div className="banner-header-row">
           <span className="banner-badge">
-            {isCollisionDanger ? '🚨 ALLARME COLLISIONE ARPA' : '⚠️ ATTENZIONE INCROCIO'}
+            {isCollisionDanger ? '🚨 ARPA COLLISION ALARM' : '⚠️ CROSSING WARNING'}
           </span>
           <span className="banner-vessel-name">
             {threat.flag ? `${threat.flag} ` : ''}
@@ -60,7 +60,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
             <span className="metric-val">{threat.sog.toFixed(1)} kn</span>
           </div>
           <div className="banner-metric banner-sighting">
-            <span className="metric-lbl">POSIZIONE</span>
+            <span className="metric-lbl">BEARING</span>
             <span className="metric-val">{threat.sightingTxt || `${threat.dist}m`}</span>
           </div>
         </div>
@@ -78,17 +78,17 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
           type="button"
           className="banner-btn btn-inspect"
           onClick={() => onInspect(threat)}
-          title="Apri Mappa Tattica AIS"
+          title="Open AIS Tactical Map"
         >
-          ISPEZIONA
+          INSPECT
         </button>
         <button
           type="button"
           className="banner-btn btn-snooze"
           onClick={() => onSnooze(threat.id)}
-          title="Posticipa allarme per 10 minuti"
+          title="Snooze alarm for 10 minutes"
         >
-          POSTICIPA 10M
+          SNOOZE 10M
         </button>
       </div>
     </div>

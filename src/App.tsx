@@ -156,7 +156,7 @@ export const App: React.FC = () => {
         isNightMode={isNightMode}
       />
 
-      {appView === 'wind' ? (
+      <div style={{ display: appView === 'wind' ? 'block' : 'none', width: '100%', height: '100%' }}>
         <div className={containerClasses}>
       {/* ================= COLONNA SINISTRA ================= */}
       {/* 1. STW */}
@@ -466,8 +466,11 @@ export const App: React.FC = () => {
         </div>
       </DataBox>
     </div>
-      ) : (
+      </div>
+
+      <div style={{ display: appView === 'ais' ? 'block' : 'none', width: '100%', height: '100%' }}>
         <AisView
+          isActive={appView === 'ais'}
           targets={aisTargets}
           harborClusters={harborClusters}
           ownShipPosition={ownShipPosition}
@@ -477,8 +480,9 @@ export const App: React.FC = () => {
           onSnoozeThreat={snoozeThreat}
           selectedTargetId={selectedAisTargetId}
           onSelectTarget={setSelectedAisTargetId}
+          ownShipName={config?.vesselName}
         />
-      )}
+      </div>
     </div>
   );
 };
