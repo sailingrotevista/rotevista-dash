@@ -1119,14 +1119,14 @@ body.night-mode #radar-ticks line {
 }
 
 .compass-btn-left {
-    left: 8.6%;
-    top: 75.6%;
+    left: 9.3%;
+    top: 75.0%;
     transform: translate(-50%, -50%);
 }
 
 .compass-btn-right {
-    left: 91.4%;
-    top: 75.6%;
+    left: 90.7%;
+    top: 75.0%;
     transform: translate(-50%, -50%);
 }
 
