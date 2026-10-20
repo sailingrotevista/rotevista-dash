@@ -933,6 +933,133 @@ body.night-mode #radar-ticks line {
     border: 1px solid rgba(255, 255, 255, 0.4);
 }
 
+@media (max-width: 1024px) and (orientation: portrait) {
+    .ais-tactical-banner {
+        top: 8px;
+        bottom: auto;
+        left: 8px;
+        right: 8px;
+        padding: 10px 12px;
+        gap: 8px;
+        flex-direction: column;
+        align-items: stretch;
+        border-radius: 10px;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+        z-index: 9999;
+    }
+
+    .banner-content {
+        width: 100%;
+    }
+
+    .banner-vessel-name {
+        font-size: 0.85rem;
+    }
+
+    .banner-badge {
+        font-size: 0.65rem;
+        padding: 1px 4px;
+    }
+
+    .banner-metrics-row {
+        gap: 4px 8px;
+        font-size: 0.72rem;
+    }
+
+    .banner-metric .metric-lbl {
+        font-size: 0.65rem;
+    }
+
+    .banner-colregs-row {
+        font-size: 0.7rem;
+    }
+
+    .banner-actions {
+        position: static;
+        transform: none;
+        width: 100%;
+        background: transparent;
+        backdrop-filter: none;
+        border: none;
+        padding: 0;
+        border-radius: 0;
+        box-shadow: none;
+        display: flex;
+        flex-direction: row;
+        gap: 8px;
+        margin-top: 4px;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .banner-btn {
+        flex: 1;
+        width: 50%;
+        min-width: 0;
+        padding: 8px 10px;
+        font-size: 0.75rem;
+        border-radius: 6px;
+        min-height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        box-sizing: border-box;
+        white-space: nowrap;
+    }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+    .ais-tactical-banner {
+        top: 6px;
+        left: 8px;
+        right: 8px;
+        margin: 0 auto;
+        padding: 8px 10px;
+        gap: 10px;
+        box-sizing: border-box;
+        border-radius: 8px;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .banner-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .banner-actions {
+        display: flex;
+        flex-direction: column;
+        width: auto;
+        min-width: max-content;
+        gap: 5px;
+        align-items: stretch;
+        justify-content: center;
+        margin: 0;
+        padding: 0;
+    }
+
+    .banner-btn {
+        width: 100%;
+        min-width: 0;
+        flex: none;
+        min-height: 28px;
+        padding: 5px 10px;
+        font-size: 0.7rem;
+        border-radius: 5px;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        white-space: nowrap;
+        margin: 0;
+    }
+}
+
 /* ==========================================================================
    12. PULSANTI INTERNI AL QUADRANTE DELLA BUSSOLA TATTICA
    ========================================================================== */
@@ -1162,6 +1289,7 @@ body.night-mode .compass-inner-btn:active,
 
 .ais-top-actions {
     display: flex;
+    flex-direction: column;
     align-items: center;
     gap: 8px;
 }
@@ -2006,4 +2134,93 @@ body.night-mode .ais-empty-title,
 .night-theme .ais-empty-title,
 .night-mode .ais-empty-title {
     color: #0f172a;
+}
+
+/* ==========================================================================
+   COLREG PROPULSION SPEECH BUBBLE TOAST
+   ========================================================================== */
+.propulsion-btn-container {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.propulsion-speech-bubble {
+    position: absolute;
+    right: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border: 1.5px solid #cbd5e1;
+    color: #1e293b;
+    padding: 8px 12px;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    white-space: normal;
+    width: max-content;
+    max-width: 240px;
+    z-index: 2200;
+    pointer-events: none;
+    animation: propBubbleFade 3.5s forwards ease-in-out;
+}
+
+.propulsion-speech-text {
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: #0369a1;
+    display: block;
+}
+
+.propulsion-speech-arrow {
+    position: absolute;
+    right: -6px;
+    top: 50%;
+    transform: translateY(-50%) rotate(45deg);
+    width: 10px;
+    height: 10px;
+    background: rgba(255, 255, 255, 0.95);
+    border-top: 1.5px solid #cbd5e1;
+    border-right: 1.5px solid #cbd5e1;
+}
+
+@keyframes propBubbleFade {
+    0% {
+        opacity: 0;
+        transform: translateY(-50%) translateX(6px);
+    }
+    10% {
+        opacity: 1;
+        transform: translateY(-50%) translateX(0);
+    }
+    82% {
+        opacity: 1;
+        transform: translateY(-50%) translateX(0);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-50%) translateX(-4px);
+    }
+}
+
+body.night-mode .propulsion-speech-bubble,
+.night-theme .propulsion-speech-bubble,
+.night-mode .propulsion-speech-bubble {
+    background: rgba(26, 0, 0, 0.95) !important;
+    border-color: #ff3333 !important;
+    box-shadow: 0 0 12px rgba(255, 0, 0, 0.4) !important;
+}
+
+body.night-mode .propulsion-speech-text,
+.night-theme .propulsion-speech-text,
+.night-mode .propulsion-speech-text {
+    color: #ff3333 !important;
+}
+
+body.night-mode .propulsion-speech-arrow,
+.night-theme .propulsion-speech-arrow,
+.night-mode .propulsion-speech-arrow {
+    background: rgba(26, 0, 0, 0.95) !important;
+    border-color: #ff3333 !important;
 }

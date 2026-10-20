@@ -13,6 +13,7 @@ import {
   AppView,
   AisTarget,
   HarborCluster,
+  PropulsionMode,
 } from '../types';
 import {
   radToDeg,
@@ -25,6 +26,7 @@ import {
   playGybeAlarm,
 } from '../utils/math';
 import { MARINA_DI_RAGUSA_SIM_DATA } from '../utils/marinaDiRagusaSimData';
+import { generateRandomColregScenario, recalculateArpaForTargets } from '../utils/colregScenarioGenerator';
 
 const DEFAULT_CONFIG: AppConfig = {
   alarms: { depthDanger: 2.5, depthWarning: 3.5 },
@@ -98,6 +100,24 @@ export function useDashboard() {
   );
   const isNightModeRef = useRef<boolean>(isNightMode);
   isNightModeRef.current = isNightMode;
+
+  const [propulsionMode, setPropulsionModeState] = useState<PropulsionMode>(
+    () => savedState?.propulsionMode || 'AUTO'
+  );
+  const propulsionModeRef = useRef<PropulsionMode>(propulsionMode);
+  useEffect(() => {
+    propulsionModeRef.current = propulsionMode;
+  }, [propulsionMode]);
+
+  const setPropulsionMode = useCallback((mode: PropulsionMode) => {
+    setPropulsionModeState(mode);
+    try {
+      const saved = localStorage.getItem('rotevista_dash_state');
+      const state = saved ? JSON.parse(saved) : {};
+      state.propulsionMode = mode;
+      localStorage.setItem('rotevista_dash_state', JSON.stringify(state));
+    } catch (e) {}
+  }, []);
   const [isFocusActive, setIsFocusActive] = useState<boolean>(false);
   const [focusedBox, setFocusedBox] = useState<BoxType | null>(null);
   const [graphModes, setGraphModes] = useState<Record<string, GraphMode>>(
@@ -149,6 +169,20 @@ export function useDashboard() {
     }
     return topThreat;
   }, [topThreat, snoozedThreats]);
+
+  useEffect(() => {
+    if (!topThreat) return;
+    setSnoozedThreats(prev => {
+      const entry = prev[topThreat.id];
+      if (!entry) return prev;
+      if (topThreat.risk === 'GREEN' || topThreat.risk === 'GREY') {
+        const next = { ...prev };
+        delete next[topThreat.id];
+        return next;
+      }
+      return prev;
+    });
+  }, [topThreat]);
 
   // Display values for UI
   const [displayValues, setDisplayValues] = useState({
@@ -673,10 +707,18 @@ export function useDashboard() {
         startTime: Date.now(),
       };
 
-      let simTargets = MARINA_DI_RAGUSA_SIM_DATA.targets.map(t => ({
-        ...t,
-        trail: t.trail ? [...t.trail] : [],
-      }));
+      // Genera scenario casuale COLREG (transizione Verde -> Arancio a 15s)
+      const { target: dynamicTarget } = generateRandomColregScenario(
+        MARINA_DI_RAGUSA_SIM_DATA.myGps,
+        45, // hdg
+        45, // cog
+        5.2 // sog
+      );
+
+      const staticTargets = MARINA_DI_RAGUSA_SIM_DATA.targets.filter(t => !t.isMoving);
+      let simTargets = [...staticTargets, dynamicTarget];
+
+      let simMyGps = { lat: MARINA_DI_RAGUSA_SIM_DATA.myGps.lat, lon: MARINA_DI_RAGUSA_SIM_DATA.myGps.lon };
 
       if (simTimer) clearInterval(simTimer);
       simTimer = setInterval(() => {
@@ -722,10 +764,14 @@ export function useDashboard() {
         const simCog = (sim.hdg - leewaySimDeg + 360) % 360;
         processIncomingData('navigation.courseOverGroundTrue', degToRad(simCog));
 
-        // Avanzamento cinematico bersagli AIS in movimento
-        const myLat = MARINA_DI_RAGUSA_SIM_DATA.myGps.lat;
-        const myLon = MARINA_DI_RAGUSA_SIM_DATA.myGps.lon;
+        // Avanzamento cinematico della propria barca
+        const myDistStepMeters = (sogKts * 1852) / 3600;
+        const myCogRad = degToRad(simCog);
+        simMyGps.lat += (myDistStepMeters * Math.cos(myCogRad)) / 111139;
+        simMyGps.lon += (myDistStepMeters * Math.sin(myCogRad)) / (111139 * Math.cos(degToRad(simMyGps.lat)));
+        setOwnShipPosition({ ...simMyGps });
 
+        // Avanzamento cinematico bersagli AIS in movimento
         simTargets = simTargets.map(t => {
           if (!t.isMoving || t.sog < 0.3) return t;
 
@@ -744,28 +790,43 @@ export function useDashboard() {
             if (currentTrail.length > 25) currentTrail.shift();
           }
 
-          const dx = (newLon - myLon) * 111139 * Math.cos(degToRad((myLat + newLat) / 2));
-          const dy = (newLat - myLat) * 111139;
-          const newDist = Math.round(Math.sqrt(dx * dx + dy * dy));
-
           return {
             ...t,
             lat: newLat,
             lon: newLon,
-            dist: newDist,
             age: 0,
             trail: currentTrail,
           };
         });
 
+        // Ricalcolo ARPA e valutazioni rischio real-time per tutti i bersagli
+        const arpaRes = recalculateArpaForTargets(
+          simMyGps,
+          sim.hdg,
+          simCog,
+          sogKts,
+          simTargets,
+          propulsionModeRef.current
+        );
+
+        simTargets = arpaRes.targets;
         setAisTargets([...simTargets]);
+        setTopThreat(arpaRes.topThreat);
       }, 1000);
 
       // Popola bersagli AIS e cluster con i bersagli reali di Marina di Ragusa
-      setOwnShipPosition(MARINA_DI_RAGUSA_SIM_DATA.myGps);
-      setAisTargets(simTargets);
+      setOwnShipPosition({ ...simMyGps });
+      const initialArpa = recalculateArpaForTargets(
+        simMyGps,
+        45,
+        45,
+        5.2,
+        simTargets,
+        propulsionModeRef.current
+      );
+      setAisTargets(initialArpa.targets);
       setHarborClusters(MARINA_DI_RAGUSA_SIM_DATA.harborClusters);
-      setTopThreat(null);
+      setTopThreat(initialArpa.topThreat);
     };
 
     let aisPollInterval: ReturnType<typeof setInterval> | null = null;
@@ -1532,5 +1593,7 @@ export function useDashboard() {
     setSelectedAisTargetId,
     ownShipPosition,
     ownShipCourse,
+    propulsionMode,
+    setPropulsionMode,
   };
 }

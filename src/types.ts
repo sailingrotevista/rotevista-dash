@@ -41,7 +41,11 @@ export interface AppConfig {
   server: {
     fallbackIp: string;
   };
+  vesselName?: string;
+  propulsionMode?: PropulsionMode;
 }
+
+export type PropulsionMode = 'AUTO' | 'SAIL' | 'MOTOR';
 
 export interface HistoryPoint {
   val: number;

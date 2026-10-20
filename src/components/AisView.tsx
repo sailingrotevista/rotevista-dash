@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AisTarget, HarborCluster } from '../types';
+import { AisTarget, HarborCluster, PropulsionMode } from '../types';
 
 interface AisViewProps {
   isActive?: boolean;
@@ -15,6 +15,9 @@ interface AisViewProps {
   selectedTargetId: string | null;
   onSelectTarget: (targetId: string | null) => void;
   ownShipName?: string;
+  propulsionMode?: PropulsionMode;
+  onSetPropulsionMode?: (mode: PropulsionMode) => void;
+  inspectToken?: number;
 }
 
 const getVesselTypeIcon = (type: number | string, name?: string): string => {
@@ -79,6 +82,9 @@ export const AisView: React.FC<AisViewProps> = ({
   selectedTargetId,
   onSelectTarget,
   ownShipName = 'MY VESSEL',
+  propulsionMode = 'SAIL',
+  onSetPropulsionMode,
+  inspectToken,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -104,6 +110,8 @@ export const AisView: React.FC<AisViewProps> = ({
   const [targetDetailTab, setTargetDetailTab] = useState<'telemetry' | 'info'>('telemetry');
   const [copiedMmsi, setCopiedMmsi] = useState<boolean>(false);
   const [ackedLabels, setAckedLabels] = useState<Record<string, string>>({});
+  const [propulsionToast, setPropulsionToast] = useState<{ text: string; mode: PropulsionMode } | null>(null);
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const selectedTargetRef = useRef<AisTarget | null>(null);
   selectedTargetRef.current = selectedTarget;
@@ -275,6 +283,65 @@ export const AisView: React.FC<AisViewProps> = ({
     [getOffsetCenter, followMode]
   );
 
+  // Smart zoom per inquadrare il triangolo di collisione nello spazio visibile disponibile
+  const zoomToCollisionTriangle = useCallback(
+    (target: AisTarget) => {
+      if (!mapRef.current) return;
+
+      const deg2rad = Math.PI / 180;
+      const ownLat = ownShipPosition.lat;
+      const ownLon = ownShipPosition.lon;
+      const targetLat = target.lat;
+      const targetLon = target.lon;
+
+      const pts: [number, number][] = [
+        [ownLat, ownLon],
+        [targetLat, targetLon],
+      ];
+
+      const tcpa = target.tcpa;
+      if (tcpa !== null && tcpa !== undefined && tcpa > 0) {
+        const ownDistNM = (ownShipCourse.sog * tcpa) / 60;
+        const ownCpaLat = ownLat + (ownDistNM * Math.cos(ownShipCourse.cog * deg2rad)) / 60;
+        const ownCpaLon =
+          ownLon +
+          (ownDistNM * Math.sin(ownShipCourse.cog * deg2rad)) / (60 * Math.cos(ownLat * deg2rad));
+
+        const targetDistNM = (target.sog * tcpa) / 60;
+        const targetCpaLat = targetLat + (targetDistNM * Math.cos(target.cog * deg2rad)) / 60;
+        const targetCpaLon =
+          targetLon +
+          (targetDistNM * Math.sin(target.cog * deg2rad)) / (60 * Math.cos(targetLat * deg2rad));
+
+        pts.push([ownCpaLat, ownCpaLon]);
+        pts.push([targetCpaLat, targetCpaLon]);
+      }
+
+      const bounds = L.latLngBounds(pts);
+      const isMobilePortrait = window.innerWidth < 640 || window.innerWidth < window.innerHeight;
+
+      let paddingTopLeft: [number, number] = [60, 100];
+      let paddingBottomRight: [number, number] = [60, 60];
+
+      if (isMobilePortrait) {
+        paddingTopLeft = [40, 260];
+        paddingBottomRight = [40, 60];
+      } else {
+        paddingTopLeft = [60, 100];
+        paddingBottomRight = [390, 60];
+      }
+
+      setFollowMode('none');
+      mapRef.current.fitBounds(bounds, {
+        paddingTopLeft,
+        paddingBottomRight,
+        animate: true,
+        maxZoom: 16,
+      });
+    },
+    [ownShipPosition, ownShipCourse]
+  );
+
   // Ripristina inquadratura mappa e posizione scroll lista al ritorno dal dettaglio
   const handleReturnToList = useCallback(() => {
     const prevTargetId = selectedTarget?.id;
@@ -373,17 +440,29 @@ export const AisView: React.FC<AisViewProps> = ({
     }
   }, [ownShipPosition.lat, ownShipPosition.lon, selectedTarget?.lat, selectedTarget?.lon, followMode, selectedTarget?.id, getOffsetCenter]);
 
-  // Seleziona e insegue il bersaglio unicamente quando cambia selectedTargetId dall'esterno
+  // Seleziona e inquadra con smart zoom il triangolo di collisione quando cambia inspectToken o selectedTargetId dall'esterno
+  const prevInspectTokenRef = useRef<number | undefined>(undefined);
   const prevSelectedTargetIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (selectedTargetId && selectedTargetId !== prevSelectedTargetIdRef.current) {
+    const isTokenUpdate = inspectToken !== undefined && inspectToken !== prevInspectTokenRef.current;
+    const isTargetChange = selectedTargetId !== null && selectedTargetId !== prevSelectedTargetIdRef.current;
+
+    if (isTokenUpdate || isTargetChange) {
       const found = targets.find(t => t.id === selectedTargetId);
       if (found) {
-        handleCenterOnTarget(found);
+        setSelectedTarget(found);
+        setShowListDrawer(true);
+        if (found.risk === 'RED' || found.risk === 'ORANGE' || isTokenUpdate) {
+          zoomToCollisionTriangle(found);
+        } else {
+          handleCenterOnTarget(found);
+        }
       }
     }
+    prevInspectTokenRef.current = inspectToken;
     prevSelectedTargetIdRef.current = selectedTargetId;
-  }, [selectedTargetId, targets, handleCenterOnTarget]);
+  }, [selectedTargetId, inspectToken, targets, handleCenterOnTarget, zoomToCollisionTriangle]);
 
   // Deselezione automatica con debounce di 2s se il bersaglio esce dalla mappa visibile e follow non è attivo
   const outOfBoundsTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -710,7 +789,7 @@ export const AisView: React.FC<AisViewProps> = ({
           opacity: isDimmed ? 0.35 : 1.0,
           icon: L.divIcon({
             className: 'ais-threat-floating-label',
-            html: `<div style="display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);backdrop-filter:blur(6px);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to hide label (Acknowledge)"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${t.name || 'Unknown'}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${cpaOrDistLine}</span></div></div>`,
+            html: `<div style="display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);backdrop-filter:blur(6px);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to select target"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${t.name || 'Unknown'}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${cpaOrDistLine}</span></div></div>`,
             iconSize: [320, 56],
             iconAnchor: [-14, 28],
           }),
@@ -723,7 +802,10 @@ export const AisView: React.FC<AisViewProps> = ({
             L.DomEvent.stopPropagation(ev.originalEvent);
             L.DomEvent.preventDefault(ev.originalEvent);
           }
-          setAckedLabels(prev => ({ ...prev, [t.id]: t.risk || 'ORANGE' }));
+          setSelectedTarget(t);
+          onSelectTarget(t.id);
+          setShowListDrawer(true);
+          handleCenterOnTarget(t);
         });
 
         markersLayerRef.current?.addLayer(labelMarker);
@@ -943,6 +1025,42 @@ export const AisView: React.FC<AisViewProps> = ({
               <line x1="3" y1="18" x2="3.01" y2="18" />
             </svg>
           </button>
+
+          <div className="propulsion-btn-container">
+            {propulsionToast && (
+              <div className="propulsion-speech-bubble" key={propulsionToast.mode}>
+                <span className="propulsion-speech-text">{propulsionToast.text}</span>
+                <div className="propulsion-speech-arrow" />
+              </div>
+            )}
+            <button
+              type="button"
+              className={`ais-tool-btn ${propulsionMode === 'MOTOR' ? 'btn-active' : ''}`}
+              style={{ fontSize: '1.2rem' }}
+              onClick={() => {
+                if (!onSetPropulsionMode) return;
+                const nextMode: PropulsionMode = propulsionMode === 'MOTOR' ? 'SAIL' : 'MOTOR';
+                onSetPropulsionMode(nextMode);
+
+                const msgText = nextMode === 'MOTOR'
+                  ? 'COLREG: Power-driven vessel rules applied (give-way / stand-on by engine mechanics).'
+                  : 'COLREG: Sailing vessel rules applied (port/starboard tack & windward/leeward).';
+
+                setPropulsionToast({ text: msgText, mode: nextMode });
+
+                if (toastTimerRef.current) {
+                  clearTimeout(toastTimerRef.current);
+                }
+                toastTimerRef.current = setTimeout(() => {
+                  setPropulsionToast(null);
+                }, 3500);
+              }}
+              title={`Propulsione: ${propulsionMode === 'MOTOR' ? 'MOTORE' : 'VELA (Auto)'}`}
+              aria-label="Modalità Propulsione"
+            >
+              {propulsionMode === 'MOTOR' ? '🚤' : '⛵'}
+            </button>
+          </div>
         </div>
       </div>
 

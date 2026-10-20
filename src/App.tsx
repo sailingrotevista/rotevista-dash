@@ -40,6 +40,8 @@ export const App: React.FC = () => {
     setSelectedAisTargetId,
     ownShipPosition,
     ownShipCourse,
+    propulsionMode,
+    setPropulsionMode,
   } = useDashboard();
 
   // Fullscreen toggle on center hotspot tap
@@ -90,10 +92,13 @@ export const App: React.FC = () => {
     return null;
   }, [aisTargets]);
 
-  // Ispezione bersaglio dal Banner Tattico: apre direttamente la schermata AIS e seleziona il target
+  const [inspectToken, setInspectToken] = React.useState<number>(0);
+
+  // Ispezione bersaglio dal Banner Tattico: apre direttamente la schermata AIS, seleziona il target ed esegue lo zoom intelligente sul triangolo di collisione
   const handleInspectThreat = useCallback(
     (threat: AisTarget) => {
       setSelectedAisTargetId(threat.id);
+      setInspectToken(Date.now());
       setAppView('ais');
     },
     [setSelectedAisTargetId, setAppView]
@@ -481,6 +486,9 @@ export const App: React.FC = () => {
           selectedTargetId={selectedAisTargetId}
           onSelectTarget={setSelectedAisTargetId}
           ownShipName={config?.vesselName}
+          propulsionMode={propulsionMode}
+          onSetPropulsionMode={setPropulsionMode}
+          inspectToken={inspectToken}
         />
       </div>
     </div>
