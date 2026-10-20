@@ -18,7 +18,7 @@ interface DataBoxProps {
   onSingleTap?: () => void;
 }
 
-export const DataBox: React.FC<DataBoxProps> = ({
+export const DataBox: React.FC<DataBoxProps> = React.memo(({
   type,
   label,
   unit,
@@ -113,4 +113,4 @@ export const DataBox: React.FC<DataBoxProps> = ({
       {children}
     </div>
   );
-};
+});

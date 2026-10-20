@@ -12,7 +12,7 @@ interface AnalogGaugeProps {
   onCenterHotspotClick: () => void;
 }
 
-export const AnalogGauge: React.FC<AnalogGaugeProps> = ({
+export const AnalogGauge: React.FC<AnalogGaugeProps> = React.memo(({
   awsVal,
   awaDeg,
   twaDeg,
@@ -240,4 +240,4 @@ export const AnalogGauge: React.FC<AnalogGaugeProps> = ({
       </g>
     </svg>
   );
-};
+});

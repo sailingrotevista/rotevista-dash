@@ -1443,55 +1443,129 @@ export function useDashboard() {
         twsColor = isNight ? '' : '#5c6bc0';
       }
 
-      setDisplayValues({
-        stw: stwKts.toFixed(1),
-        sog: displayModeSog === 'VMG' ? (store.histories.vmg[store.histories.vmg.length - 1]?.val || 0).toFixed(1) : sogKts.toFixed(1),
-        sogColor,
-        hdg: hdgFormatted.str,
-        hdgUnstable: hdgFormatted.unstable,
-        cog: cogFormatted.str,
-        cogUnstable: cogFormatted.unstable,
-        depth: rawDepth !== undefined ? rawDepth.toFixed(1) : '--.-',
-        depthAlarmClass: depthAlarm,
-        tws: currentWindVal.toFixed(1),
-        twsColor,
-        awsSvg: awsVal.toFixed(1),
-        twaAvg: twaFormatted.str,
-        twaUnstable: twaFormatted.unstable,
-        awaAvg: awaFormatted.str,
-        awaUnstable: awaFormatted.unstable,
-        twdAvg: twdFormatted.str,
-        twdUnstable: twdFormatted.unstable,
-        tackHdg: tackHdgStr,
-        tackHdgUnstable,
-        tackCog: tackCogStr,
-        tackCogUnstable,
-        tackLabel: tackLabelMode,
-        leewayDeg: smoothedLeeway,
-        trackRotDeg: curTrackRot,
-        awaPointerDeg,
-        twaPointerDeg,
-        windCompassRotDeg,
-        boatCompassRotDeg,
-        tacticCwDot: tacticCw,
-        tacticCcwDot: tacticCcw,
-        compassCwDot: compassCw,
-        compassCcwDot: compassCcw,
-        twdShiftText,
-        twdShiftColor,
-        meteoLed: meteoLedState,
-        isNavigating: isNav,
+      const newStw = stwKts.toFixed(1);
+      const newSog = displayModeSog === 'VMG' ? (store.histories.vmg[store.histories.vmg.length - 1]?.val || 0).toFixed(1) : sogKts.toFixed(1);
+      const newDepth = rawDepth !== undefined ? rawDepth.toFixed(1) : '--.-';
+      const newTws = currentWindVal.toFixed(1);
+      const newAwsSvg = awsVal.toFixed(1);
+
+      setDisplayValues(prev => {
+        if (
+          prev.stw === newStw &&
+          prev.sog === newSog &&
+          prev.sogColor === sogColor &&
+          prev.hdg === hdgFormatted.str &&
+          prev.hdgUnstable === hdgFormatted.unstable &&
+          prev.cog === cogFormatted.str &&
+          prev.cogUnstable === cogFormatted.unstable &&
+          prev.depth === newDepth &&
+          prev.depthAlarmClass === depthAlarm &&
+          prev.tws === newTws &&
+          prev.twsColor === twsColor &&
+          prev.awsSvg === newAwsSvg &&
+          prev.twaAvg === twaFormatted.str &&
+          prev.twaUnstable === twaFormatted.unstable &&
+          prev.awaAvg === awaFormatted.str &&
+          prev.awaUnstable === awaFormatted.unstable &&
+          prev.twdAvg === twdFormatted.str &&
+          prev.twdUnstable === twdFormatted.unstable &&
+          prev.tackHdg === tackHdgStr &&
+          prev.tackHdgUnstable === tackHdgUnstable &&
+          prev.tackCog === tackCogStr &&
+          prev.tackCogUnstable === tackCogUnstable &&
+          prev.tackLabel === tackLabelMode &&
+          prev.leewayDeg === smoothedLeeway &&
+          prev.trackRotDeg === curTrackRot &&
+          prev.awaPointerDeg === awaPointerDeg &&
+          prev.twaPointerDeg === twaPointerDeg &&
+          prev.windCompassRotDeg === windCompassRotDeg &&
+          prev.boatCompassRotDeg === boatCompassRotDeg &&
+          prev.twdShiftText === twdShiftText &&
+          prev.twdShiftColor === twdShiftColor &&
+          prev.isNavigating === isNav &&
+          prev.tacticCwDot.active === tacticCw.active &&
+          prev.tacticCwDot.color === tacticCw.color &&
+          prev.tacticCwDot.gybing === tacticCw.gybing &&
+          prev.tacticCcwDot.active === tacticCcw.active &&
+          prev.tacticCcwDot.color === tacticCcw.color &&
+          prev.tacticCcwDot.gybing === tacticCcw.gybing &&
+          prev.compassCwDot.active === compassCw.active &&
+          prev.compassCwDot.color === compassCw.color &&
+          prev.compassCwDot.blinking === compassCw.blinking &&
+          prev.compassCcwDot.active === compassCcw.active &&
+          prev.compassCcwDot.color === compassCcw.color &&
+          prev.compassCcwDot.blinking === compassCcw.blinking &&
+          prev.meteoLed?.active === meteoLedState?.active &&
+          prev.meteoLed?.color === meteoLedState?.color &&
+          prev.meteoLed?.angleTarget === meteoLedState?.angleTarget
+        ) {
+          return prev;
+        }
+        return {
+          stw: newStw,
+          sog: newSog,
+          sogColor,
+          hdg: hdgFormatted.str,
+          hdgUnstable: hdgFormatted.unstable,
+          cog: cogFormatted.str,
+          cogUnstable: cogFormatted.unstable,
+          depth: newDepth,
+          depthAlarmClass: depthAlarm,
+          tws: newTws,
+          twsColor,
+          awsSvg: newAwsSvg,
+          twaAvg: twaFormatted.str,
+          twaUnstable: twaFormatted.unstable,
+          awaAvg: awaFormatted.str,
+          awaUnstable: awaFormatted.unstable,
+          twdAvg: twdFormatted.str,
+          twdUnstable: twdFormatted.unstable,
+          tackHdg: tackHdgStr,
+          tackHdgUnstable,
+          tackCog: tackCogStr,
+          tackCogUnstable,
+          tackLabel: tackLabelMode,
+          leewayDeg: smoothedLeeway,
+          trackRotDeg: curTrackRot,
+          awaPointerDeg,
+          twaPointerDeg,
+          windCompassRotDeg,
+          boatCompassRotDeg,
+          tacticCwDot: tacticCw,
+          tacticCcwDot: tacticCcw,
+          compassCwDot: compassCw,
+          compassCcwDot: compassCcw,
+          twdShiftText,
+          twdShiftColor,
+          meteoLed: meteoLedState,
+          isNavigating: isNav,
+        };
       });
 
       // Update exported histories state for charts
-      setHistoriesState({
-        stw: [...store.histories.stw],
-        sog: [...store.histories.sog],
-        vmg: [...store.histories.vmg],
-        depth: [...store.histories.depth],
-        tws: [...store.histories.tws],
-        aws: [...store.histories.aws],
-        twd: [...store.histories.twd],
+      setHistoriesState(prev => {
+        const s = store.histories;
+        if (
+          prev.stw.length === s.stw.length &&
+          prev.sog.length === s.sog.length &&
+          prev.vmg.length === s.vmg.length &&
+          prev.depth.length === s.depth.length &&
+          prev.tws.length === s.tws.length &&
+          prev.aws.length === s.aws.length &&
+          prev.twd.length === s.twd.length &&
+          (s.stw.length === 0 || prev.stw[prev.stw.length - 1] === s.stw[s.stw.length - 1])
+        ) {
+          return prev;
+        }
+        return {
+          stw: [...s.stw],
+          sog: [...s.sog],
+          vmg: [...s.vmg],
+          depth: [...s.depth],
+          tws: [...s.tws],
+          aws: [...s.aws],
+          twd: [...s.twd],
+        };
       });
 
       // =========================================================================

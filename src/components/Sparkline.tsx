@@ -14,7 +14,7 @@ interface SparklineProps {
   onScaleChange?: (min: number, max: number) => void;
 }
 
-export const Sparkline: React.FC<SparklineProps> = ({
+export const Sparkline: React.FC<SparklineProps> = React.memo(({
   id,
   type,
   data,
@@ -342,4 +342,4 @@ export const Sparkline: React.FC<SparklineProps> = ({
       </svg>
     </>
   );
-};
+});

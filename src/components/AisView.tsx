@@ -520,7 +520,7 @@ export const AisView: React.FC<AisViewProps> = ({
 
   // Render Dynamic Range Rings (scaling from 15m at zoom 19+ up to unlimited NM on zoom out)
   useEffect(() => {
-    if (!ringsLayerRef.current) return;
+    if (!isActive || !ringsLayerRef.current) return;
     ringsLayerRef.current.clearLayers();
 
     const center: [number, number] = selectedTarget
@@ -578,11 +578,11 @@ export const AisView: React.FC<AisViewProps> = ({
       });
       ringsLayerRef.current?.addLayer(tagMarker);
     });
-  }, [ownShipPosition, selectedTarget, mapZoom, isNightMode]);
+  }, [isActive, ownShipPosition, selectedTarget, mapZoom, isNightMode]);
 
   // Render Harbor Clusters Hulls
   useEffect(() => {
-    if (!clustersLayerRef.current) return;
+    if (!isActive || !clustersLayerRef.current) return;
     clustersLayerRef.current.clearLayers();
 
     harborClusters.forEach(cluster => {
@@ -610,11 +610,11 @@ export const AisView: React.FC<AisViewProps> = ({
         clustersLayerRef.current?.addLayer(badgeMarker);
       }
     });
-  }, [harborClusters, isNightMode]);
+  }, [isActive, harborClusters, isNightMode]);
 
   // Render Own Ship & AIS Target Markers
   useEffect(() => {
-    if (!mapRef.current || !markersLayerRef.current) return;
+    if (!isActive || !mapRef.current || !markersLayerRef.current) return;
     markersLayerRef.current.clearLayers();
 
     // 1. Own Ship Marker
@@ -902,7 +902,7 @@ export const AisView: React.FC<AisViewProps> = ({
         markersLayerRef.current?.addLayer(trailLine);
       }
     });
-  }, [targets, ownShipPosition, ownShipCourse, selectedTarget, ackedLabels, onSelectTarget, handleCenterOnTarget]);
+  }, [isActive, targets, ownShipPosition, ownShipCourse, selectedTarget, ackedLabels, onSelectTarget, handleCenterOnTarget]);
 
   // Zoom handlers (ancorati al bersaglio/propria barca se selezionati, altrimenti al centro dello schermo)
   const handleZoomIn = useCallback(() => {
