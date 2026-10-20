@@ -27,7 +27,6 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
       }`}
       role="alert"
     >
-      <div className="banner-pulse-indicator" />
       <div className="banner-content">
         <div className="banner-header-row">
           <span className="banner-badge">

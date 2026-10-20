@@ -1081,25 +1081,21 @@ export function useDashboard() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    connectWs();
+    const initialWsTimer = setTimeout(connectWs, 50);
 
     return () => {
       isDisposed = true;
+      clearTimeout(initialWsTimer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (ws) {
+        ws.onopen = null;
         ws.onmessage = null;
         ws.onerror = null;
         ws.onclose = null;
-        if (ws.readyState === WebSocket.CONNECTING) {
-          const closingWs = ws;
-          closingWs.onopen = () => {
-            try {
-              closingWs.close();
-            } catch {}
-          };
-        } else if (ws.readyState === WebSocket.OPEN) {
-          ws.onopen = null;
-          ws.close();
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          try {
+            ws.close();
+          } catch {}
         }
       }
       if (reconnectTimeout) clearTimeout(reconnectTimeout);

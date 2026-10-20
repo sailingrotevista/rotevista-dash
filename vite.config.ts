@@ -1,18 +1,15 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import dns from 'node:dns';
+import https from 'node:https';
 
 export default defineConfig(async () => {
   const isVenusReachable = await new Promise<boolean>((resolve) => {
-    try {
-      const dns = require('dns');
-      const timer = setTimeout(() => resolve(false), 300);
-      dns.lookup('venus.local', (err: any) => {
-        clearTimeout(timer);
-        resolve(!err);
-      });
-    } catch {
-      resolve(false);
-    }
+    const timer = setTimeout(() => resolve(false), 300);
+    dns.lookup('venus.local', (err) => {
+      clearTimeout(timer);
+      resolve(!err);
+    });
   });
 
   return {
@@ -62,8 +59,7 @@ export default defineConfig(async () => {
               res.end();
               return;
             }
-            const https = require('https');
-            https.get(target, { timeout: 4500 }, (proxyRes: any) => {
+            https.get(target, { timeout: 4500 }, (proxyRes) => {
               res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
               proxyRes.pipe(res);
             }).on('error', () => {
@@ -83,7 +79,13 @@ export default defineConfig(async () => {
             '/signalk': {
               target: 'http://venus.local:3000',
               ws: true,
-              changeOrigin: true
+              changeOrigin: true,
+              configure: (proxy) => {
+                proxy.on('error', () => {});
+                proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
+                  socket.on('error', () => {});
+                });
+              }
             },
             '/rotevista-config': {
               target: 'http://venus.local:3000',
