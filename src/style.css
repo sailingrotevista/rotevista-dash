@@ -1214,18 +1214,48 @@ body.night-mode .compass-inner-btn:active,
 
 .ais-top-bar {
     position: absolute;
-    top: 10px;
+    top: 12px;
     left: 12px;
     right: 12px;
     z-index: 2000;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     pointer-events: none;
 }
 
 .ais-top-bar > * {
     pointer-events: auto;
+}
+
+.ais-top-left-group {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.ais-beta-tag {
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #38bdf8;
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    padding: 2px 8px;
+    border-radius: 6px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    line-height: 1.1;
+}
+
+body.night-mode .ais-beta-tag,
+.night-theme .ais-beta-tag,
+.night-mode .ais-beta-tag {
+    color: #ff5555;
+    background: rgba(26, 0, 0, 0.9);
+    border-color: rgba(255, 85, 85, 0.4);
 }
 
 .ais-hotspot-wind-btn {
@@ -2223,4 +2253,156 @@ body.night-mode .propulsion-speech-arrow,
 .night-mode .propulsion-speech-arrow {
     background: rgba(26, 0, 0, 0.95) !important;
     border-color: #ff3333 !important;
+}
+
+/* FLOATING SUPPORT BUTTON (BOTTOM LEFT) */
+.ais-floating-support-btn {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    z-index: 2000;
+    width: clamp(40px, 12vw, 48px);
+    height: clamp(40px, 12vw, 48px);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    background: #ffffff;
+    border: 1.5px solid #000000;
+    color: #0f172a;
+    font-size: 1.3rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.ais-floating-support-btn:hover,
+.ais-floating-support-btn:active {
+    transform: scale(1.08);
+}
+
+body.night-mode .ais-floating-support-btn,
+.night-theme .ais-floating-support-btn,
+.night-mode .ais-floating-support-btn {
+    background: #1a0000 !important;
+    border-color: #ff3333 !important;
+    color: #ff3333 !important;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.4) !important;
+}
+
+/* SUPPORT MODAL OVERLAY & POPUP */
+.ais-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.ais-support-modal {
+    background: #ffffff;
+    color: #0f172a;
+    width: 100%;
+    max-width: 440px;
+    border-radius: 16px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    animation: modalPop 0.2s ease-out;
+}
+
+@keyframes modalPop {
+    from { opacity: 0; transform: scale(0.92); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.ais-support-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.ais-support-modal-title {
+    font-weight: 800;
+    font-size: 1.05rem;
+    color: #0f172a;
+}
+
+.ais-support-modal-body {
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: #334155;
+}
+
+.ais-support-email-btn {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #0284c7;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.85rem;
+    padding: 10px 14px;
+    border-radius: 10px;
+    text-decoration: none;
+    box-shadow: 0 2px 8px rgba(2, 132, 199, 0.3);
+    transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.ais-support-email-btn:hover,
+.ais-support-email-btn:active {
+    background: #0369a1;
+    transform: translateY(-1px);
+}
+
+/* Night Mode Modal */
+body.night-mode .ais-support-modal,
+.night-theme .ais-support-modal,
+.night-mode .ais-support-modal {
+    background: #110000 !important;
+    color: #f8fafc !important;
+    border-color: #ff3333 !important;
+    box-shadow: 0 0 24px rgba(255, 0, 0, 0.4) !important;
+}
+
+body.night-mode .ais-support-modal-header,
+.night-theme .ais-support-modal-header,
+.night-mode .ais-support-modal-header {
+    background: #1f0000 !important;
+    border-bottom-color: #880000 !important;
+}
+
+body.night-mode .ais-support-modal-title,
+.night-theme .ais-support-modal-title,
+.night-mode .ais-support-modal-title {
+    color: #ff3333 !important;
+}
+
+body.night-mode .ais-support-modal-body,
+.night-theme .ais-support-modal-body,
+.night-mode .ais-support-modal-body {
+    color: #ffcccc !important;
+}
+
+body.night-mode .ais-support-email-btn,
+.night-theme .ais-support-email-btn,
+.night-mode .ais-support-email-btn {
+    background: #990000 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5) !important;
 }

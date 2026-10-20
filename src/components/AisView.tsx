@@ -106,6 +106,7 @@ export const AisView: React.FC<AisViewProps> = ({
   const [followMode, setFollowMode] = useState<FollowMode>('own');
   const [mapZoom, setMapZoom] = useState<number>(16);
   const [showListDrawer, setShowListDrawer] = useState<boolean>(false);
+  const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [selectedTarget, setSelectedTarget] = useState<AisTarget | null>(null);
   const [targetDetailTab, setTargetDetailTab] = useState<'telemetry' | 'info'>('telemetry');
   const [copiedMmsi, setCopiedMmsi] = useState<boolean>(false);
@@ -974,31 +975,34 @@ export const AisView: React.FC<AisViewProps> = ({
 
       {/* TOP TACTICAL CONTROL BAR */}
       <div className="ais-top-bar">
-        {/* STATUS COUNTERS */}
-        <div className="ais-status-counters">
-          <span className="counter-item counter-total">
-            <span className="counter-val">{stats.total}</span>
-            <span className="counter-lbl">Vessels</span>
-          </span>
-
-          {stats.red > 0 && (
-            <span className="counter-item counter-danger">
-              <span className="counter-val">{stats.red}</span>
-              <span className="counter-lbl">Collision</span>
+        {/* TOP LEFT GROUP: BETA TAG & STATUS COUNTERS */}
+        <div className="ais-top-left-group">
+          <div className="ais-beta-tag">Beta</div>
+          <div className="ais-status-counters">
+            <span className="counter-item counter-total">
+              <span className="counter-val">{stats.total}</span>
+              <span className="counter-lbl">Vessels</span>
             </span>
-          )}
 
-          {stats.orange > 0 && (
-            <span className="counter-item counter-warning">
-              <span className="counter-val">{stats.orange}</span>
-              <span className="counter-lbl">Crossing</span>
+            {stats.red > 0 && (
+              <span className="counter-item counter-danger">
+                <span className="counter-val">{stats.red}</span>
+                <span className="counter-lbl">Collision</span>
+              </span>
+            )}
+
+            {stats.orange > 0 && (
+              <span className="counter-item counter-warning">
+                <span className="counter-val">{stats.orange}</span>
+                <span className="counter-lbl">Crossing</span>
+              </span>
+            )}
+
+            <span className="counter-item counter-anchored">
+              <span className="counter-val">{stats.anchored}</span>
+              <span className="counter-lbl">Anchored</span>
             </span>
-          )}
-
-          <span className="counter-item counter-anchored">
-            <span className="counter-val">{stats.anchored}</span>
-            <span className="counter-lbl">Anchored</span>
-          </span>
+          </div>
         </div>
 
         {/* TOP RIGHT ACTIONS */}
@@ -1411,6 +1415,17 @@ export const AisView: React.FC<AisViewProps> = ({
         </button>
       </div>
 
+      {/* FLOATING ACTION BUTTON: SUPPORT / FEEDBACK (BOTTOM LEFT) */}
+      <button
+        type="button"
+        className="ais-floating-support-btn"
+        onClick={() => setShowSupportModal(true)}
+        title="Support Project & Feedback"
+        aria-label="Support Project & Feedback"
+      >
+        $
+      </button>
+
       {/* FLOATING ACTION BUTTON: SWITCH TO WIND DASHBOARD (BOTTOM RIGHT) */}
       <button
         type="button"
@@ -1423,6 +1438,42 @@ export const AisView: React.FC<AisViewProps> = ({
           <path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2" />
         </svg>
       </button>
+
+      {/* SUPPORT & FEEDBACK MODAL POPUP */}
+      {showSupportModal && (
+        <div className="ais-modal-backdrop" onClick={() => setShowSupportModal(false)}>
+          <div className="ais-support-modal" onClick={e => e.stopPropagation()}>
+            <div className="ais-support-modal-header">
+              <span className="ais-support-modal-title">Feedback & Support</span>
+              <button
+                type="button"
+                className="ais-card-close-btn"
+                onClick={() => setShowSupportModal(false)}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="ais-support-modal-body">
+              <p>
+                <strong>Your feedback matters most!</strong> I would love to hear your thoughts, feature ideas, or bug reports to make this tactical AIS monitor even better for real-world navigation.
+              </p>
+              <p>
+                I&apos;m personally investing time and resources into building and refining this tool — featuring ARPA CPA/TCPA collision alarms, COLREGs crossing rules, anchor drag alerts, and weather radar overlay.
+              </p>
+              <p>
+                Infrastructure and testing costs have reached <strong>€40</strong> so far. Additional funding allows new features to be added much faster — but even a simple email with your feedback means a lot!
+              </p>
+              <a
+                href="mailto:refuso.chiari.1j@icloud.com?subject=Rotevista%20dash%3A%20Improvement"
+                className="ais-support-email-btn"
+              >
+                ✉️ Contact Developer
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

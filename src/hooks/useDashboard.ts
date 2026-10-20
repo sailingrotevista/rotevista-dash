@@ -1088,7 +1088,7 @@ export function useDashboard() {
 
   // Main 1Hz Tactical Display Loop
   useEffect(() => {
-    const interval = setInterval(() => {
+    const tick = () => {
       const store = storeRef.current;
       const now = Date.now();
 
@@ -1543,7 +1543,10 @@ export function useDashboard() {
         cog: Math.round((curCogDeg + 360) % 360),
         sog: sogKts,
       });
-    }, 1000);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
 
     return () => clearInterval(interval);
   }, [config, displayModeSog, displayModeTws, manageHistory]);
