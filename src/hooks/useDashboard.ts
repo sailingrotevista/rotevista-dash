@@ -138,6 +138,9 @@ export function useDashboard() {
   const [appView, setAppView] = useState<AppView>(
     () => savedState?.appView || 'wind'
   );
+  const appViewRef = useRef<AppView>(appView);
+  appViewRef.current = appView;
+
   const [aisTargets, setAisTargets] = useState<AisTarget[]>([]);
   const [harborClusters, setHarborClusters] = useState<HarborCluster[]>([]);
   const [topThreat, setTopThreat] = useState<AisTarget | null>(null);
@@ -145,6 +148,26 @@ export function useDashboard() {
   const [snoozedThreats, setSnoozedThreats] = useState<Record<string, { until: number; initialRisk: string }>>({});
   const [ownShipPosition, setOwnShipPosition] = useState<{ lat: number; lon: number }>({ lat: 36.780956, lon: 14.545439 });
   const [ownShipCourse, setOwnShipCourse] = useState<{ hdg: number; cog: number; sog: number }>({ hdg: 45, cog: 45, sog: 0.0 });
+
+  const latestAisRef = useRef<{
+    targets: AisTarget[];
+    clusters: HarborCluster[];
+    pos: { lat: number; lon: number };
+    highestRisk: 'RED' | 'ORANGE' | null;
+  }>({
+    targets: [],
+    clusters: [],
+    pos: { lat: 36.780956, lon: 14.545439 },
+    highestRisk: null,
+  });
+
+  useEffect(() => {
+    if (appView === 'ais') {
+      setOwnShipPosition(latestAisRef.current.pos);
+      setAisTargets(latestAisRef.current.targets);
+      setHarborClusters(latestAisRef.current.clusters);
+    }
+  }, [appView]);
 
   const snoozeThreat = useCallback((targetId: string) => {
     setTopThreat(currentTop => {
@@ -507,24 +530,59 @@ export function useDashboard() {
         const lat = parseFloat(val.latitude);
         const lon = parseFloat(val.longitude);
         if (!isNaN(lat) && !isNaN(lon)) {
-          setOwnShipPosition({ lat, lon });
+          const prevPos = latestAisRef.current.pos;
+          if (Math.abs(prevPos.lat - lat) > 0.000005 || Math.abs(prevPos.lon - lon) > 0.000005) {
+            const nextPos = { lat, lon };
+            latestAisRef.current.pos = nextPos;
+            if (appViewRef.current === 'ais') {
+              setOwnShipPosition(nextPos);
+            }
+          }
         }
       }
     }
 
     if (path === 'environment.ais_targets') {
       if (Array.isArray(val)) {
-        setAisTargets(val);
+        latestAisRef.current.targets = val;
+        const nextRisk: 'RED' | 'ORANGE' | null = val.some((t: AisTarget) => t.risk === 'RED')
+          ? 'RED'
+          : val.some((t: AisTarget) => t.risk === 'ORANGE')
+            ? 'ORANGE'
+            : null;
+        if (appViewRef.current === 'ais' || nextRisk !== latestAisRef.current.highestRisk) {
+          latestAisRef.current.highestRisk = nextRisk;
+          setAisTargets(val);
+        }
       }
     }
 
     if (path === 'environment.ais_top_threat') {
-      setTopThreat(val || null);
+      const nextThreat: AisTarget | null = val || null;
+      setTopThreat(prev => {
+        if (!prev && !nextThreat) return prev;
+        if (
+          prev &&
+          nextThreat &&
+          prev.id === nextThreat.id &&
+          prev.risk === nextThreat.risk &&
+          prev.cpa === nextThreat.cpa &&
+          prev.tcpa === nextThreat.tcpa &&
+          prev.dist === nextThreat.dist &&
+          prev.sog === nextThreat.sog
+        ) {
+          return prev;
+        }
+        return nextThreat;
+      });
     }
 
     if (path === 'environment.harbor_clusters') {
       if (Array.isArray(val)) {
-        setHarborClusters(val);
+        latestAisRef.current.clusters = val;
+        if (appViewRef.current === 'ais') {
+          setHarborClusters(val);
+        }
       }
     }
   }, []);
@@ -777,7 +835,7 @@ export function useDashboard() {
         const myCogRad = degToRad(simCog);
         simMyGps.lat += (myDistStepMeters * Math.cos(myCogRad)) / 111139;
         simMyGps.lon += (myDistStepMeters * Math.sin(myCogRad)) / (111139 * Math.cos(degToRad(simMyGps.lat)));
-        setOwnShipPosition({ ...simMyGps });
+        processIncomingData('navigation.position', { latitude: simMyGps.lat, longitude: simMyGps.lon });
 
         // Avanzamento cinematico bersagli AIS in movimento
         simTargets = simTargets.map(t => {
@@ -818,12 +876,12 @@ export function useDashboard() {
         );
 
         simTargets = arpaRes.targets;
-        setAisTargets([...simTargets]);
-        setTopThreat(arpaRes.topThreat);
+        processIncomingData('environment.ais_targets', [...simTargets]);
+        processIncomingData('environment.ais_top_threat', arpaRes.topThreat);
       }, 1000);
 
       // Popola bersagli AIS e cluster con i bersagli reali di Marina di Ragusa
-      setOwnShipPosition({ ...simMyGps });
+      processIncomingData('navigation.position', { latitude: simMyGps.lat, longitude: simMyGps.lon });
       const initialArpa = recalculateArpaForTargets(
         simMyGps,
         45,
@@ -832,12 +890,10 @@ export function useDashboard() {
         simTargets,
         propulsionModeRef.current
       );
-      setAisTargets(initialArpa.targets);
-      setHarborClusters(MARINA_DI_RAGUSA_SIM_DATA.harborClusters);
-      setTopThreat(initialArpa.topThreat);
+      processIncomingData('environment.ais_targets', initialArpa.targets);
+      processIncomingData('environment.harbor_clusters', MARINA_DI_RAGUSA_SIM_DATA.harborClusters);
+      processIncomingData('environment.ais_top_threat', initialArpa.topThreat);
     };
-
-    let aisPollInterval: ReturnType<typeof setInterval> | null = null;
 
     const fetchAisTargets = () => {
       if (!isDisposed && storeRef.current.hasEverConnectedToSignalK) {
@@ -845,9 +901,9 @@ export function useDashboard() {
           .then(res => (res.ok ? res.json() : null))
           .then(d => {
             if (d) {
-              if (Array.isArray(d.targets)) setAisTargets(d.targets);
-              if (Array.isArray(d.harborClusters)) setHarborClusters(d.harborClusters);
-              if (d.topThreat !== undefined) setTopThreat(d.topThreat);
+              if (Array.isArray(d.targets)) processIncomingData('environment.ais_targets', d.targets);
+              if (Array.isArray(d.harborClusters)) processIncomingData('environment.harbor_clusters', d.harborClusters);
+              if (d.topThreat !== undefined) processIncomingData('environment.ais_top_threat', d.topThreat);
             }
           })
           .catch(() => {});
@@ -901,9 +957,6 @@ export function useDashboard() {
 
           fetchHistory();
           fetchAisTargets();
-
-          if (aisPollInterval) clearInterval(aisPollInterval);
-          aisPollInterval = setInterval(fetchAisTargets, 5000);
         };
 
         const fetchHistory = () => {
@@ -1101,7 +1154,6 @@ export function useDashboard() {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (handshakeTimeout) clearTimeout(handshakeTimeout);
       if (simTimer) clearInterval(simTimer);
-      if (aisPollInterval) clearInterval(aisPollInterval);
     };
   }, [processIncomingData, seedDemoHistory]);
 
@@ -1651,20 +1703,22 @@ export function useDashboard() {
           : { text: nextStatusText, className: nextStatusClass }
       );
 
-      const curHdgDeg = store.raw['navigation.headingTrue'] !== undefined
-        ? radToDeg(store.raw['navigation.headingTrue'])
-        : (store.raw['navigation.courseOverGroundTrue'] !== undefined ? radToDeg(store.raw['navigation.courseOverGroundTrue']) : 0);
-      const curCogDeg = store.raw['navigation.courseOverGroundTrue'] !== undefined
-        ? radToDeg(store.raw['navigation.courseOverGroundTrue'])
-        : curHdgDeg;
-      const nextHdg = Math.round((curHdgDeg + 360) % 360);
-      const nextCog = Math.round((curCogDeg + 360) % 360);
-      const nextSog = Math.round(sogKts * 10) / 10;
-      setOwnShipCourse(prev =>
-        prev.hdg === nextHdg && prev.cog === nextCog && prev.sog === nextSog
-          ? prev
-          : { hdg: nextHdg, cog: nextCog, sog: nextSog }
-      );
+      if (appViewRef.current === 'ais') {
+        const curHdgDeg = store.raw['navigation.headingTrue'] !== undefined
+          ? radToDeg(store.raw['navigation.headingTrue'])
+          : (store.raw['navigation.courseOverGroundTrue'] !== undefined ? radToDeg(store.raw['navigation.courseOverGroundTrue']) : 0);
+        const curCogDeg = store.raw['navigation.courseOverGroundTrue'] !== undefined
+          ? radToDeg(store.raw['navigation.courseOverGroundTrue'])
+          : curHdgDeg;
+        const nextHdg = Math.round((curHdgDeg + 360) % 360);
+        const nextCog = Math.round((curCogDeg + 360) % 360);
+        const nextSog = Math.round(sogKts * 10) / 10;
+        setOwnShipCourse(prev =>
+          prev.hdg === nextHdg && prev.cog === nextCog && prev.sog === nextSog
+            ? prev
+            : { hdg: nextHdg, cog: nextCog, sog: nextSog }
+        );
+      }
     };
 
     tick();

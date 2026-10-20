@@ -116,12 +116,24 @@ export const App: React.FC = () => {
   }, [aisTargets]);
 
   const [inspectToken, setInspectToken] = React.useState<number>(0);
+  const [hasOpenedAis, setHasOpenedAis] = React.useState<boolean>(appView === 'ais');
+
+  useEffect(() => {
+    if (appView === 'ais') {
+      setHasOpenedAis(true);
+    }
+  }, [appView]);
+
+  const handleSwitchToWind = useCallback(() => {
+    setAppView('wind');
+  }, [setAppView]);
 
   // Ispezione bersaglio dal Banner Tattico: apre direttamente la schermata AIS, seleziona il target ed esegue lo zoom intelligente sul triangolo di collisione
   const handleInspectThreat = useCallback(
     (threat: AisTarget) => {
       setSelectedAisTargetId(threat.id);
       setInspectToken(Date.now());
+      setHasOpenedAis(true);
       setAppView('ais');
     },
     [setSelectedAisTargetId, setAppView]
@@ -474,24 +486,26 @@ export const App: React.FC = () => {
     </div>
       </div>
 
-      <div style={{ display: appView === 'ais' ? 'block' : 'none', width: '100%', height: '100%' }}>
-        <AisView
-          isActive={appView === 'ais'}
-          targets={aisTargets}
-          harborClusters={harborClusters}
-          ownShipPosition={ownShipPosition}
-          ownShipCourse={ownShipCourse}
-          isNightMode={isNightMode}
-          onSwitchToWind={() => setAppView('wind')}
-          onSnoozeThreat={snoozeThreat}
-          selectedTargetId={selectedAisTargetId}
-          onSelectTarget={setSelectedAisTargetId}
-          ownShipName={config?.vesselName}
-          propulsionMode={propulsionMode}
-          onSetPropulsionMode={setPropulsionMode}
-          inspectToken={inspectToken}
-        />
-      </div>
+      {hasOpenedAis && (
+        <div style={{ display: appView === 'ais' ? 'block' : 'none', width: '100%', height: '100%' }}>
+          <AisView
+            isActive={appView === 'ais'}
+            targets={aisTargets}
+            harborClusters={harborClusters}
+            ownShipPosition={ownShipPosition}
+            ownShipCourse={ownShipCourse}
+            isNightMode={isNightMode}
+            onSwitchToWind={handleSwitchToWind}
+            onSnoozeThreat={snoozeThreat}
+            selectedTargetId={selectedAisTargetId}
+            onSelectTarget={setSelectedAisTargetId}
+            ownShipName={config?.vesselName}
+            propulsionMode={propulsionMode}
+            onSetPropulsionMode={setPropulsionMode}
+            inspectToken={inspectToken}
+          />
+        </div>
+      )}
     </div>
   );
 };

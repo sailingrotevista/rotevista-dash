@@ -70,7 +70,7 @@ const formatAge = (seconds: number): string => {
 
 type FollowMode = 'own' | 'target' | 'none';
 
-export const AisView: React.FC<AisViewProps> = ({
+export const AisView: React.FC<AisViewProps> = React.memo(({
   isActive = true,
   targets,
   harborClusters,
@@ -261,10 +261,11 @@ export const AisView: React.FC<AisViewProps> = ({
         mapRef.current.setView(center, standardZoom, { animate: false });
       }
       lastLeaveTimeRef.current = null;
-    } else {
+    } else if (lastLeaveTimeRef.current === null) {
       lastLeaveTimeRef.current = Date.now();
     }
-  }, [isActive, harborClusters, ownShipCourse.sog, ownShipPosition.lat, ownShipPosition.lon, getOffsetCenter, onSelectTarget]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   // Center on Target handler (centrato nella porzione di schermo libera con follow attivo)
   const handleCenterOnTarget = useCallback(
@@ -400,8 +401,8 @@ export const AisView: React.FC<AisViewProps> = ({
   const lastFollowPosRef = useRef<{ lat: number; lon: number; mode: FollowMode; targetId?: string } | null>(null);
 
   useEffect(() => {
-    if (!mapRef.current || followMode === 'none') {
-      lastFollowPosRef.current = null;
+    if (!isActive || !mapRef.current || followMode === 'none') {
+      if (followMode === 'none') lastFollowPosRef.current = null;
       return;
     }
 
@@ -439,7 +440,7 @@ export const AisView: React.FC<AisViewProps> = ({
       lastFollowPosRef.current = { lat: pos[0], lon: pos[1], mode: modeKey, targetId: currentTargetId };
       map.panTo(targetCenter, { animate: true, duration: 2.0, easeLinearity: 0.25 });
     }
-  }, [ownShipPosition.lat, ownShipPosition.lon, selectedTarget?.lat, selectedTarget?.lon, followMode, selectedTarget?.id, getOffsetCenter]);
+  }, [isActive, ownShipPosition.lat, ownShipPosition.lon, selectedTarget?.lat, selectedTarget?.lon, followMode, selectedTarget?.id, getOffsetCenter]);
 
   // Seleziona e inquadra con smart zoom il triangolo di collisione quando cambia inspectToken o selectedTargetId dall'esterno
   const prevInspectTokenRef = useRef<number | undefined>(undefined);
@@ -1476,4 +1477,4 @@ export const AisView: React.FC<AisViewProps> = ({
       )}
     </div>
   );
-};
+}, (prev, next) => !prev.isActive && !next.isActive);
