@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import dns from 'node:dns';
+import http from 'node:http';
 import https from 'node:https';
 function setupMiddlewares(server: { middlewares: any }, isVenusReachable: boolean) {
   if (!isVenusReachable) {
@@ -50,10 +50,14 @@ function setupMiddlewares(server: { middlewares: any }, isVenusReachable: boolea
 
 export default defineConfig(async () => {
   const isVenusReachable = await new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => resolve(false), 300);
-    dns.lookup('venus.local', (err) => {
-      clearTimeout(timer);
-      resolve(!err);
+    const req = http.get('http://venus.local:3000/signalk', { timeout: 350 }, (res) => {
+      resolve(true);
+      res.resume();
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
     });
   });
 
@@ -88,8 +92,12 @@ export default defineConfig(async () => {
               changeOrigin: true,
               configure: (proxy) => {
                 proxy.on('error', () => {});
-                proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
+                proxy.on('proxyReqWs', (proxyReq, _req, socket) => {
+                  proxyReq.on('error', () => {});
                   socket.on('error', () => {});
+                });
+                proxy.on('open', (proxySocket) => {
+                  proxySocket.on('error', () => {});
                 });
               }
             },
