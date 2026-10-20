@@ -1130,6 +1130,22 @@ body.night-mode #radar-ticks line {
     transform: translate(-50%, -50%);
 }
 
+@media (max-aspect-ratio: 1.25/1) {
+    .compass-inner-btn {
+        width: clamp(24px, 10.5%, 36px);
+    }
+
+    .compass-btn-left {
+        left: 14.2%;
+        top: 69.5%;
+    }
+
+    .compass-btn-right {
+        left: 85.8%;
+        top: 69.5%;
+    }
+}
+
 .compass-inner-btn.active-radar {
     background: #ffffff;
     border-color: #0284c7;
