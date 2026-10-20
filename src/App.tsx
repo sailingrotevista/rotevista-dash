@@ -79,6 +79,29 @@ export const App: React.FC = () => {
     }
   }, [activeInstrument, setActiveInstrument]);
 
+  const handleBoxSingleTap = useCallback(
+    (type: BoxType) => {
+      if (isFocusActive) toggleFocusMode(type);
+    },
+    [isFocusActive, toggleFocusMode]
+  );
+
+  const handleSogSingleTap = useCallback(() => {
+    if (!isFocusActive) {
+      setDisplayModeSog(prev => (prev === 'SOG' ? 'VMG' : 'SOG'));
+    } else {
+      toggleFocusMode('sog');
+    }
+  }, [isFocusActive, setDisplayModeSog, toggleFocusMode]);
+
+  const handleTwsSingleTap = useCallback(() => {
+    if (!isFocusActive) {
+      setDisplayModeTws(prev => (prev === 'TWS' ? 'AWS' : 'TWS'));
+    } else {
+      toggleFocusMode('tws');
+    }
+  }, [isFocusActive, setDisplayModeTws, toggleFocusMode]);
+
   // Toggle tra Bussola del Vento e Radar Meteo dal pulsante interno alla bussola
   const handleToggleRadar = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -172,8 +195,8 @@ export const App: React.FC = () => {
         value={displayValues.stw}
         isFocused={focusedBox === 'stw'}
         isHercules={graphModes.stw === 'hercules'}
-        onLongPress={() => toggleFocusMode('stw')}
-        onDoubleTap={() => toggleGraphMode('stw')}
+        onLongPress={toggleFocusMode}
+        onDoubleTap={toggleGraphMode}
       >
         <div className="graph-wrapper">
           <Sparkline
@@ -198,15 +221,9 @@ export const App: React.FC = () => {
         valueColor={displayValues.sogColor}
         isFocused={focusedBox === 'sog'}
         isHercules={graphModes.sog === 'hercules'}
-        onLongPress={() => toggleFocusMode('sog')}
-        onDoubleTap={() => toggleGraphMode('sog')}
-        onSingleTap={() => {
-          if (!isFocusActive) {
-            setDisplayModeSog(prev => (prev === 'SOG' ? 'VMG' : 'SOG'));
-          } else {
-            toggleFocusMode('sog');
-          }
-        }}
+        onLongPress={toggleFocusMode}
+        onDoubleTap={toggleGraphMode}
+        onSingleTap={handleSogSingleTap}
       >
         <div className="graph-wrapper">
           <Sparkline
@@ -230,10 +247,8 @@ export const App: React.FC = () => {
         isLargeValue
         unstable={displayValues.hdgUnstable}
         isFocused={focusedBox === 'hdg'}
-        onLongPress={() => toggleFocusMode('hdg')}
-        onSingleTap={() => {
-          if (isFocusActive) toggleFocusMode('hdg');
-        }}
+        onLongPress={toggleFocusMode}
+        onSingleTap={handleBoxSingleTap}
       />
 
       {/* 4. COG (MEAN) */}
@@ -244,10 +259,8 @@ export const App: React.FC = () => {
         isLargeValue
         unstable={displayValues.cogUnstable}
         isFocused={focusedBox === 'cog'}
-        onLongPress={() => toggleFocusMode('cog')}
-        onSingleTap={() => {
-          if (isFocusActive) toggleFocusMode('cog');
-        }}
+        onLongPress={toggleFocusMode}
+        onSingleTap={handleBoxSingleTap}
       />
 
       {/* 5. TACK / GYBE OPPOSITE COURSE */}
@@ -255,10 +268,8 @@ export const App: React.FC = () => {
         type="tack"
         label={displayValues.tackLabel}
         isFocused={focusedBox === 'tack'}
-        onLongPress={() => toggleFocusMode('tack')}
-        onSingleTap={() => {
-          if (isFocusActive) toggleFocusMode('tack');
-        }}
+        onLongPress={toggleFocusMode}
+        onSingleTap={handleBoxSingleTap}
       >
         <div className="dual-value-container">
           <div className="dual-value-col tack-hdg-col">
@@ -367,8 +378,8 @@ export const App: React.FC = () => {
         alarmClass={displayValues.depthAlarmClass}
         isFocused={focusedBox === 'depth'}
         isHercules={graphModes.depth === 'hercules'}
-        onLongPress={() => toggleFocusMode('depth')}
-        onDoubleTap={() => toggleGraphMode('depth')}
+        onLongPress={toggleFocusMode}
+        onDoubleTap={toggleGraphMode}
       >
         <div className="graph-wrapper">
           <Sparkline
@@ -394,15 +405,9 @@ export const App: React.FC = () => {
         valueColor={displayValues.twsColor}
         isFocused={focusedBox === 'tws'}
         isHercules={graphModes.tws === 'hercules'}
-        onLongPress={() => toggleFocusMode('tws')}
-        onDoubleTap={() => toggleGraphMode('tws')}
-        onSingleTap={() => {
-          if (!isFocusActive) {
-            setDisplayModeTws(prev => (prev === 'TWS' ? 'AWS' : 'TWS'));
-          } else {
-            toggleFocusMode('tws');
-          }
-        }}
+        onLongPress={toggleFocusMode}
+        onDoubleTap={toggleGraphMode}
+        onSingleTap={handleTwsSingleTap}
       >
         <div className="graph-wrapper">
           <Sparkline
@@ -427,10 +432,8 @@ export const App: React.FC = () => {
         isLargeValue
         unstable={displayValues.twaUnstable}
         isFocused={focusedBox === 'twa'}
-        onLongPress={() => toggleFocusMode('twa')}
-        onSingleTap={() => {
-          if (isFocusActive) toggleFocusMode('twa');
-        }}
+        onLongPress={toggleFocusMode}
+        onSingleTap={handleBoxSingleTap}
       />
 
       {/* 9. AWA (MEAN) */}
@@ -441,10 +444,8 @@ export const App: React.FC = () => {
         isLargeValue
         unstable={displayValues.awaUnstable}
         isFocused={focusedBox === 'awa'}
-        onLongPress={() => toggleFocusMode('awa')}
-        onSingleTap={() => {
-          if (isFocusActive) toggleFocusMode('awa');
-        }}
+        onLongPress={toggleFocusMode}
+        onSingleTap={handleBoxSingleTap}
       />
 
       {/* 10. TWD (MEAN) WITH MINI COMPASS */}

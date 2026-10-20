@@ -34,7 +34,7 @@ html, body, #root {
 .box-hdg   { grid-area: hdg; }
 .box-cog   { grid-area: cog; }
 .box-tack  { grid-area: tack; }
-.box-gauge { grid-area: gauge; display: flex; align-items: center; justify-content: center; position: relative; }
+.box-gauge { grid-area: gauge; display: flex; align-items: center; justify-content: center; position: relative; contain: layout paint; }
 .box-depth { grid-area: depth; }
 .box-tws   { grid-area: tws; }
 .box-twa   { grid-area: twa; }
@@ -48,7 +48,7 @@ html, body, #root {
     position: relative; border-bottom: 1px solid #eee;
     padding: 0.75rem 8px 3px 8px;
     display: flex; flex-direction: column; width: 100%;
-    box-sizing: border-box; container-type: size;
+    box-sizing: border-box; container-type: size; contain: paint;
     min-height: 0; overflow: hidden;
     background: rgba(0, 0, 0, 0.03); border-radius: 12px;
     transition: background-color 0.2s ease;
@@ -1098,7 +1098,6 @@ body.night-mode #radar-ticks line {
     justify-content: center;
     cursor: pointer;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
-    backdrop-filter: blur(4px);
     transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
     padding: 0;
 }

@@ -13,9 +13,9 @@ interface DataBoxProps {
   isFocused?: boolean;
   isHercules?: boolean;
   children?: React.ReactNode;
-  onLongPress?: () => void;
-  onDoubleTap?: () => void;
-  onSingleTap?: () => void;
+  onLongPress?: (type: BoxType) => void;
+  onDoubleTap?: (type: BoxType) => void;
+  onSingleTap?: (type: BoxType) => void;
 }
 
 export const DataBox: React.FC<DataBoxProps> = React.memo(({
@@ -43,7 +43,7 @@ export const DataBox: React.FC<DataBoxProps> = React.memo(({
     isLongPressActiveRef.current = false;
     pressTimerRef.current = setTimeout(() => {
       isLongPressActiveRef.current = true;
-      if (onLongPress) onLongPress();
+      if (onLongPress) onLongPress(type);
       lastTapTimeRef.current = 0;
     }, 1000);
   };
@@ -60,12 +60,12 @@ export const DataBox: React.FC<DataBoxProps> = React.memo(({
 
     if (tapDelay < 300 && tapDelay > 0) {
       if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
-      if (onDoubleTap) onDoubleTap();
+      if (onDoubleTap) onDoubleTap(type);
       lastTapTimeRef.current = 0;
     } else {
       lastTapTimeRef.current = currentTime;
       tapTimeoutRef.current = setTimeout(() => {
-        if (onSingleTap) onSingleTap();
+        if (onSingleTap) onSingleTap(type);
       }, 250);
     }
   };
@@ -87,6 +87,11 @@ export const DataBox: React.FC<DataBoxProps> = React.memo(({
     .filter(Boolean)
     .join(' ');
 
+  const valueStyle = React.useMemo(
+    () => (valueColor ? { color: valueColor } : undefined),
+    [valueColor]
+  );
+
   return (
     <div
       className={boxClasses}
@@ -105,9 +110,10 @@ export const DataBox: React.FC<DataBoxProps> = React.memo(({
         <span
           className={`${isLargeValue ? 'value-large' : 'value'} ${unstable ? 'unstable-data' : ''} ${alarmClass}`}
           id={type}
-          style={valueColor ? { color: valueColor } : undefined}
-          dangerouslySetInnerHTML={{ __html: value }}
-        />
+          style={valueStyle}
+        >
+          {value}
+        </span>
       )}
 
       {children}

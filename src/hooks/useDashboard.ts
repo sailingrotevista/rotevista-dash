@@ -396,10 +396,13 @@ export function useDashboard() {
       const directionVal = typeof val === 'object' && val.val !== undefined ? val.val : val;
       safePush(store.smoothBuf.twd, directionVal, now, true, historyMinutes);
       safePush(store.longBuf.twd, directionVal, now, true, historyMinutes);
-      // Also push to twd history for radar
-      store.histories.twd.push({ val: directionVal, time: now });
-      while (store.histories.twd.length > 0 && now - store.histories.twd[0].time > 120 * 60000) {
-        store.histories.twd.shift();
+      // Also push to twd history for radar (throttled to 10s buckets)
+      const lastTwdPt = store.histories.twd[store.histories.twd.length - 1];
+      if (!lastTwdPt || now - lastTwdPt.time >= 10000) {
+        store.histories.twd.push({ val: directionVal, time: now });
+        while (store.histories.twd.length > 0 && now - store.histories.twd[0].time > 120 * 60000) {
+          store.histories.twd.shift();
+        }
       }
     }
 
@@ -488,7 +491,10 @@ export function useDashboard() {
             store.raw['environment.wind.directionTrue'] = twd;
             safePush(store.smoothBuf.twd, twd, now, true, historyMinutes);
             safePush(store.longBuf.twd, twd, now, true, historyMinutes);
-            store.histories.twd.push({ val: twd, time: now });
+            const lastTwdPt = store.histories.twd[store.histories.twd.length - 1];
+            if (!lastTwdPt || now - lastTwdPt.time >= 10000) {
+              store.histories.twd.push({ val: twd, time: now });
+            }
           }
         }
         store.lastTWCompute = now;
@@ -1449,7 +1455,35 @@ export function useDashboard() {
       const newTws = currentWindVal.toFixed(1);
       const newAwsSvg = awsVal.toFixed(1);
 
+      const roundedLeeway = Math.round(smoothedLeeway * 10) / 10;
+      const roundedTrackRot = Math.round(curTrackRot * 10) / 10;
+      const roundedAwaRot = Math.round(awaPointerDeg * 10) / 10;
+      const roundedTwaRot = Math.round(twaPointerDeg * 10) / 10;
+      const roundedWindCompRot = Math.round(windCompassRotDeg * 10) / 10;
+      const roundedBoatCompRot = Math.round(boatCompassRotDeg * 10) / 10;
+
       setDisplayValues(prev => {
+        const sameTacCw =
+          prev.tacticCwDot.active === tacticCw.active &&
+          prev.tacticCwDot.color === tacticCw.color &&
+          prev.tacticCwDot.gybing === tacticCw.gybing;
+        const sameTacCcw =
+          prev.tacticCcwDot.active === tacticCcw.active &&
+          prev.tacticCcwDot.color === tacticCcw.color &&
+          prev.tacticCcwDot.gybing === tacticCcw.gybing;
+        const sameCompCw =
+          prev.compassCwDot.active === compassCw.active &&
+          prev.compassCwDot.color === compassCw.color &&
+          prev.compassCwDot.blinking === compassCw.blinking;
+        const sameCompCcw =
+          prev.compassCcwDot.active === compassCcw.active &&
+          prev.compassCcwDot.color === compassCcw.color &&
+          prev.compassCcwDot.blinking === compassCcw.blinking;
+        const sameMeteoLed =
+          prev.meteoLed?.active === meteoLedState?.active &&
+          prev.meteoLed?.color === meteoLedState?.color &&
+          prev.meteoLed?.angleTarget === meteoLedState?.angleTarget;
+
         if (
           prev.stw === newStw &&
           prev.sog === newSog &&
@@ -1474,30 +1508,20 @@ export function useDashboard() {
           prev.tackCog === tackCogStr &&
           prev.tackCogUnstable === tackCogUnstable &&
           prev.tackLabel === tackLabelMode &&
-          prev.leewayDeg === smoothedLeeway &&
-          prev.trackRotDeg === curTrackRot &&
-          prev.awaPointerDeg === awaPointerDeg &&
-          prev.twaPointerDeg === twaPointerDeg &&
-          prev.windCompassRotDeg === windCompassRotDeg &&
-          prev.boatCompassRotDeg === boatCompassRotDeg &&
+          prev.leewayDeg === roundedLeeway &&
+          prev.trackRotDeg === roundedTrackRot &&
+          prev.awaPointerDeg === roundedAwaRot &&
+          prev.twaPointerDeg === roundedTwaRot &&
+          prev.windCompassRotDeg === roundedWindCompRot &&
+          prev.boatCompassRotDeg === roundedBoatCompRot &&
           prev.twdShiftText === twdShiftText &&
           prev.twdShiftColor === twdShiftColor &&
           prev.isNavigating === isNav &&
-          prev.tacticCwDot.active === tacticCw.active &&
-          prev.tacticCwDot.color === tacticCw.color &&
-          prev.tacticCwDot.gybing === tacticCw.gybing &&
-          prev.tacticCcwDot.active === tacticCcw.active &&
-          prev.tacticCcwDot.color === tacticCcw.color &&
-          prev.tacticCcwDot.gybing === tacticCcw.gybing &&
-          prev.compassCwDot.active === compassCw.active &&
-          prev.compassCwDot.color === compassCw.color &&
-          prev.compassCwDot.blinking === compassCw.blinking &&
-          prev.compassCcwDot.active === compassCcw.active &&
-          prev.compassCcwDot.color === compassCcw.color &&
-          prev.compassCcwDot.blinking === compassCcw.blinking &&
-          prev.meteoLed?.active === meteoLedState?.active &&
-          prev.meteoLed?.color === meteoLedState?.color &&
-          prev.meteoLed?.angleTarget === meteoLedState?.angleTarget
+          sameTacCw &&
+          sameTacCcw &&
+          sameCompCw &&
+          sameCompCcw &&
+          sameMeteoLed
         ) {
           return prev;
         }
@@ -1525,46 +1549,46 @@ export function useDashboard() {
           tackCog: tackCogStr,
           tackCogUnstable,
           tackLabel: tackLabelMode,
-          leewayDeg: smoothedLeeway,
-          trackRotDeg: curTrackRot,
-          awaPointerDeg,
-          twaPointerDeg,
-          windCompassRotDeg,
-          boatCompassRotDeg,
-          tacticCwDot: tacticCw,
-          tacticCcwDot: tacticCcw,
-          compassCwDot: compassCw,
-          compassCcwDot: compassCcw,
+          leewayDeg: roundedLeeway,
+          trackRotDeg: roundedTrackRot,
+          awaPointerDeg: roundedAwaRot,
+          twaPointerDeg: roundedTwaRot,
+          windCompassRotDeg: roundedWindCompRot,
+          boatCompassRotDeg: roundedBoatCompRot,
+          tacticCwDot: sameTacCw ? prev.tacticCwDot : tacticCw,
+          tacticCcwDot: sameTacCcw ? prev.tacticCcwDot : tacticCcw,
+          compassCwDot: sameCompCw ? prev.compassCwDot : compassCw,
+          compassCcwDot: sameCompCcw ? prev.compassCcwDot : compassCcw,
           twdShiftText,
           twdShiftColor,
-          meteoLed: meteoLedState,
+          meteoLed: sameMeteoLed ? prev.meteoLed : meteoLedState,
           isNavigating: isNav,
         };
       });
 
-      // Update exported histories state for charts
+      // Update exported histories state for charts (preserving unchanged array references)
       setHistoriesState(prev => {
         const s = store.histories;
-        if (
-          prev.stw.length === s.stw.length &&
-          prev.sog.length === s.sog.length &&
-          prev.vmg.length === s.vmg.length &&
-          prev.depth.length === s.depth.length &&
-          prev.tws.length === s.tws.length &&
-          prev.aws.length === s.aws.length &&
-          prev.twd.length === s.twd.length &&
-          (s.stw.length === 0 || prev.stw[prev.stw.length - 1] === s.stw[s.stw.length - 1])
-        ) {
+        const isSame = (a: HistoryPoint[], b: HistoryPoint[]) =>
+          a.length === b.length && (b.length === 0 || a[a.length - 1] === b[b.length - 1]);
+        const sameStw = isSame(prev.stw, s.stw);
+        const sameSog = isSame(prev.sog, s.sog);
+        const sameVmg = isSame(prev.vmg, s.vmg);
+        const sameDepth = isSame(prev.depth, s.depth);
+        const sameTws = isSame(prev.tws, s.tws);
+        const sameAws = isSame(prev.aws, s.aws);
+        const sameTwd = isSame(prev.twd, s.twd);
+        if (sameStw && sameSog && sameVmg && sameDepth && sameTws && sameAws && sameTwd) {
           return prev;
         }
         return {
-          stw: [...s.stw],
-          sog: [...s.sog],
-          vmg: [...s.vmg],
-          depth: [...s.depth],
-          tws: [...s.tws],
-          aws: [...s.aws],
-          twd: [...s.twd],
+          stw: sameStw ? prev.stw : [...s.stw],
+          sog: sameSog ? prev.sog : [...s.sog],
+          vmg: sameVmg ? prev.vmg : [...s.vmg],
+          depth: sameDepth ? prev.depth : [...s.depth],
+          tws: sameTws ? prev.tws : [...s.tws],
+          aws: sameAws ? prev.aws : [...s.aws],
+          twd: sameTwd ? prev.twd : [...s.twd],
         };
       });
 
@@ -1586,37 +1610,48 @@ export function useDashboard() {
       const isSocketOpen = store.isSocketOpen;
       const isDataFlowing = now - store.lastMessageReceivedTime < 6000;
 
+      let nextStatusText = 'OFFLINE';
+      let nextStatusClass = 'offline';
       if (store.isSimulating) {
-        setConnectionStatus({ text: 'SIMULAZIONE', className: 'simulating' });
+        nextStatusText = 'SIMULAZIONE';
+        nextStatusClass = 'simulating';
       } else if (isSocketOpen && isDataFlowing) {
+        nextStatusClass = 'online';
         if (oldestTime) {
           const availableMs = now - oldestTime;
           if (availableMs >= requiredMs) {
-            setConnectionStatus({ text: `ONLINE ${viewportMinutes}min`, className: 'online' });
+            nextStatusText = `ONLINE ${viewportMinutes}min`;
           } else {
             const availableMin = Math.max(1, Math.floor(availableMs / 60000));
-            setConnectionStatus({ text: `ONLINE ${availableMin}/${viewportMinutes}min`, className: 'online' });
+            nextStatusText = `ONLINE ${availableMin}/${viewportMinutes}min`;
           }
         } else {
-          setConnectionStatus({ text: 'ONLINE', className: 'online' });
+          nextStatusText = 'ONLINE';
         }
       } else {
-        setConnectionStatus({
-          text: isSocketOpen ? 'ATTESA DATI...' : 'OFFLINE',
-          className: 'offline',
-        });
+        nextStatusText = isSocketOpen ? 'ATTESA DATI...' : 'OFFLINE';
+        nextStatusClass = 'offline';
       }
+      setConnectionStatus(prev =>
+        prev.text === nextStatusText && prev.className === nextStatusClass
+          ? prev
+          : { text: nextStatusText, className: nextStatusClass }
+      );
+
       const curHdgDeg = store.raw['navigation.headingTrue'] !== undefined
         ? radToDeg(store.raw['navigation.headingTrue'])
         : (store.raw['navigation.courseOverGroundTrue'] !== undefined ? radToDeg(store.raw['navigation.courseOverGroundTrue']) : 0);
       const curCogDeg = store.raw['navigation.courseOverGroundTrue'] !== undefined
         ? radToDeg(store.raw['navigation.courseOverGroundTrue'])
         : curHdgDeg;
-      setOwnShipCourse({
-        hdg: Math.round((curHdgDeg + 360) % 360),
-        cog: Math.round((curCogDeg + 360) % 360),
-        sog: sogKts,
-      });
+      const nextHdg = Math.round((curHdgDeg + 360) % 360);
+      const nextCog = Math.round((curCogDeg + 360) % 360);
+      const nextSog = Math.round(sogKts * 10) / 10;
+      setOwnShipCourse(prev =>
+        prev.hdg === nextHdg && prev.cog === nextCog && prev.sog === nextSog
+          ? prev
+          : { hdg: nextHdg, cog: nextCog, sog: nextSog }
+      );
     };
 
     tick();

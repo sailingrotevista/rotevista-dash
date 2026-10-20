@@ -30,8 +30,8 @@ export const Sparkline: React.FC<SparklineProps> = React.memo(({
 
   const visibleMinutes = (config.graphs.historyMinutes || 5) * (isNavigating ? 1 : 2);
   const viewportMs = visibleMinutes * 60000;
-  const now = Date.now();
-  const viewportStart = now - viewportMs;
+  const latestTime = data && data.length > 0 ? data[data.length - 1].time : 0;
+  const viewportStart = latestTime - viewportMs;
 
   // 1. FILTER, SORT AND DEDUPLICATE STRICTLY BY TIME
   const visibleData = useMemo(() => {
