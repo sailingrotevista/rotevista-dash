@@ -173,8 +173,9 @@ export const Sparkline: React.FC<SparklineProps> = React.memo(({
   // Horizontal gridlines
   const horizontalGridY = [0.25, 0.5, 0.75].map(p => h - p * h);
 
-  // Vertical time gridlines
-  const gridInterval = visibleMinutes <= 15 ? 1 : 5;
+  // Vertical time gridlines (passo divisibile proporzionale alla durata totale)
+  const gridInterval =
+    visibleMinutes <= 10 ? 1 : visibleMinutes <= 30 ? 5 : visibleMinutes <= 60 ? 10 : 20;
   const verticalGridX: number[] = [];
   for (let m = gridInterval; m < visibleMinutes; m += gridInterval) {
     verticalGridX.push(w - (m / visibleMinutes) * w);

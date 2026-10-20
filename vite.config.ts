@@ -2,6 +2,51 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import dns from 'node:dns';
 import https from 'node:https';
+function setupMiddlewares(server: { middlewares: any }, isVenusReachable: boolean) {
+  if (!isVenusReachable) {
+    server.middlewares.use((req: any, res: any, next: any) => {
+      if (
+        req.url?.startsWith('/rotevista-config') ||
+        req.url?.startsWith('/rotevista-history') ||
+        req.url?.startsWith('/rotevista-ais')
+      ) {
+        res.statusCode = 404;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'Signal K offline' }));
+        return;
+      }
+      next();
+    });
+  }
+
+  server.middlewares.use('/rotevista-tile', (req: any, res: any) => {
+    const url = new URL(req.url || '', 'http://localhost');
+    const provider = url.searchParams.get('provider');
+    const z = url.searchParams.get('z');
+    const x = url.searchParams.get('x');
+    const y = url.searchParams.get('y');
+    let target = '';
+    if (provider === 'esri-dark') {
+      target = `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`;
+    } else if (provider === 'esri-light') {
+      target = `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/${z}/${y}/${x}`;
+    } else if (provider === 'openseamap') {
+      target = `https://tiles.openseamap.org/seamark/${z}/${x}/${y}.png`;
+    }
+    if (!target) {
+      res.statusCode = 404;
+      res.end();
+      return;
+    }
+    https.get(target, { timeout: 4500 }, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
+      proxyRes.pipe(res);
+    }).on('error', () => {
+      res.statusCode = 204;
+      res.end();
+    });
+  });
+}
 
 export default defineConfig(async () => {
   const isVenusReachable = await new Promise<boolean>((resolve) => {
@@ -24,49 +69,10 @@ export default defineConfig(async () => {
       {
         name: 'tile-proxy-dev',
         configureServer(server) {
-          if (!isVenusReachable) {
-            server.middlewares.use((req, res, next) => {
-              if (
-                req.url?.startsWith('/rotevista-config') ||
-                req.url?.startsWith('/rotevista-history') ||
-                req.url?.startsWith('/rotevista-ais')
-              ) {
-                res.statusCode = 404;
-                res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ error: 'Signal K offline' }));
-                return;
-              }
-              next();
-            });
-          }
-
-          server.middlewares.use('/rotevista-tile', (req, res) => {
-            const url = new URL(req.url || '', 'http://localhost');
-            const provider = url.searchParams.get('provider');
-            const z = url.searchParams.get('z');
-            const x = url.searchParams.get('x');
-            const y = url.searchParams.get('y');
-            let target = '';
-            if (provider === 'esri-dark') {
-              target = `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${z}/${y}/${x}`;
-            } else if (provider === 'esri-light') {
-              target = `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/${z}/${y}/${x}`;
-            } else if (provider === 'openseamap') {
-              target = `https://tiles.openseamap.org/seamark/${z}/${x}/${y}.png`;
-            }
-            if (!target) {
-              res.statusCode = 404;
-              res.end();
-              return;
-            }
-            https.get(target, { timeout: 4500 }, (proxyRes) => {
-              res.writeHead(proxyRes.statusCode || 200, proxyRes.headers);
-              proxyRes.pipe(res);
-            }).on('error', () => {
-              res.statusCode = 204;
-              res.end();
-            });
-          });
+          setupMiddlewares(server, isVenusReachable);
+        },
+        configurePreviewServer(server) {
+          setupMiddlewares(server, isVenusReachable);
         }
       }
     ],

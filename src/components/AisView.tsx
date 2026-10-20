@@ -177,10 +177,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       ? '/rotevista-tile?provider=esri-dark&z={z}&x={x}&y={y}'
       : '/rotevista-tile?provider=esri-light&z={z}&x={x}&y={y}';
 
-    const tiles = L.tileLayer(tileUrl, {
-      maxZoom: 20,
-      maxNativeZoom: 16,
-    }).addTo(map);
+    const tiles = L.tileLayer(tileUrl, { maxZoom: 20, maxNativeZoom: 16 }).addTo(map);
     tileLayerRef.current = tiles;
 
     const seamarks = L.tileLayer('/rotevista-tile?provider=openseamap&z={z}&x={x}&y={y}', {
@@ -188,6 +185,29 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       opacity: isNightMode ? 0.85 : 0.75,
     }).addTo(map);
     seamarksLayerRef.current = seamarks;
+
+    const getUpstream = (provider: string, c: { z: number; x: number; y: number }) =>
+      provider === 'esri-dark'
+        ? `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${c.z}/${c.y}/${c.x}`
+        : provider === 'esri-light'
+          ? `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/${c.z}/${c.y}/${c.x}`
+          : `https://tiles.openseamap.org/seamark/${c.z}/${c.x}/${c.y}.png`;
+
+    tiles.on('tileerror', (e: any) => {
+      const img = e.tile as HTMLImageElement;
+      if (img && !img.dataset.fb && e.coords) {
+        img.dataset.fb = '1';
+        img.src = getUpstream(isNightMode ? 'esri-dark' : 'esri-light', e.coords);
+      }
+    });
+
+    seamarks.on('tileerror', (e: any) => {
+      const img = e.tile as HTMLImageElement;
+      if (img && !img.dataset.fb && e.coords) {
+        img.dataset.fb = '1';
+        img.src = getUpstream('openseamap', e.coords);
+      }
+    });
 
     const ringsGroup = L.layerGroup().addTo(map);
     ringsLayerRef.current = ringsGroup;
@@ -198,10 +218,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     const markersGroup = L.layerGroup().addTo(map);
     markersLayerRef.current = markersGroup;
 
-    map.on('dragstart', () => {
-      setFollowMode('none');
-    });
-
+    map.on('dragstart', () => setFollowMode('none'));
     map.on('click', () => {
       if (selectedTargetRef.current && followModeRef.current === 'none') {
         setSelectedTarget(null);
@@ -211,14 +228,21 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         setFollowMode('none');
       }
     });
+    map.on('zoomend', () => setMapZoom(Math.round(map.getZoom())));
 
-    map.on('zoomend', () => {
-      setMapZoom(Math.round(map.getZoom()));
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          map.invalidateSize();
+        }
+      }
     });
+    resizeObserver.observe(mapContainerRef.current);
 
     mapRef.current = map;
 
     return () => {
+      resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
     };
