@@ -112,12 +112,13 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   const [copiedMmsi, setCopiedMmsi] = useState<boolean>(false);
   const [ackedLabels, setAckedLabels] = useState<Record<string, string>>({});
   const [propulsionToast, setPropulsionToast] = useState<{ text: string; mode: PropulsionMode } | null>(null);
-  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedTargetRef = useRef<AisTarget | null>(null);
   selectedTargetRef.current = selectedTarget;
   const followModeRef = useRef<FollowMode>('own');
   followModeRef.current = followMode;
+  const lastIntendedZoomRef = useRef<number | null>(null);
 
   // Calcola il centro geografico corretto adattandosi a Desktop (Orizzontale) e Mobile (Verticale)
   const getOffsetCenter = useCallback(
@@ -218,17 +219,38 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     const markersGroup = L.layerGroup().addTo(map);
     markersLayerRef.current = markersGroup;
 
-    map.on('dragstart', () => setFollowMode('none'));
+    map.on('dragstart', () => {
+      lastIntendedZoomRef.current = null;
+      setFollowMode('none');
+      followModeRef.current = 'none';
+    });
+    map.on('wheel', () => {
+      lastIntendedZoomRef.current = null;
+      setFollowMode('none');
+      followModeRef.current = 'none';
+    });
     map.on('click', () => {
+      lastIntendedZoomRef.current = null;
       if (selectedTargetRef.current && followModeRef.current === 'none') {
         setSelectedTarget(null);
         onSelectTargetRef.current(null);
         setShowListDrawer(false);
       } else {
         setFollowMode('none');
+        followModeRef.current = 'none';
       }
     });
     map.on('zoomend', () => setMapZoom(Math.round(map.getZoom())));
+
+    const mapEl = mapContainerRef.current;
+    const handleTouchInteraction = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        lastIntendedZoomRef.current = null;
+        setFollowMode('none');
+        followModeRef.current = 'none';
+      }
+    };
+    mapEl?.addEventListener('touchstart', handleTouchInteraction, { passive: true });
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -237,11 +259,14 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         }
       }
     });
-    resizeObserver.observe(mapContainerRef.current);
+    if (mapContainerRef.current) {
+      resizeObserver.observe(mapContainerRef.current);
+    }
 
     mapRef.current = map;
 
     return () => {
+      mapEl?.removeEventListener('touchstart', handleTouchInteraction);
       resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
@@ -399,27 +424,39 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   // Center on Own Ship & Contextual Standard Zoom
   const handleCenterOnOwnShip = useCallback(() => {
     if (!mapRef.current) return;
-    const currentCenter = mapRef.current.getCenter();
-    const currentZoom = mapRef.current.getZoom();
-    const targetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], currentZoom);
-    const dLat = Math.abs(currentCenter.lat - targetCenter.lat);
-    const dLon = Math.abs(currentCenter.lng - targetCenter.lng);
-    const isAlreadyCentered = followMode === 'own' && dLat < 0.0002 && dLon < 0.0002;
 
-    if (!isAlreadyCentered) {
-      // 1° Click: ripristina followMode = 'own' e centra mantenendo lo zoom corrente
-      setFollowMode('own');
-      mapRef.current.panTo(targetCenter, { animate: true });
-    } else {
-      // 2° Click: zoom standard contestuale alla velocità o presenza in porto (fermi/porto: 16, navigazione: 13)
-      const isInHarbor = harborClusters.some(c => c.dist < 500);
-      const isStoppedOrAnchored = ownShipCourse.sog < 1.0 || isInHarbor;
-      const standardZoom = isStoppedOrAnchored ? 16 : 13;
-      const targetZoom = currentZoom === standardZoom ? (standardZoom === 16 ? 13 : 16) : standardZoom;
-      const newTargetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], targetZoom);
-      mapRef.current.setView(newTargetCenter, targetZoom, { animate: true });
+    if (selectedTarget) {
+      setSelectedTarget(null);
+      onSelectTarget(null);
     }
-  }, [ownShipPosition, ownShipCourse, harborClusters, followMode, getOffsetCenter]);
+
+    const map = mapRef.current;
+    const isInHarbor = harborClusters.some(c => c.dist < 500);
+    const isStoppedOrAnchored = ownShipCourse.sog < 1.0 || isInHarbor;
+    const standardZoom = isStoppedOrAnchored ? 16 : 13;
+    const alternateZoom = standardZoom === 16 ? 13 : 16;
+
+    if (followModeRef.current !== 'own') {
+      // 1° Click: ripristina followMode = 'own' e centra arrotondando lo zoom a intero
+      const nextZoom = Math.round(map.getZoom());
+      lastIntendedZoomRef.current = nextZoom;
+      setFollowMode('own');
+      followModeRef.current = 'own';
+      lastFollowPosRef.current = { lat: ownShipPosition.lat, lon: ownShipPosition.lon, mode: 'own' };
+      const newTargetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], nextZoom);
+      map.setView(newTargetCenter, nextZoom, { animate: true });
+    } else {
+      // 2° e 3° Click: zoom standard contestuale (16 porto/fermi, 13 navigazione) o toggle tra 13 e 16
+      const effectiveZoom = lastIntendedZoomRef.current ?? Math.round(map.getZoom());
+      const targetZoom = effectiveZoom === standardZoom ? alternateZoom : standardZoom;
+      lastIntendedZoomRef.current = targetZoom;
+      setFollowMode('own');
+      followModeRef.current = 'own';
+      lastFollowPosRef.current = { lat: ownShipPosition.lat, lon: ownShipPosition.lon, mode: 'own' };
+      const newTargetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], targetZoom);
+      map.setView(newTargetCenter, targetZoom, { animate: true });
+    }
+  }, [ownShipPosition, ownShipCourse, harborClusters, getOffsetCenter, selectedTarget, onSelectTarget]);
 
   // Follow Mode: progressivo con soglia di movimento (~20px) per evitare traslazioni ad ogni refresh
   const lastFollowPosRef = useRef<{ lat: number; lon: number; mode: FollowMode; targetId?: string } | null>(null);
@@ -491,7 +528,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   }, [selectedTargetId, inspectToken, targets, handleCenterOnTarget, zoomToCollisionTriangle]);
 
   // Deselezione automatica con debounce di 2s se il bersaglio esce dalla mappa visibile e follow non è attivo
-  const outOfBoundsTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const outOfBoundsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!selectedTarget || followMode !== 'none' || !mapRef.current) {
@@ -934,6 +971,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     if (!mapRef.current) return;
     const currentZoom = mapRef.current.getZoom();
     const newZoom = Math.min(mapRef.current.getMaxZoom() || 18, currentZoom + 1);
+    lastIntendedZoomRef.current = newZoom;
 
     if (selectedTarget) {
       const newCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon], newZoom);
@@ -950,6 +988,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     if (!mapRef.current) return;
     const currentZoom = mapRef.current.getZoom();
     const newZoom = Math.max(mapRef.current.getMinZoom() || 3, currentZoom - 1);
+    lastIntendedZoomRef.current = newZoom;
 
     if (selectedTarget) {
       const newCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon], newZoom);

@@ -95,7 +95,7 @@ export type AppView = 'wind' | 'ais';
 export interface AisTrailPoint {
   lat: number;
   lon: number;
-  t: number;
+  t?: number;
 }
 
 export interface AisTarget {
@@ -113,7 +113,7 @@ export interface AisTarget {
   swingRadius?: number | null;
   anchorCenter?: { lat: number; lon: number; radius?: number } | null;
   isMoving: boolean;
-  risk: 'RED' | 'ORANGE' | 'GREY';
+  risk: 'GREEN' | 'RED' | 'ORANGE' | 'GREY';
   riskMsg: string;
   cpa: number | null;
   tcpa: number | null;

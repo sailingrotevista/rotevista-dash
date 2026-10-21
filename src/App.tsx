@@ -139,8 +139,11 @@ export const App: React.FC = () => {
     [setSelectedAisTargetId, setAppView]
   );
 
-  // Navigazione a gesture: Two-finger horizontal swipe per passare tra Vento e AIS senza interferire con la mappa
+  // Navigazione a gesture: Two-finger swipe attivo SOLO in vista Vento per passare ad AIS.
+  // In vista AIS la gesture a due dita è disabilitata per evitare interferenze con il pinch-to-zoom (uscita solo da pulsante).
   useEffect(() => {
+    if (appView !== 'wind') return;
+
     let startX = 0;
     let startY = 0;
     let isTwoFingerTouch = false;
@@ -164,7 +167,7 @@ export const App: React.FC = () => {
       const dy = endY - startY;
 
       if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.3) {
-        setAppView(prev => (prev === 'wind' ? 'ais' : 'wind'));
+        setAppView('ais');
       }
     };
 
@@ -174,7 +177,7 @@ export const App: React.FC = () => {
       window.removeEventListener('touchstart', handleTouchStart);
       window.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [setAppView]);
+  }, [appView, setAppView]);
 
   const isLeftFocused = focusedBox && ['stw', 'sog', 'hdg', 'cog', 'tack'].includes(focusedBox);
   const containerClasses = [

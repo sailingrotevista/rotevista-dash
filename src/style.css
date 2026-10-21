@@ -1199,9 +1199,9 @@ body.night-mode .compass-inner-btn:active,
 
 .ais-top-bar {
     position: absolute;
-    top: 12px;
-    left: 12px;
-    right: 12px;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    left: max(12px, env(safe-area-inset-left, 12px));
+    right: max(12px, env(safe-area-inset-right, 12px));
     z-index: 2000;
     display: flex;
     align-items: flex-start;
@@ -1452,11 +1452,11 @@ body.night-mode .ais-tool-btn.btn-active,
    ========================================================================== */
 .ais-dropdown-card {
     position: absolute;
-    top: 10px;
-    right: 68px;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    right: calc(max(12px, env(safe-area-inset-right, 12px)) + 56px);
     width: 360px;
     max-width: calc(100vw - 84px);
-    max-height: calc(100vh - 24px);
+    max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px);
     background: #ffffff;
     border: 1.5px solid #cbd5e1;
     border-radius: 20px;
@@ -2005,8 +2005,8 @@ body.night-mode .btn-vesselfinder:hover,
 /* Floating Action Button: Switch to Wind Dashboard (Bottom Right, Round style) */
 .ais-floating-wind-btn {
     position: absolute;
-    bottom: 12px;
-    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    right: max(14px, env(safe-area-inset-right, 14px));
     z-index: 2100;
     width: clamp(40px, 12vw, 48px);
     height: clamp(40px, 12vw, 48px);
@@ -2051,7 +2051,7 @@ body.night-mode .ais-floating-wind-btn,
 /* Dock Controlli Mappa (Centro Bordo Destro, Allineato a 12px) */
 .ais-map-controls-dock {
     position: absolute;
-    right: 12px;
+    right: max(12px, env(safe-area-inset-right, 12px));
     top: 50%;
     transform: translateY(-50%);
     z-index: 1500;
@@ -2243,8 +2243,8 @@ body.night-mode .propulsion-speech-arrow,
 /* FLOATING SUPPORT BUTTON (BOTTOM LEFT) */
 .ais-floating-support-btn {
     position: absolute;
-    bottom: 16px;
-    left: 16px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    left: max(14px, env(safe-area-inset-left, 14px));
     z-index: 2000;
     width: clamp(40px, 12vw, 48px);
     height: clamp(40px, 12vw, 48px);
@@ -2390,4 +2390,20 @@ body.night-mode .ais-support-email-btn,
     background: #990000 !important;
     color: #ffffff !important;
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.5) !important;
+}
+
+/* Scalatura +15%/+20% controlli AIS su schermi ampi (desktop / tablet landscape) */
+@media (min-width: 768px) and (min-height: 500px) {
+    .ais-view-container .ais-tool-btn,
+    .ais-view-container .ais-map-btn,
+    .ais-view-container .ais-floating-wind-btn,
+    .ais-view-container .ais-floating-support-btn {
+        width: 54px;
+        height: 54px;
+        font-size: 1.45rem;
+    }
+
+    .ais-view-container .ais-dropdown-card {
+        right: calc(max(12px, env(safe-area-inset-right, 12px)) + 64px);
+    }
 }

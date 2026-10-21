@@ -241,7 +241,8 @@ export function recalculateArpaForTargets(
     const rawCogDiff = Math.abs(myCog - v.cog) % 360;
     const cogAngularDiff = rawCogDiff > 180 ? 360 - rawCogDiff : rawCogDiff;
 
-    const isCommercial = (v.type >= 70 && v.type <= 89) || (v.type >= 40 && v.type <= 49) || v.type === 60 || (v.length && v.length >= 40);
+    const typeNum = typeof v.type === 'number' ? v.type : parseInt(String(v.type), 10);
+    const isCommercial = (!isNaN(typeNum) && ((typeNum >= 70 && typeNum <= 89) || (typeNum >= 40 && typeNum <= 49) || typeNum === 60)) || Boolean(v.length && v.length >= 40);
     const baseRedCpa = isCommercial ? 800 : 300;
     const baseOrangeCpa = isCommercial ? 1852 : 700;
     const maxTcpaWindow = isCommercial ? 15 : 10;
