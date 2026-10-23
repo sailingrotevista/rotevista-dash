@@ -1613,6 +1613,17 @@ body.night-mode .ais-tool-btn.btn-active,
     top: calc(env(safe-area-inset-top, 0px) + 86px);
 }
 
+@media (max-width: 1024px) and (orientation: portrait) {
+    .app-root-wrapper:has(> .ais-tactical-banner) .ais-dropdown-card {
+        top: calc(env(safe-area-inset-top, 0px) + 154px);
+        max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 170px);
+    }
+
+    .app-root-wrapper:has(> .ais-tactical-banner) .ais-top-bar {
+        top: calc(env(safe-area-inset-top, 0px) + 154px);
+    }
+}
+
 @keyframes cardDropdown {
     from { opacity: 0; transform: translateY(-8px) scale(0.98); }
     to { opacity: 1; transform: translateY(0) scale(1); }
