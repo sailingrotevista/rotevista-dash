@@ -29,6 +29,7 @@
     "collisionPipeline.js",
     "harborDetector.js",
     "windEngine.js",
+    "aisEngine.js",
     "public",
     "icons",
     "apple-touch-icon.png",

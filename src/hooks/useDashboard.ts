@@ -189,12 +189,18 @@ export function useDashboard() {
   const activeThreat = useMemo(() => {
     const candidates: AisTarget[] = [];
     const seen = new Set<string>();
-    if (topThreat && (topThreat.risk === 'RED' || topThreat.risk === 'ORANGE') && !topThreat.isDeferred) {
+    const isHarborTarget = (t: AisTarget) => Boolean(t.isMoored || t.inCluster || t.anchorState === 'MOORED');
+    if (
+      topThreat &&
+      (topThreat.risk === 'RED' || topThreat.risk === 'ORANGE') &&
+      !topThreat.isDeferred &&
+      !isHarborTarget(topThreat)
+    ) {
       candidates.push(topThreat);
       seen.add(topThreat.id);
     }
     aisTargets.forEach(t => {
-      if (!seen.has(t.id) && (t.risk === 'RED' || t.risk === 'ORANGE') && !t.isDeferred) {
+      if (!seen.has(t.id) && (t.risk === 'RED' || t.risk === 'ORANGE') && !t.isDeferred && !isHarborTarget(t)) {
         candidates.push(t);
         seen.add(t.id);
       }
@@ -922,7 +928,7 @@ export function useDashboard() {
           const lastPt = currentTrail[currentTrail.length - 1];
           if (!lastPt || now - (lastPt.t || 0) >= 30000) {
             currentTrail.push({ lat: Number(newLat.toFixed(5)), lon: Number(newLon.toFixed(5)), t: now });
-            const maxAgeMs = (settingsRef.current.vectorMinutes || 15) * 60 * 1000;
+            const maxAgeMs = ((config.aisAlerter && config.aisAlerter.vectorMinutes) || 15) * 60 * 1000;
             while (currentTrail.length > 2 && now - (currentTrail[0].t || now) > maxAgeMs) {
               currentTrail.shift();
             }

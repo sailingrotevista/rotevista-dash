@@ -7,8 +7,11 @@ html, body, #root {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
     margin: 0; padding: 0;
     height: 100vh; width: 100vw;
+    height: 100dvh; width: 100dvw;
     overflow: hidden;
     -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 /* ==========================================================================
@@ -1091,7 +1094,7 @@ body.night-mode #radar-ticks line {
 .compass-inner-btn {
     position: absolute;
     z-index: 40;
-    width: clamp(38px, 13.8%, 50px);
+    width: clamp(44px, 14.5%, 58px);
     aspect-ratio: 1 / 1;
     height: auto;
     border-radius: 50%;
@@ -1105,6 +1108,8 @@ body.night-mode #radar-ticks line {
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
     transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
     padding: 0;
+    box-sizing: border-box;
+    flex-shrink: 0;
 }
 
 .compass-inner-btn svg {
@@ -1327,8 +1332,8 @@ body.night-mode .ais-beta-tag,
 }
 
 .ais-tool-btn {
-    width: clamp(40px, 12vw, 48px);
-    height: clamp(40px, 12vw, 48px);
+    width: clamp(46px, 12vw, 54px);
+    height: clamp(46px, 12vw, 54px);
     aspect-ratio: 1 / 1;
     border-radius: 50%;
     background: #ffffff;
@@ -1342,6 +1347,9 @@ body.night-mode .ais-beta-tag,
     backdrop-filter: blur(4px);
     transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
     padding: 0;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    overflow: hidden;
 }
 
 .ais-tool-btn.btn-active {
@@ -2168,8 +2176,8 @@ body.night-mode .btn-vesselfinder:hover,
     bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
     right: max(14px, env(safe-area-inset-right, 14px));
     z-index: 2100;
-    width: clamp(40px, 12vw, 48px);
-    height: clamp(40px, 12vw, 48px);
+    width: clamp(48px, 12vw, 56px);
+    height: clamp(48px, 12vw, 56px);
     aspect-ratio: 1 / 1;
     border-radius: 50%;
     background: #ffffff;
@@ -2183,6 +2191,9 @@ body.night-mode .btn-vesselfinder:hover,
     backdrop-filter: blur(4px);
     transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
     padding: 0;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    overflow: hidden;
 }
 
 .ais-floating-wind-btn svg {
@@ -2406,8 +2417,8 @@ body.night-mode .propulsion-speech-arrow,
     bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
     left: max(14px, env(safe-area-inset-left, 14px));
     z-index: 2000;
-    width: clamp(40px, 12vw, 48px);
-    height: clamp(40px, 12vw, 48px);
+    width: clamp(48px, 12vw, 56px);
+    height: clamp(48px, 12vw, 56px);
     aspect-ratio: 1 / 1;
     border-radius: 50%;
     background: #ffffff;
@@ -2421,6 +2432,11 @@ body.night-mode .propulsion-speech-arrow,
     cursor: pointer;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     transition: transform 0.15s ease, background-color 0.15s ease;
+    padding: 0;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    overflow: hidden;
+    line-height: 1;
 }
 
 .ais-floating-support-btn:hover,
@@ -2552,15 +2568,35 @@ body.night-mode .ais-support-email-btn,
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.5) !important;
 }
 
-/* Scalatura a 64px dei controlli AIS su schermi ampi (desktop / tablet landscape) */
-@media (min-width: 768px) and (min-height: 500px) {
+/* Scalatura touch per schermi tablet (Android / iPad / Desktop Landscape) */
+@media (min-width: 700px) and (min-height: 380px) {
     .ais-view-container .ais-tool-btn,
     .ais-view-container .ais-map-btn,
     .ais-view-container .ais-floating-wind-btn,
     .ais-view-container .ais-floating-support-btn {
-        width: 64px;
-        height: 64px;
-        font-size: 1.65rem;
+        width: 60px;
+        height: 60px;
+        min-width: 60px;
+        min-height: 60px;
+        font-size: 1.55rem;
+        box-sizing: border-box;
+        flex-shrink: 0;
+    }
+
+    .compass-inner-btn {
+        width: clamp(48px, 15%, 62px);
+    }
+
+    .counter-item {
+        font-size: 0.82rem;
+    }
+
+    .counter-val {
+        font-size: 0.95rem;
+    }
+
+    .counter-lbl {
+        font-size: 0.72rem;
     }
 
     .ais-view-container .ais-dropdown-card {

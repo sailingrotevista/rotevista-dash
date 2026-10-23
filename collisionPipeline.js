@@ -247,6 +247,81 @@ function computeCpaTcpa(ownShip, target, uncertainty) {
     };
 }
 
+function computeSighting(relBearingDeg) {
+    let rel = normalizeDegrees(relBearingDeg);
+    let clockHour = Math.round(rel / 30) % 12;
+    if (clockHour === 0) clockHour = 12;
+
+    let sightAngleTxt = "";
+    if (rel <= 10 || rel >= 350) sightAngleTxt = "Dritto di Prua";
+    else if (rel >= 80 && rel <= 100) sightAngleTxt = "Al Traverso di Dritta";
+    else if (rel >= 260 && rel <= 280) sightAngleTxt = "Al Traverso di Sinistra";
+    else if (rel >= 170 && rel <= 190) sightAngleTxt = "Dritto di Poppa";
+    else if (rel < 180) sightAngleTxt = `${Math.round(rel)}° a Dritta`;
+    else sightAngleTxt = `${Math.round(360 - rel)}° a Sinistra`;
+
+    return `${sightAngleTxt} (ore ${clockHour})`;
+}
+
+function evaluateColreg(ownShip, target, kinematics, alertState, category) {
+    let ownHdg = (ownShip.hdg !== undefined && ownShip.hdg !== null) ? ownShip.hdg : (ownShip.cog || 0);
+    let relBearingDeg = normalizeDegrees(kinematics.bearingNowDeg - ownHdg);
+    let sightingTxt = computeSighting(relBearingDeg);
+    let crossOutcome = kinematics.isDiverging ? "In Allontanamento" : "In Avvicinamento";
+
+    if (alertState === 'NO_DANGER' || (target.sog || 0) < 0.5) {
+        return { relBearingDeg, sightingTxt, crossOutcome, crossDir: '', crossRule: '' };
+    }
+
+    let passTxt = '';
+    if (kinematics.tcpaSec > 0) {
+        let mySpeedMs = (ownShip.sog || 0) * KNOTS_TO_MS;
+        let myVx = mySpeedMs * Math.sin(d2r(ownShip.cog || 0));
+        let myVy = mySpeedMs * Math.cos(d2r(ownShip.cog || 0));
+        let tgtSpeedMs = (target.sog || 0) * KNOTS_TO_MS;
+        let tgtVx = tgtSpeedMs * Math.sin(d2r(target.cog || 0));
+        let tgtVy = tgtSpeedMs * Math.cos(d2r(target.cog || 0));
+
+        let tSec = kinematics.tcpaSec;
+        let x0 = (target.lon - ownShip.lon) * METERS_PER_DEG_LAT * Math.cos(d2r(ownShip.lat));
+        let y0 = (target.lat - ownShip.lat) * METERS_PER_DEG_LAT;
+        let relX_cpa = x0 + (tgtVx - myVx) * tSec;
+        let relY_cpa = y0 + (tgtVy - myVy) * tSec;
+
+        let bowDist = relX_cpa * Math.sin(d2r(ownHdg)) + relY_cpa * Math.cos(d2r(ownHdg));
+        let distStr = Math.abs(bowDist) >= 1852 ? `${(Math.abs(bowDist) / 1852).toFixed(1)} NM` : `${Math.round(Math.abs(bowDist))} m`;
+        passTxt = bowDist >= 0 ? `Passa a prora a ${distStr}` : `Passa a poppa a ${distStr}`;
+    }
+
+    let crossRule = '';
+    let crossDir = '';
+    let targetCog = target.cog || 0;
+    let ownCog = ownShip.cog || 0;
+    let cogDiff = Math.abs(normalizeDegrees(targetCog - ownCog) - 180);
+
+    if (category === 'work') {
+        crossRule = "R.18: Dare precedenza (nave con manovrabilità limitata o pesca)";
+        crossDir = passTxt ? `${passTxt} | R.18 DARE PRECEDENZA` : "R.18 DARE PRECEDENZA";
+    } else if (cogDiff <= 25 && (relBearingDeg <= 15 || relBearingDeg >= 345)) {
+        crossRule = "R.14: Rotte opposte di prua (accostare a dritta)";
+        crossDir = passTxt ? `${passTxt} | R.14 ROTTE OPPOSTE` : "R.14 ROTTE OPPOSTE (accosta a dritta)";
+    } else if (relBearingDeg > 112.5 && relBearingDeg < 247.5 && (target.sog || 0) > (ownShip.sog || 0)) {
+        crossRule = "R.13: Bersaglio in sorpasso da poppa";
+        crossDir = passTxt ? `${passTxt} | R.13 BERSAGLIO IN SORPASSO` : "R.13 BERSAGLIO IN SORPASSO";
+    } else if (relBearingDeg > 15 && relBearingDeg <= 112.5) {
+        crossRule = "R.15: Bersaglio a dritta (DARE PRECEDENZA)";
+        crossDir = passTxt ? `${passTxt} | R.15 DARE PRECEDENZA` : "R.15 DARE PRECEDENZA (bersaglio a dritta)";
+    } else if (relBearingDeg >= 247.5 && relBearingDeg < 345) {
+        crossRule = "R.15: Bersaglio a sinistra (MANTIENI ROTTA)";
+        crossDir = passTxt ? `${passTxt} | R.15 MANTIENI ROTTA` : "R.15 MANTIENI ROTTA (bersaglio a sinistra)";
+    } else {
+        crossRule = "COLREG-72";
+        crossDir = passTxt || "Attenzione incrocio";
+    }
+
+    return { relBearingDeg, sightingTxt, crossOutcome, crossDir, crossRule };
+}
+
 // ----------------------------------------------------------------------------
 // 5. MODULO 4: SOGLIE, DIFFERIBILITÀ, TREND E STATE MACHINE
 // ----------------------------------------------------------------------------
@@ -255,6 +330,29 @@ const SEVERITY_LEVELS = {
     ORANGE: 1,
     RED: 2
 };
+
+function compareTargets(a, b) {
+    const riskMap = { RED: 2, ORANGE: 1, GREEN: 0, GREY: 0, NO_DANGER: 0 };
+    let sevA = SEVERITY_LEVELS[a.alertState] !== undefined ? SEVERITY_LEVELS[a.alertState] : (riskMap[a.risk] || 0);
+    let sevB = SEVERITY_LEVELS[b.alertState] !== undefined ? SEVERITY_LEVELS[b.alertState] : (riskMap[b.risk] || 0);
+    let nonDefA = (sevA > 0 && !a.isDeferred) ? 1 : 0;
+    let nonDefB = (sevB > 0 && !b.isDeferred) ? 1 : 0;
+    if (nonDefA !== nonDefB) return nonDefB - nonDefA;
+    if (sevA !== sevB) return sevB - sevA;
+    if (sevA > 0) {
+        let tcpaA = (a.tcpaMinutes !== undefined && a.tcpaMinutes >= 0) ? a.tcpaMinutes : ((a.tcpa !== null && a.tcpa !== undefined && a.tcpa >= 0) ? a.tcpa : 999);
+        let tcpaB = (b.tcpaMinutes !== undefined && b.tcpaMinutes >= 0) ? b.tcpaMinutes : ((b.tcpa !== null && b.tcpa !== undefined && b.tcpa >= 0) ? b.tcpa : 999);
+        let cpaA = (a.cpaNominalMeters !== undefined && a.cpaNominalMeters !== null) ? a.cpaNominalMeters : ((a.cpa !== null && a.cpa !== undefined) ? a.cpa : (a.dist || 0));
+        let cpaB = (b.cpaNominalMeters !== undefined && b.cpaNominalMeters !== null) ? b.cpaNominalMeters : ((b.cpa !== null && b.cpa !== undefined) ? b.cpa : (b.dist || 0));
+        let scoreA = cpaA + (tcpaA * 60);
+        let scoreB = cpaB + (tcpaB * 60);
+        if (Math.abs(scoreA - scoreB) > 10) return scoreA - scoreB;
+        return cpaA - cpaB;
+    }
+    let distA = a.rangeMeters !== undefined ? a.rangeMeters : (a.dist || 0);
+    let distB = b.rangeMeters !== undefined ? b.rangeMeters : (b.dist || 0);
+    return distA - distB;
+}
 
 class CollisionPipeline {
     constructor(userConfig = {}) {
@@ -350,6 +448,41 @@ class CollisionPipeline {
     evaluateTarget(ownShip, target, now = Date.now()) {
         let targetId = target.mmsi || target.id || target.name;
         if (!targetId) return null;
+
+        let isMoored = Boolean(target.isMoored || target.inCluster || target.anchorState === 'MOORED' || (target.sog !== undefined && target.sog < 0.3 && !target.isMoving));
+        if (isMoored) {
+            this.targetStates.delete(targetId);
+            let kinematics = computeCpaTcpa(ownShip, target, null);
+            let ownHdg = (ownShip.hdg !== undefined && ownShip.hdg !== null) ? ownShip.hdg : (ownShip.cog || 0);
+            let rel = normalizeDegrees(kinematics.bearingNowDeg - ownHdg);
+            return {
+                targetId,
+                mmsi: target.mmsi,
+                name: target.name || `MMSI ${target.mmsi || 'N/A'}`,
+                category: this._resolveVesselCategory(target),
+                alertState: 'NO_DANGER',
+                isDeferred: false,
+                trend: 'STABLE',
+                deltaCpaPerMin: 0,
+                rangeMeters: kinematics.rangeMeters,
+                rangeNM: kinematics.rangeNM,
+                bearingNowDeg: kinematics.bearingNowDeg,
+                relBearingDeg: rel,
+                cpaNominalMeters: null,
+                cpaMinMeters: null,
+                cpaMaxMeters: null,
+                tcpaSeconds: -1,
+                tcpaMinutes: -1,
+                isDiverging: kinematics.isDiverging,
+                hullMarginMeters: 0,
+                uncertaintyConeDeg: 0,
+                reason: '',
+                crossDir: '',
+                crossOutcome: kinematics.isDiverging ? 'In Allontanamento' : 'In Avvicinamento',
+                crossRule: '',
+                sightingTxt: computeSighting(rel)
+            };
+        }
 
         let category = this._resolveVesselCategory(target);
         let ownHull = getHullBoundingRadius(ownShip, 'sailing');
@@ -498,6 +631,8 @@ class CollisionPipeline {
             state.deescalateTimerStartedAt = 0;
         }
 
+        let colreg = evaluateColreg(ownShip, target, kinematics, state.currentState, category);
+
         return {
             targetId,
             mmsi: target.mmsi,
@@ -521,7 +656,13 @@ class CollisionPipeline {
             // Dettagli diagnostici incertezza e scafo
             hullMarginMeters: totalHullMargin,
             uncertaintyConeDeg: uncertainty.halfConeDeg * 2,
-            reason: state.reason || ''
+            reason: state.reason || '',
+            // Valutazione incrocio COLREGs e rilevamento
+            crossDir: colreg.crossDir,
+            crossRule: colreg.crossRule,
+            crossOutcome: colreg.crossOutcome,
+            sightingTxt: colreg.sightingTxt,
+            relBearingDeg: colreg.relBearingDeg
         };
     }
 
@@ -544,23 +685,7 @@ class CollisionPipeline {
             else noDangerCount++;
         }
 
-        evaluated.sort((a, b) => {
-            let sevA = SEVERITY_LEVELS[a.alertState] || 0;
-            let sevB = SEVERITY_LEVELS[b.alertState] || 0;
-            let nonDefA = (sevA > 0 && !a.isDeferred) ? 1 : 0;
-            let nonDefB = (sevB > 0 && !b.isDeferred) ? 1 : 0;
-            if (nonDefA !== nonDefB) return nonDefB - nonDefA;
-            if (sevA !== sevB) return sevB - sevA;
-            if (sevA > 0) {
-                let tcpaA = a.tcpaMinutes > 0 ? a.tcpaMinutes : 999;
-                let tcpaB = b.tcpaMinutes > 0 ? b.tcpaMinutes : 999;
-                let scoreA = a.cpaNominalMeters + (tcpaA * 60);
-                let scoreB = b.cpaNominalMeters + (tcpaB * 60);
-                if (Math.abs(scoreA - scoreB) > 10) return scoreA - scoreB;
-                return a.cpaNominalMeters - b.cpaNominalMeters;
-            }
-            return a.rangeMeters - b.rangeMeters;
-        });
+        evaluated.sort(compareTargets);
 
         let topThreat = (evaluated.length > 0 && (SEVERITY_LEVELS[evaluated[0].alertState] || 0) > 0) ? evaluated[0] : null;
         this.pruneInactive(now);
@@ -579,6 +704,15 @@ class CollisionPipeline {
             }
         }
     }
+
+    sortTargets(targetsList) {
+        if (!Array.isArray(targetsList)) return targetsList;
+        return targetsList.sort(compareTargets);
+    }
+
+    compareTargets(a, b) {
+        return compareTargets(a, b);
+    }
 }
 
 const _pipelineExports = {
@@ -587,7 +721,10 @@ const _pipelineExports = {
     getHullEllipticalMargin,
     calculateUncertaintyCone,
     computeCpaTcpa,
-    solveRelativeKinematics
+    solveRelativeKinematics,
+    computeSighting,
+    evaluateColreg,
+    compareTargets
 };
 
 if (typeof module !== 'undefined' && module.exports) {

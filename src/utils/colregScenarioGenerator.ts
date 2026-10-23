@@ -200,7 +200,6 @@ export function recalculateArpaForTargets(
   _myPropulsion: 'AUTO' | 'SAIL' | 'MOTOR' = 'AUTO'
 ): { targets: AisTarget[]; topThreat: AisTarget | null } {
   const now = Date.now();
-  let highestThreat: AisTarget | null = null;
 
   const ownShipInput = {
     lat: myGps.lat,
@@ -211,8 +210,7 @@ export function recalculateArpaForTargets(
   };
 
   const updatedTargets = targets.map(v => {
-    if (!v.isMoving || v.sog < 0.3) return v.crossDir ? { ...v, crossDir: '', crossRule: '' } : v;
-
+    const isStoppedOrMoored = !v.isMoving || v.sog < 0.3 || v.isMoored || v.inCluster;
     const evalRes = simCollisionPipeline.evaluateTarget(
       ownShipInput,
       {
@@ -228,39 +226,33 @@ export function recalculateArpaForTargets(
         isClassB: v.aisClass !== 'A',
         length: v.length,
         beam: v.beam,
+        isMoored: Boolean(v.isMoored || isStoppedOrMoored),
+        inCluster: Boolean(v.inCluster),
+        anchorState: v.anchorState,
       },
       now
     );
 
-    const bearingNow = evalRes ? evalRes.bearingNowDeg : 0;
-    const relBearingNow = (bearingNow - myHdg + 360) % 360;
-    const cpa = evalRes && !evalRes.isDiverging ? evalRes.cpaNominalMeters : null;
-    const tcpa = evalRes && !evalRes.isDiverging && evalRes.tcpaMinutes >= 0 ? evalRes.tcpaMinutes : -1;
+    const cpa = evalRes ? evalRes.cpaNominalMeters : null;
+    const tcpa = evalRes && evalRes.tcpaMinutes >= 0 ? evalRes.tcpaMinutes : -1;
     const isDeferred = evalRes ? Boolean(evalRes.isDeferred) : false;
     const trend = evalRes ? evalRes.trend : 'STABLE';
 
     let risk: 'GREEN' | 'ORANGE' | 'RED' | 'GREY' = 'GREEN';
     let riskMsg = 'NESSUN RISCHIO';
-    if (evalRes && evalRes.alertState === 'RED') {
+    if (isStoppedOrMoored) {
+      risk = 'GREY';
+    } else if (evalRes && evalRes.alertState === 'RED') {
       risk = 'RED';
-      riskMsg = 'RISCHIO COLLISIONE!';
+      riskMsg = evalRes.reason || 'RISCHIO COLLISIONE!';
     } else if (evalRes && evalRes.alertState === 'ORANGE') {
       risk = 'ORANGE';
-      riskMsg = 'ATTENZIONE INCROCIO';
+      riskMsg = evalRes.reason || 'ATTENZIONE INCROCIO';
     }
-
-    const crossOutcome = evalRes && evalRes.isDiverging ? 'In Allontanamento' : 'In Avvicinamento';
-    const crossRule = '';
-    const crossDir = '';
-
-    let clockHour = Math.round(relBearingNow / 30) % 12;
-    if (clockHour === 0) clockHour = 12;
-    const angleOff = Math.round(relBearingNow <= 180 ? relBearingNow : 360 - relBearingNow);
-    const sideName = relBearingNow <= 180 ? 'Dritta' : 'Sinistra';
-    const sightingTxt = `${angleOff}° a ${sideName} (ore ${clockHour})`;
 
     const updated: AisTarget = {
       ...v,
+      isMoving: !isStoppedOrMoored,
       dist: evalRes ? Math.round(evalRes.rangeMeters) : v.dist,
       cpa,
       tcpa,
@@ -268,33 +260,17 @@ export function recalculateArpaForTargets(
       isDeferred,
       trend,
       riskMsg,
-      crossDir,
-      crossOutcome,
-      crossRule,
-      sightingTxt,
+      crossDir: evalRes ? evalRes.crossDir : '',
+      crossOutcome: evalRes ? evalRes.crossOutcome : 'In Avvicinamento',
+      crossRule: evalRes ? evalRes.crossRule : '',
+      sightingTxt: evalRes ? evalRes.sightingTxt : '',
     };
-
-    if ((updated.risk === 'RED' || updated.risk === 'ORANGE') && !updated.isDeferred) {
-      if (!highestThreat) {
-        highestThreat = updated;
-      } else {
-        const riskPriority = { RED: 3, ORANGE: 2, GREEN: 1, GREY: 0 };
-        const p1 = riskPriority[updated.risk];
-        const p2 = riskPriority[highestThreat.risk];
-        if (p1 > p2) {
-          highestThreat = updated;
-        } else if (p1 === p2) {
-          const cpa1 = updated.cpa !== null && updated.cpa >= 0 ? updated.cpa : updated.dist;
-          const cpa2 = highestThreat.cpa !== null && highestThreat.cpa >= 0 ? highestThreat.cpa : highestThreat.dist;
-          const tcpa1 = updated.tcpa !== null && updated.tcpa > 0 ? updated.tcpa : 999;
-          const tcpa2 = highestThreat.tcpa !== null && highestThreat.tcpa > 0 ? highestThreat.tcpa : 999;
-          if ((cpa1 + tcpa1 * 60) < (cpa2 + tcpa2 * 60)) highestThreat = updated;
-        }
-      }
-    }
 
     return updated;
   });
+
+  simCollisionPipeline.sortTargets(updatedTargets);
+  const highestThreat = updatedTargets.find(v => (v.risk === 'RED' || v.risk === 'ORANGE') && !v.isDeferred) || null;
 
   return { targets: updatedTargets, topThreat: highestThreat };
 }
