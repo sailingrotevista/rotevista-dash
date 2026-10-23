@@ -1,6 +1,6 @@
 /**
     * ==========================================================================
-    * Rotevista Dash Configuration & History Plugin (Pro v6.0)
+    * Rotevista Dash Configuration & History Plugin (v9.3.0-beta.2)
     * ==========================================================================
     * Definisce l'interfaccia di configurazione in Signal K Admin e crea
     * gli endpoint pubblici per la Dashboard, mantenendo lo storico in RAM.

@@ -1350,7 +1350,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       <div className="ais-top-bar">
         {/* TOP LEFT GROUP: BETA TAG & STATUS COUNTERS */}
         <div className="ais-top-left-group">
-          <div className="ais-beta-tag">Beta</div>
+          <div className="ais-beta-tag">Beta 2</div>
           <div
             className="ais-status-counters"
             onClick={onReopenTopThreat}
