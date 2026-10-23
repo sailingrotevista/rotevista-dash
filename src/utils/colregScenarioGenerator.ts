@@ -154,7 +154,13 @@ function buildTargetFromInverseCpa(
     aisClass: tpl.aisClass,
     flag: tpl.flag,
     inCluster: false,
-    trail: [{ lat, lon }],
+    trail: Array.from({ length: 31 }, (_, idx) => {
+      const secAgo = (30 - idx) * 30;
+      const distPast = ((targetSog * 1852) / 3600) * secAgo;
+      const pLat = lat - (distPast * Math.cos(degToRad(targetCog))) / 111139;
+      const pLon = lon - (distPast * Math.sin(degToRad(targetCog))) / (111139 * Math.cos(degToRad(lat)));
+      return { lat: Number(pLat.toFixed(5)), lon: Number(pLon.toFixed(5)), t: Date.now() - secAgo * 1000 };
+    }),
   };
 }
 

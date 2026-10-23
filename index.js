@@ -119,6 +119,12 @@ module.exports = function (app) {
         currentConfig = options || {};
         currentConfig.aisAlerter = Object.assign({}, defaultAisConfig, currentConfig.aisAlerter || {});
         app.debug(`${plugin.name} started/updated with new options`);
+        if (typeof app.handleMessage === 'function') {
+            app.handleMessage(plugin.id, {
+                context: 'vessels.self',
+                updates: [{ values: [{ path: 'environment.rotevista_config', value: currentConfig }] }]
+            });
+        }
 
         // Rimosso il reset distruttivo per garantire la conservazione dei dati in RAM
         // durante il salvataggio dei parametri o il cambio delle calibrazioni delle scale.
@@ -127,6 +133,7 @@ module.exports = function (app) {
         if (!routeRegistered) {
             app.get('/rotevista-config', (req, res) => {
                 res.header("Access-Control-Allow-Origin", "*"); // Sblocca la Dashboard locale su Mac
+                res.header("Cache-Control", "no-store, no-cache, must-revalidate");
                 res.json(currentConfig);
             });
             app.get('/rotevista-history', (req, res) => {
@@ -1810,20 +1817,26 @@ module.exports = function (app) {
                     navStateRaw = String(val).toLowerCase();
                 }
 
-                let trail = aisPersistentCache[key] ? (aisPersistentCache[key].trail || []) : [];
-                let lastTrailPt = trail[trail.length - 1];
-                let shouldAddTrail = !lastTrailPt || distanceMeters(lastTrailPt.lat, lastTrailPt.lon, vLat, vLon) > 5.0 || (now - lastTrailPt.t > 45000);
-                if (shouldAddTrail) {
-                    trail.push({ lat: vLat, lon: vLon, t: now });
-                    if (trail.length > 12) trail.shift();
-                }
-
                 let realAisTime = now;
                 if (v.navigation.position.timestamp) {
                     let parsedTime = Date.parse(v.navigation.position.timestamp);
                     if (!isNaN(parsedTime)) {
-                        // Tolleranza clock-skew (se l'orologio di bordo differisce da UTC di oltre 5 min, usa now)
                         realAisTime = Math.abs(now - parsedTime) < 300000 ? parsedTime : now;
+                    }
+                }
+
+                let trail = aisPersistentCache[key] ? (aisPersistentCache[key].trail || []) : [];
+                if (sog < 0.8) {
+                    trail = [];
+                } else {
+                    let lastPt = trail[trail.length - 1];
+                    let moved = !lastPt || (distanceMeters(lastPt.lat, lastPt.lon, vLat, vLon) > 10.0 && (realAisTime - (lastPt.t || 0) >= 25000));
+                    if (moved) {
+                        trail.push({ lat: Number(vLat.toFixed(5)), lon: Number(vLon.toFixed(5)), t: realAisTime });
+                    }
+                    let maxTrailAgeMs = ((currentConfig.vectorMinutes || 15) * 60 * 1000);
+                    while (trail.length > 2 && ((now - (trail[0].t || now)) > maxTrailAgeMs || trail.length > 60)) {
+                        trail.shift();
                     }
                 }
 

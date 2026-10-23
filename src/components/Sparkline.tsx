@@ -261,7 +261,7 @@ export const Sparkline: React.FC<SparklineProps> = React.memo(({
     }
 
     return { lineElements: lines, areaPath: path, gradientStops: stops };
-  }, [visibleData, viewportStart, viewportMs, min, range, isFocused, displayMode, isNightMode]);
+  }, [visibleData, viewportStart, viewportMs, min, range, isFocused, displayMode, isNightMode, config.graphs, config.alarms]);
 
   const gradId = `grad-${id}`;
 

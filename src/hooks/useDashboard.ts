@@ -539,11 +539,11 @@ export function useDashboard() {
           }
 
           if (tws_water > 0.05 || hasNativeTwa) {
-            safePush(store.smoothBuf.twa, twa, now, true, config.graphs.historyMinutes);
-            safePush(store.longBuf.twa, twa, now, true, config.graphs.historyMinutes);
+            safePush(store.smoothBuf.twa, twa, now, true, historyMinutes);
+            safePush(store.longBuf.twa, twa, now, true, historyMinutes);
             if (awa !== undefined) {
-              safePush(store.smoothBuf.awa, awa, now, true, config.graphs.historyMinutes);
-              safePush(store.longBuf.awa, awa, now, true, config.graphs.historyMinutes);
+              safePush(store.smoothBuf.awa, awa, now, true, historyMinutes);
+              safePush(store.longBuf.awa, awa, now, true, historyMinutes);
             }
           }
 
@@ -627,11 +627,22 @@ export function useDashboard() {
         }
       }
     }
+
+    if (path === 'environment.rotevista_config' && val && typeof val === 'object') {
+      setConfig(prev => ({
+        ...prev,
+        ...val,
+        alarms: { ...prev.alarms, ...(val.alarms || {}) },
+        graphs: { ...prev.graphs, ...(val.graphs || {}) },
+        averaging: { ...prev.averaging, ...(val.averaging || {}) },
+        scales: { ...prev.scales, ...(val.scales || {}) },
+        aisAlerter: { ...prev.aisAlerter, ...(val.aisAlerter || {}) },
+      }));
+    }
   }, []);
 
-  // Load configuration from Signal K plugin or settings.json
-  useEffect(() => {
-    fetch('/rotevista-config')
+  const fetchConfig = useCallback(() => {
+    fetch('/rotevista-config', { cache: 'no-store' })
       .then(async res => {
         const contentType = res.headers.get('content-type') || '';
         if (!res.ok || !contentType.includes('application/json')) throw new Error('Not available');
@@ -640,7 +651,7 @@ export function useDashboard() {
         return json;
       })
       .catch(() => {
-        return fetch('/settings.json').then(r => (r.ok ? r.json() : null));
+        return fetch('/settings.json', { cache: 'no-store' }).then(r => (r.ok ? r.json() : null));
       })
       .then(data => {
         if (data) {
@@ -656,8 +667,14 @@ export function useDashboard() {
         }
       })
       .catch(() => {});
-
   }, []);
+
+  // Load configuration from Signal K plugin or settings.json
+  useEffect(() => {
+    fetchConfig();
+    const configInterval = setInterval(fetchConfig, 10000);
+    return () => clearInterval(configInterval);
+  }, [fetchConfig]);
 
   // Save layout state to localStorage on changes
   useEffect(() => {
@@ -903,9 +920,12 @@ export function useDashboard() {
 
           const currentTrail = t.trail ? [...t.trail] : [];
           const lastPt = currentTrail[currentTrail.length - 1];
-          if (!lastPt || Math.abs(lastPt.lat - newLat) > 0.00001 || Math.abs(lastPt.lon - newLon) > 0.00001) {
-            currentTrail.push({ lat: newLat, lon: newLon });
-            if (currentTrail.length > 25) currentTrail.shift();
+          if (!lastPt || now - (lastPt.t || 0) >= 30000) {
+            currentTrail.push({ lat: Number(newLat.toFixed(5)), lon: Number(newLon.toFixed(5)), t: now });
+            const maxAgeMs = (settingsRef.current.vectorMinutes || 15) * 60 * 1000;
+            while (currentTrail.length > 2 && now - (currentTrail[0].t || now) > maxAgeMs) {
+              currentTrail.shift();
+            }
           }
 
           return {
@@ -1011,12 +1031,14 @@ export function useDashboard() {
               { path: 'environment.ais_targets', minPeriod: 5000 },
               { path: 'environment.ais_top_threat', minPeriod: 5000 },
               { path: 'environment.harbor_clusters', minPeriod: 15000 },
+              { path: 'environment.rotevista_config', minPeriod: 1000 },
             ],
           };
           try {
             ws?.send(JSON.stringify(subscriptionPayload));
           } catch (e) {}
 
+          fetchConfig();
           fetchHistory();
           fetchAisTargets();
         };
@@ -1164,6 +1186,7 @@ export function useDashboard() {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && !isDisposed) {
+        fetchConfig();
         if (storeRef.current.hasEverConnectedToSignalK) {
           fetch('/rotevista-history')
             .then(res => (res.ok ? res.json() : null))
@@ -1218,7 +1241,7 @@ export function useDashboard() {
       if (handshakeTimeout) clearTimeout(handshakeTimeout);
       if (simTimer) clearInterval(simTimer);
     };
-  }, [processIncomingData, seedDemoHistory]);
+  }, [processIncomingData, seedDemoHistory, fetchConfig]);
 
   // Main 1Hz Tactical Display Loop
   useEffect(() => {
@@ -1277,8 +1300,9 @@ export function useDashboard() {
       }
 
       // Analog Pointers Rotations
-      const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, 2000, true, now);
-      const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, 2000, true, now);
+      const smoothWin = config.averaging.smoothWindow || 2000;
+      const smAwa = getCircularAverageFromBuffer(store.smoothBuf.awa, smoothWin, true, now);
+      const smTwa = getCircularAverageFromBuffer(store.smoothBuf.twa, smoothWin, true, now);
       let awaPointerDeg = store.curAwaRot;
       let twaPointerDeg = store.curTwaRot;
       if (smAwa) {

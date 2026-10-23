@@ -1231,17 +1231,26 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         }
       }
 
-      // Breadcrumb Trail
-      if (t.trail && t.trail.length > 1) {
-        const trailPts = t.trail.map(pt => [pt.lat, pt.lon] as [number, number]);
-        const trailLine = L.polyline(trailPts, {
-          color: color,
-          weight: isSelected ? 1.8 : 1.2,
-          dashArray: '2, 4',
-          opacity: isDimmed ? 0.15 : 0.55,
-          interactive: false,
-        });
-        markersLayerRef.current?.addLayer(trailLine);
+      // Breadcrumb Trail (1/3 vettore se non selezionato, 1x vettore se selezionato, min 2 punti per Class B)
+      if (t.isMoving && t.trail && t.trail.length > 0) {
+        const refTime = t.trail[t.trail.length - 1]?.t || Date.now();
+        const maxAgeMs = (vectorMinutes || 15) * (isSelected ? 1 : 1 / 3) * 60 * 1000;
+        let visibleTrail = t.trail.filter(pt => !pt.t || refTime - pt.t <= maxAgeMs);
+        if (visibleTrail.length < 2 && t.trail.length >= 2) {
+          visibleTrail = t.trail.slice(-2);
+        }
+        const trailPts = visibleTrail.map(pt => [pt.lat, pt.lon] as [number, number]);
+        trailPts.push([t.lat, t.lon]);
+        if (trailPts.length > 1) {
+          const trailLine = L.polyline(trailPts, {
+            color: color,
+            weight: isSelected ? 1.8 : 1.2,
+            dashArray: '2, 4',
+            opacity: isDimmed ? 0.15 : isSelected ? 0.75 : 0.5,
+            interactive: false,
+          });
+          markersLayerRef.current?.addLayer(trailLine);
+        }
       }
     });
 
