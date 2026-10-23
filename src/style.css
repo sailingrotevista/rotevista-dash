@@ -864,7 +864,7 @@ body.night-mode #radar-ticks line {
 
 .banner-metric {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 4px;
 }
 
@@ -877,6 +877,17 @@ body.night-mode #radar-ticks line {
 .banner-metric .metric-val {
     font-weight: 800;
     font-family: monospace;
+}
+
+.banner-metric-primary .metric-lbl {
+    font-size: 0.74rem;
+    font-weight: 700;
+    opacity: 0.95;
+}
+
+.banner-metric-primary .metric-val {
+    font-size: 0.92rem;
+    font-weight: 900;
 }
 
 .banner-sighting {
@@ -1272,6 +1283,12 @@ body.night-mode .ais-beta-tag,
     padding: 4px 10px;
     border-radius: 8px;
     backdrop-filter: blur(8px);
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.15s ease;
+}
+
+.ais-status-counters:active {
+    transform: scale(0.97);
 }
 
 .counter-item {
@@ -1377,10 +1394,14 @@ body.night-mode .ais-tool-btn.btn-active,
 
 /* DivIcon Markers */
 .own-ship-icon-wrapper {
+    position: relative;
+    width: 30px;
+    height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.4s ease-out;
+    transform: rotate(var(--vessel-rot, 0deg));
+    transition: transform 1.05s linear;
 }
 
 .ais-target-marker {
@@ -1395,7 +1416,29 @@ body.night-mode .ais-tool-btn.btn-active,
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.4s ease-out;
+    transform: rotate(var(--vessel-rot, 0deg));
+    transition: transform 1.05s linear;
+}
+
+.vessel-course-vector,
+.vessel-cpa-vector {
+    position: absolute;
+    bottom: 50%;
+    left: 50%;
+    transform: translateX(-50%);
+    transform-origin: bottom center;
+    pointer-events: none;
+    z-index: -1;
+}
+
+.vessel-course-vector {
+    height: var(--vec-len, 0px);
+    transition: height 1.05s linear;
+}
+
+.vessel-cpa-vector {
+    height: var(--cpa-len, 0px);
+    transition: height 1.05s linear;
 }
 
 .target-radar-pulse {
@@ -1410,6 +1453,46 @@ body.night-mode .ais-tool-btn.btn-active,
 @keyframes targetPulse {
     0% { transform: scale(0.6); opacity: 1; }
     100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* Ghost Ships at CPA & Smooth Vessel Motion */
+.own-ship-marker,
+.ais-target-marker,
+.cpa-ghost-marker,
+.ais-threat-floating-label {
+    background: transparent !important;
+    border: none !important;
+    transition: transform 1.05s linear;
+    will-change: transform;
+}
+
+.leaflet-zoom-anim .own-ship-marker,
+.leaflet-zoom-anim .ais-target-marker,
+.leaflet-zoom-anim .cpa-ghost-marker,
+.leaflet-zoom-anim .ais-threat-floating-label,
+.leaflet-zoom-anim .cpa-ghost-vessel {
+    transition: transform 0.25s cubic-bezier(0, 0, 0.25, 1) !important;
+}
+
+.leaflet-zoom-anim .vessel-course-vector,
+.leaflet-zoom-anim .vessel-cpa-vector {
+    transition: height 0.25s cubic-bezier(0, 0, 0.25, 1) !important;
+}
+
+.cpa-ghost-vessel {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.35;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+    transform: translate(-50%, calc(-50% - var(--ghost-dist, 0px)));
+    transition: transform 1.05s linear;
+    pointer-events: none;
 }
 
 .target-selection-ring {
@@ -1467,6 +1550,16 @@ body.night-mode .ais-tool-btn.btn-active,
     flex-direction: column;
     overflow: hidden;
     animation: cardDropdown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: top 0.25s cubic-bezier(0.16, 1, 0.3, 1), max-height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-root-wrapper:has(> .ais-tactical-banner) .ais-dropdown-card {
+    top: calc(env(safe-area-inset-top, 0px) + 86px);
+    max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 102px);
+}
+
+.app-root-wrapper:has(> .ais-tactical-banner) .ais-top-bar {
+    top: calc(env(safe-area-inset-top, 0px) + 86px);
 }
 
 @keyframes cardDropdown {
@@ -2392,18 +2485,18 @@ body.night-mode .ais-support-email-btn,
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.5) !important;
 }
 
-/* Scalatura +15%/+20% controlli AIS su schermi ampi (desktop / tablet landscape) */
+/* Scalatura a 64px dei controlli AIS su schermi ampi (desktop / tablet landscape) */
 @media (min-width: 768px) and (min-height: 500px) {
     .ais-view-container .ais-tool-btn,
     .ais-view-container .ais-map-btn,
     .ais-view-container .ais-floating-wind-btn,
     .ais-view-container .ais-floating-support-btn {
-        width: 54px;
-        height: 54px;
-        font-size: 1.45rem;
+        width: 64px;
+        height: 64px;
+        font-size: 1.65rem;
     }
 
     .ais-view-container .ais-dropdown-card {
-        right: calc(max(12px, env(safe-area-inset-right, 12px)) + 64px);
+        right: calc(max(12px, env(safe-area-inset-right, 12px)) + 76px);
     }
 }

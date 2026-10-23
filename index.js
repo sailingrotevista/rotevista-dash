@@ -10,6 +10,7 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { CollisionPipeline } = require('./collisionPipeline');
 
 // ==========================================================================
 // CONFIGURAZIONE PARAMETRICA CACHE TILE CARTOGRAFICHE (Cerbo GX / Venus OS)
@@ -54,6 +55,7 @@ module.exports = function (app) {
     let vesselHdgHist = {};      // Storico prua bersagli per rilevamento ormeggio
     let lastOwnGps = { lat: null, lon: null, t: 0 }; // Ultimo punto GPS proprio per cinematica
     let aisDiagnostics = { status: 'INITIALIZING', myGps: null, vesselsCount: 0, extractionMethod: 'none', lastRun: null };
+    const collisionPipeline = new CollisionPipeline();
 
     // ==========================================================================
     // COSTANTI DI SVILUPPO (DEVELOPER CONFIG)
@@ -107,9 +109,11 @@ module.exports = function (app) {
                 maxTcpa: 15
             },
             workboats: {
-                redCpa: 500,
+                redCpa: 350,
+                orangeCpa: 750,
                 maxTcpa: 12
             },
+            vectorMinutes: 15,
             criticalProximity: 45
         };
         currentConfig = options || {};
@@ -1049,6 +1053,12 @@ module.exports = function (app) {
                         description: 'Your own vessel MMSI, Callsign, or Name to ignore from incoming AIS targets, preventing self-collision false alarms.',
                         default: '106125'
                     },
+                    vectorMinutes: {
+                        type: 'number',
+                        title: 'Course Vector Length (Minutes)',
+                        description: 'Projection time in minutes for own ship and AIS targets course vectors on the tactical map.',
+                        default: 15
+                    },
                     criticalProximity: {
                         type: 'number',
                         title: 'Emergency Proximity Bubble (Meters)',
@@ -1113,8 +1123,14 @@ module.exports = function (app) {
                             redCpa: {
                                 type: 'number',
                                 title: 'Danger CPA (Meters)',
-                                description: 'Critical clearance. Warning distance is automatically doubled.',
-                                default: 500
+                                description: 'Critical clearance for workboats and tugs.',
+                                default: 350
+                            },
+                            orangeCpa: {
+                                type: 'number',
+                                title: 'Warning CPA (Meters)',
+                                description: 'Advisory clearance for workboats and tugs.',
+                                default: 750
                             },
                             maxTcpa: {
                                 type: 'number',
@@ -1195,7 +1211,7 @@ module.exports = function (app) {
                 field: 'ObjectField',
                 wrapClassName: 'panel-group'
             },
-            'ui:order': ['enabled', 'ignoreOwnTarget', 'criticalProximity', 'pleasureCraft', 'commercialShips', 'workboats'],
+            'ui:order': ['enabled', 'ignoreOwnTarget', 'vectorMinutes', 'criticalProximity', 'pleasureCraft', 'commercialShips', 'workboats'],
             pleasureCraft: {
                 'ui:field': 'collapsible',
                 collapse: {
@@ -1528,13 +1544,6 @@ module.exports = function (app) {
         return Math.sqrt(dx * dx + dy * dy);
     }
 
-    function bearingDeg(lat1, lon1, lat2, lon2) {
-        const y = Math.sin((lon2 - lon1) * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180);
-        const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
-                Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos((lon2 - lon1) * Math.PI / 180);
-        return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-    }
-
     function computeConvexHull(points) {
         if (!points || points.length < 3) return points;
         let sorted = points.slice().sort((a, b) => a[0] === b[0] ? a[1] - b[1] : a[0] - b[0]);
@@ -1649,9 +1658,6 @@ module.exports = function (app) {
             if (dVal !== undefined && !isNaN(dVal)) myDepth = parseFloat(dVal);
         }
 
-        const isOwnShipAtAnchor = mySpeedKn < 0.8;
-        const isOwnShipManeuvering = mySpeedKn < 2.5;
-
         // 2. Lettura configurazione attiva con supporto gruppi ad albero e retrocompatibilità
         const cfg = currentConfig.aisAlerter || {};
         const ignoreOwnTarget = String(cfg.ignoreOwnTarget !== undefined ? cfg.ignoreOwnTarget : (cfg.ignoreOwnCallsign || "106125")).trim().toLowerCase();
@@ -1664,10 +1670,28 @@ module.exports = function (app) {
         const commercialOrangeCpa = cShips.orangeCpa !== undefined ? cShips.orangeCpa : (cfg.commercialOrangeCpa || 1852);
         const commercialMaxTcpa = cShips.maxTcpa !== undefined ? cShips.maxTcpa : (cfg.commercialMaxTcpa || 15);
         const wBoats = cfg.workboats || {};
-        const workRedCpa = wBoats.redCpa !== undefined ? wBoats.redCpa : (cfg.workRedCpa || 500);
-        const workOrangeCpa = workRedCpa * 2;
+        const workRedCpa = wBoats.redCpa !== undefined ? wBoats.redCpa : (cfg.workRedCpa || 350);
+        const workOrangeCpa = wBoats.orangeCpa !== undefined ? wBoats.orangeCpa : Math.round(workRedCpa * 2.15);
         const workMaxTcpa = wBoats.maxTcpa !== undefined ? wBoats.maxTcpa : (cfg.workMaxTcpa || 12);
-        const criticalProximity = cfg.criticalProximity || 45;
+        collisionPipeline.updateConfig({
+            yachtRedCpaMeters: yachtRedCpa,
+            yachtOrangeCpaMeters: yachtOrangeCpa,
+            yachtHorizonTcpaMin: yachtMaxTcpa,
+            commercialRedCpaMeters: commercialRedCpa,
+            commercialOrangeCpaMeters: commercialOrangeCpa,
+            commercialHorizonTcpaMin: commercialMaxTcpa,
+            workRedCpaMeters: workRedCpa,
+            workOrangeCpaMeters: workOrangeCpa,
+            workHorizonTcpaMin: workMaxTcpa
+        });
+
+        const ownShipInput = {
+            lat: myGps.lat,
+            lon: myGps.lon,
+            sog: mySpeedKn,
+            cog: myCog,
+            hdg: myHdg
+        };
 
         const MAX_DISTANCE_METERS = 37040; // 20 NM
 
@@ -1868,12 +1892,6 @@ module.exports = function (app) {
                     hdg: hdg !== null ? Math.round((hdg + 360) % 360) : (aisPersistentCache[key] ? aisPersistentCache[key].hdg : null),
                     trail: trail,
                     lastSeen: realAisTime,
-                    anchorState: aisPersistentCache[key] ? (aisPersistentCache[key].anchorState || 'UNDERWAY') : 'UNDERWAY',
-                    anchorStateStartTime: aisPersistentCache[key] ? (aisPersistentCache[key].anchorStateStartTime || realAisTime) : realAisTime,
-                    anchorPositions: aisPersistentCache[key] ? (aisPersistentCache[key].anchorPositions || []) : [],
-                    anchorCenter: aisPersistentCache[key] ? aisPersistentCache[key].anchorCenter : null,
-                    swingRadius: aisPersistentCache[key] ? (aisPersistentCache[key].swingRadius || 35) : 35,
-                    isAnchored: aisPersistentCache[key] ? Boolean(aisPersistentCache[key].isAnchored) : false,
                     isMoored: aisPersistentCache[key] ? Boolean(aisPersistentCache[key].isMoored) : false
                 };
             }
@@ -1924,451 +1942,42 @@ module.exports = function (app) {
                 isEstimated = true;
             }
 
-            // Macchina a stati completa rilevazione ancoraggio (Punto A)
             let navState = v.navStateRaw || "";
             let isExplicitMoored = navState.includes("moored") || navState === "5";
-            let isExplicitAnchor = navState.includes("anchor") || isExplicitMoored || navState === "1";
-            let isExplicitUnderway = navState.includes("under way") || navState.includes("motoring") || navState.includes("sailing") || navState === "0" || navState === "8";
-
-            let anchorState = v.anchorState || 'UNDERWAY';
-            let anchorCenter = v.anchorCenter || null;
-            let stateEnteredAt = v.anchorStateStartTime || now;
-            let anchorPositions = Array.isArray(v.anchorPositions) ? v.anchorPositions : [];
-
-            // Classificazione tipologia nave per dimensionamento brandeggio
-            let tCode = parseInt(v.type) || 0;
-            const isCommercial = (tCode >= 70 && tCode <= 89) || (tCode >= 40 && tCode <= 49) || (tCode >= 60 && tCode <= 69) || (v.length && v.length >= 40);
-            const isWork = (tCode >= 30 && tCode <= 32) || (tCode >= 50 && tCode <= 59);
-
-            // Calcolo geometrico dinamico del raggio di brandeggio (Punto B)
-            let boatLen = (v.length && !isNaN(v.length) && v.length > 0) ? v.length : 12;
-            let currentDistToMe = distanceMeters(myGps.lat, myGps.lon, v.lat, v.lon);
-            let estDepth = (myDepth > 1 && currentDistToMe <= 3704) ? myDepth : 8;
-            let rawSwing = boatLen + (estDepth * 4.5);
-            let swingRadius = Math.max(25, Math.min(isCommercial ? 300 : 150, Math.round(rawSwing)));
-            v.swingRadius = swingRadius;
-
-            // Aggiungi campionamento posizioni e prua per analisi dispersione spaziale (debounce 10s)
-            if (anchorPositions.length === 0 || (now - anchorPositions[anchorPositions.length - 1].t >= 10000)) {
-                anchorPositions.push({ lat: v.lat, lon: v.lon, t: now, sog: v.sog, hdg: v.hdg });
-                if (anchorPositions.length > 40) anchorPositions.shift();
-            }
-            v.anchorPositions = anchorPositions;
-
-            let timeInStateMs = now - stateEnteredAt;
-
-            if (anchorState === 'UNDERWAY') {
-                if (isExplicitMoored) {
-                    anchorState = 'MOORED';
-                    stateEnteredAt = now;
-                    anchorCenter = null;
-                    v.isAnchored = false;
-                    v.isMoored = true;
-                } else if (isExplicitAnchor || v.sog < 1.0) {
-                    anchorState = 'POSSIBLE_ANCHOR';
-                    stateEnteredAt = now;
-                    anchorCenter = { lat: v.lat, lon: v.lon, radius: swingRadius };
-                    v.isAnchored = false;
-                    v.isMoored = false;
-                } else {
-                    v.isAnchored = false;
-                    v.isMoored = false;
-                }
-            } else if (anchorState === 'POSSIBLE_ANCHOR') {
-                let stateSamples = anchorPositions.filter(p => p.t >= stateEnteredAt);
-                if (stateSamples.length === 0) stateSamples = [{ lat: v.lat, lon: v.lon, t: now, sog: v.sog, hdg: v.hdg }];
-
-                let sumLat = 0, sumLon = 0;
-                for (let i = 0; i < stateSamples.length; i++) {
-                    sumLat += stateSamples[i].lat;
-                    sumLon += stateSamples[i].lon;
-                }
-                let candCenter = { lat: sumLat / stateSamples.length, lon: sumLon / stateSamples.length };
-
-                let maxDispersion = 0;
-                for (let i = 0; i < stateSamples.length; i++) {
-                    let d = distanceMeters(candCenter.lat, candCenter.lon, stateSamples[i].lat, stateSamples[i].lon);
-                    if (d > maxDispersion) maxDispersion = d;
-                }
-                let distFromInitial = anchorCenter ? distanceMeters(anchorCenter.lat, anchorCenter.lon, v.lat, v.lon) : 0;
-                let cancelThreshold = Math.max(50, swingRadius + 10);
-
-                // Analisi varianza prua (HDG) per discriminare banchina/finger (Punto C)
-                let hdgSamples = stateSamples.map(s => s.hdg).filter(h => h !== undefined && h !== null && !isNaN(h));
-                let hdgSpread = 0;
-                if (hdgSamples.length >= 2) {
-                    let minH = Math.min(...hdgSamples);
-                    let maxH = Math.max(...hdgSamples);
-                    hdgSpread = maxH - minH;
-                    if (hdgSpread > 180) {
-                        let unrolled = hdgSamples.map(h => (h < 180 ? h + 360 : h));
-                        hdgSpread = Math.max(...unrolled) - Math.min(...unrolled);
-                    }
-                }
-
-                if ((v.sog >= 1.5 && timeInStateMs > 30000 && distFromInitial > cancelThreshold) || (isExplicitUnderway && v.sog >= 1.2)) {
-                    anchorState = 'UNDERWAY';
-                    stateEnteredAt = now;
-                    anchorCenter = null;
-                    v.isAnchored = false;
-                    v.isMoored = false;
-                } else if (isExplicitMoored && (timeInStateMs >= 30000 || stateSamples.length >= 2) && v.sog < 1.0) {
-                    // Ormeggio esplicito in banchina
-                    anchorState = 'MOORED';
-                    stateEnteredAt = now;
-                    anchorCenter = null;
-                    v.isAnchored = false;
-                    v.isMoored = true;
-                } else if (v.sog < 0.6 && maxDispersion <= 12 && timeInStateMs >= 120000 && (hdgSamples.length === 0 || hdgSpread <= 10)) {
-                    // Deduzione banchina/finger: dispersione minima e prua costante
-                    anchorState = 'MOORED';
-                    stateEnteredAt = now;
-                    anchorCenter = null;
-                    v.isAnchored = false;
-                    v.isMoored = true;
-                } else if (isExplicitAnchor && (timeInStateMs >= 45000 || stateSamples.length >= 2) && v.sog < 1.5) {
-                    // Transponder Classe A con NavStatus esplicito "at anchor"
-                    anchorState = 'ANCHORED';
-                    stateEnteredAt = now;
-                    if (trueWindDir !== undefined && !isNaN(trueWindDir)) {
-                        let distToAnchor = Math.max(15, swingRadius - (boatLen * 0.5));
-                        let estLat = candCenter.lat + (distToAnchor * Math.cos(d2r(trueWindDir))) / 111139;
-                        let estLon = candCenter.lon + (distToAnchor * Math.sin(d2r(trueWindDir))) / (111139 * Math.cos(d2r(candCenter.lat)));
-                        anchorCenter = { lat: estLat, lon: estLon, radius: swingRadius };
-                    } else {
-                        anchorCenter = { lat: candCenter.lat, lon: candCenter.lon, radius: swingRadius };
-                    }
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                } else if (maxDispersion <= (swingRadius * 0.9) && distFromInitial <= (swingRadius + 15) && ((timeInStateMs >= 300000) || (stateSamples.length >= 3 && timeInStateMs >= 180000 && v.sog < 0.9))) {
-                    // Deduzione cinematica rada libera
-                    anchorState = 'ANCHORED';
-                    stateEnteredAt = now;
-                    if (trueWindDir !== undefined && !isNaN(trueWindDir)) {
-                        let distToAnchor = Math.max(15, swingRadius - (boatLen * 0.5));
-                        let estLat = candCenter.lat + (distToAnchor * Math.cos(d2r(trueWindDir))) / 111139;
-                        let estLon = candCenter.lon + (distToAnchor * Math.sin(d2r(trueWindDir))) / (111139 * Math.cos(d2r(candCenter.lat)));
-                        anchorCenter = { lat: estLat, lon: estLon, radius: swingRadius };
-                    } else {
-                        anchorCenter = { lat: candCenter.lat, lon: candCenter.lon, radius: swingRadius };
-                    }
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                } else {
-                    v.isAnchored = false;
-                    v.isMoored = false;
-                }
-            } else if (anchorState === 'MOORED') {
-                let distFromMoored = anchorCenter ? distanceMeters(v.lat, v.lon, anchorCenter.lat, anchorCenter.lon) : 0;
-                if ((v.sog >= 1.2 && distFromMoored > 30) || (isExplicitUnderway && v.sog >= 1.0)) {
-                    anchorState = 'UNDERWAY';
-                    stateEnteredAt = now;
-                    anchorCenter = null;
-                    v.isAnchored = false;
-                    v.isMoored = false;
-                } else {
-                    v.isAnchored = false;
-                    v.isMoored = true;
-                }
-            } else if (anchorState === 'ANCHORED') {
-                let distFromAnchor = anchorCenter ? distanceMeters(v.lat, v.lon, anchorCenter.lat, anchorCenter.lon) : 0;
-                let exitThreshold = Math.max(60, swingRadius + 15);
-
-                // Verifica scarroccio sottovento (Anchor Dragging - Punto D)
-                let isDownwindDrift = false;
-                if (trueWindDir !== undefined && !isNaN(trueWindDir)) {
-                    let downwindDir = (trueWindDir + 180) % 360;
-                    let diff = Math.abs(v.cog - downwindDir) % 360;
-                    if (diff > 180) diff = 360 - diff;
-                    isDownwindDrift = (diff <= 35.0);
-                } else {
-                    isDownwindDrift = (distFromAnchor > (swingRadius + 20));
-                }
-
-                if ((v.sog >= 2.2) || (isExplicitUnderway && v.sog >= 1.5)) {
-                    // Motore acceso per disancoraggio
-                    anchorState = 'WEIGHING_ANCHOR';
-                    stateEnteredAt = now;
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                } else if (distFromAnchor > exitThreshold && v.sog >= 0.4 && v.sog <= 2.0 && isDownwindDrift) {
-                    // Spedo dell'ancora in corso
-                    anchorState = 'ANCHOR_DRAGGING';
-                    stateEnteredAt = now;
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                } else {
-                    // Mantiene ancoraggio; affina progressivamente la posizione ancora con EMA
-                    if (v.sog < 0.6 && anchorCenter) {
-                        if (trueWindDir !== undefined && !isNaN(trueWindDir)) {
-                            let distToAnchor = Math.max(15, swingRadius - (boatLen * 0.5));
-                            let instantAnchorLat = v.lat + (distToAnchor * Math.cos(d2r(trueWindDir))) / 111139;
-                            let instantAnchorLon = v.lon + (distToAnchor * Math.sin(d2r(trueWindDir))) / (111139 * Math.cos(d2r(v.lat)));
-                            anchorCenter.lat = anchorCenter.lat * 0.95 + instantAnchorLat * 0.05;
-                            anchorCenter.lon = anchorCenter.lon * 0.95 + instantAnchorLon * 0.05;
-                        } else {
-                            anchorCenter.lat = anchorCenter.lat * 0.95 + v.lat * 0.05;
-                            anchorCenter.lon = anchorCenter.lon * 0.95 + v.lon * 0.05;
-                        }
-                        anchorCenter.radius = swingRadius;
-                    }
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                }
-            } else if (anchorState === 'ANCHOR_DRAGGING') {
-                let distFromAnchor = anchorCenter ? distanceMeters(v.lat, v.lon, anchorCenter.lat, anchorCenter.lon) : 100;
-                let timeInDrift = now - stateEnteredAt;
-
-                if (v.sog >= 2.2 || (isExplicitUnderway && v.sog >= 1.5)) {
-                    anchorState = 'WEIGHING_ANCHOR';
-                    stateEnteredAt = now;
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                } else if (v.sog < 0.4 && distFromAnchor <= (swingRadius + 10)) {
-                    // Ancora ha ripreso tenuta
-                    anchorState = 'ANCHORED';
-                    stateEnteredAt = now;
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                } else if (timeInDrift > 600000 && distFromAnchor > 600) {
-                    anchorState = 'UNDERWAY';
-                    stateEnteredAt = now;
-                    anchorCenter = null;
-                    v.isAnchored = false;
-                    v.isMoored = false;
-                } else {
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                }
-            } else if (anchorState === 'WEIGHING_ANCHOR') {
-                let timeWeighing = now - stateEnteredAt;
-                let distFromAnchor = anchorCenter ? distanceMeters(v.lat, v.lon, anchorCenter.lat, anchorCenter.lon) : 100;
-                let exitThreshold = Math.max(60, swingRadius + 15);
-
-                if ((v.sog >= 1.5 && (distFromAnchor > exitThreshold || timeWeighing >= 30000)) || (isExplicitUnderway && v.sog >= 1.2)) {
-                    anchorState = 'UNDERWAY';
-                    stateEnteredAt = now;
-                    anchorCenter = null;
-                    v.isAnchored = false;
-                    v.isMoored = false;
-                } else if (v.sog < 0.8 && distFromAnchor <= (swingRadius + 5)) {
-                    anchorState = 'ANCHORED';
-                    stateEnteredAt = now;
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                } else {
-                    v.isAnchored = true;
-                    v.isMoored = false;
-                }
-            }
-
-            v.anchorState = anchorState;
-            v.anchorStateStartTime = stateEnteredAt;
-            v.anchorCenter = anchorCenter;
-            let isAnchored = (anchorState === 'ANCHORED' || anchorState === 'ANCHOR_DRAGGING');
-            let isMoored = (anchorState === 'MOORED');
-            v.isAnchored = isAnchored;
+            let isMoored = isExplicitMoored || (Boolean(v.isMoored) && v.sog < 0.8);
+            let isAnchored = false;
+            let anchorState = isMoored ? 'MOORED' : 'UNDERWAY';
+            v.isAnchored = false;
             v.isMoored = isMoored;
+            let tCode = parseInt(v.type) || 0;
 
-            let isTargetStationary = (v.sog < 0.8) || isAnchored || isMoored;
+            // Valutazione tramite CollisionPipeline (Moduli 1-4)
+            let evalRes = collisionPipeline.evaluateTarget(ownShipInput, {
+                id: v.id,
+                mmsi: v.id,
+                name: v.name,
+                lat: outLat,
+                lon: outLon,
+                sog: isMoored ? 0 : v.sog,
+                cog: v.cog,
+                shipType: tCode,
+                lastUpdate: v.lastSeen,
+                isClassB: v.aisClass !== "A",
+                length: v.length,
+                beam: v.beam
+            }, now);
 
-            let baseRedCpa = yachtRedCpa;
-            let baseOrangeCpa = yachtOrangeCpa;
-            let maxTcpaWindow = yachtMaxTcpa;
-
-            if (isCommercial) {
-                // Moltiplicatore dinamico di velocità: +3.5% per nodo sopra 12kn (clamp a 1.75x)
-                let speedFactor = Math.min(1.75, 1.0 + Math.max(0, v.sog - 12.0) * 0.035);
-                baseRedCpa = Math.round(commercialRedCpa * speedFactor);
-                baseOrangeCpa = Math.round(commercialOrangeCpa * speedFactor);
-                maxTcpaWindow = commercialMaxTcpa;
-            } else if (isWork) {
-                baseRedCpa = workRedCpa;
-                baseOrangeCpa = workOrangeCpa;
-                maxTcpaWindow = workMaxTcpa;
-            }
-
-            // Calcolo vettoriale cinematico ARPA
-            let cpa = null;
-            let tcpa = null;
-            let crossDir = "";
-            let crossOutcome = "";
-            let crossRule = "";
-            let risk = "GREY";
-            let riskMsg = "";
-
-            // Calcolo vettori moto relativo (ARPA stabilizzato per unita all'ancora o ormeggiate)
-            let isStaticStationary = (anchorState === 'ANCHORED' || anchorState === 'MOORED');
-            let t_v_ms = isStaticStationary ? 0 : (v.sog * 0.514444);
-            let tvx = isStaticStationary ? 0 : (t_v_ms * Math.sin(d2r(v.cog)));
-            let tvy = isStaticStationary ? 0 : (t_v_ms * Math.cos(d2r(v.cog)));
-
-            let myvx = mySpeedMs * Math.sin(d2r(myCog));
-            let myvy = mySpeedMs * Math.cos(d2r(myCog));
-
-            let vx = tvx - myvx;
-            let vy = tvy - myvy;
-
-            let x0 = (outLon - myGps.lon) * 111139 * Math.cos(d2r(myGps.lat));
-            let y0 = (outLat - myGps.lat) * 111139;
-
-            let v2 = (vx * vx + vy * vy);
-            if (v2 < 0.000001) v2 = 0.000001;
-
-            let t_sec = -(x0 * vx + y0 * vy) / v2;
-            let rawCpa = Math.sqrt((x0 + vx * t_sec) * (x0 + vx * t_sec) + (y0 + vy * t_sec) * (y0 + vy * t_sec));
-
-            let bearingNow = (r2d(Math.atan2(x0, y0)) + 360) % 360;
+            let bearingNow = evalRes ? evalRes.bearingNowDeg : 0;
             let relBearingNow = (bearingNow - myHdg + 360) % 360;
-
-            let rawCogDiff = Math.abs(myCog - v.cog) % 360;
-            let cogAngularDiff = rawCogDiff > 180 ? 360 - rawCogDiff : rawCogDiff;
-
-            // Dimezzamento (50%) per rotte parallele SOLO per diporto
-            let isParallelCourse = (cogAngularDiff <= 20.0 && !isCommercial && !isWork);
-            let effectiveRedCpa = isParallelCourse ? Math.round(baseRedCpa * 0.5) : baseRedCpa;
-            let effectiveOrangeCpa = isParallelCourse ? Math.round(baseOrangeCpa * 0.5) : baseOrangeCpa;
-
-            let isBothStationary = isOwnShipAtAnchor && isTargetStationary && anchorState !== 'ANCHOR_DRAGGING';
-
-            if (isBothStationary || t_sec < 0) {
-                tcpa = -1;
-                cpa = null; // Nessun moto relativo o punto di incrocio nel passato
-            } else if (rawCpa > (effectiveOrangeCpa * 1.5) || (t_sec / 60.0) > maxTcpaWindow) {
-                tcpa = -1;
-                cpa = Math.round(rawCpa);
-            } else {
-                tcpa = t_sec / 60.0;
-                cpa = Math.round(rawCpa);
-            }
-
-            let isTcpaThreat = (tcpa >= 0 && cpa !== null);
-
-            // Valutazione rischio collisione
-            if (anchorState === 'ANCHOR_DRAGGING') {
-                // Bersaglio che speda l'ancora
-                let bearingTargetToMe = (bearingNow + 180) % 360;
-                let relDriftDiff = Math.abs(v.cog - bearingTargetToMe) % 360;
-                if (relDriftDiff > 180) relDriftDiff = 360 - relDriftDiff;
-
-                let isDriftingTowardsMe = (relDriftDiff <= 35.0);
-                if (isDriftingTowardsMe && currentDist <= 400) {
-                    risk = "RED";
-                    riskMsg = "ALLARME: BERSAGLIO IN DERIVA VERSO DI TE!";
-                } else if (currentDist <= 250) {
-                    risk = "RED";
-                    riskMsg = "BERSAGLIO SPEDA L'ANCORA (PROSSIMITA)!";
-                } else {
-                    risk = "ORANGE";
-                    riskMsg = "BERSAGLIO SPEDA L'ANCORA";
-                }
-            } else if (anchorState === 'MOORED') {
-                // Bersaglio ormeggiato in banchina
-                if (!isOwnShipManeuvering && isTcpaThreat && cpa < 30 && tcpa <= 2.0) {
-                    risk = "RED";
-                    riskMsg = "BANCHINA / BERSAGLIO FERMO!";
-                } else if (currentDist < 25 && !isOwnShipAtAnchor && !isOwnShipManeuvering) {
-                    risk = "RED";
-                    riskMsg = "PROSSIMITA CRITICA BANCHINA!";
-                }
-            } else if (isAnchored) {
-                // Bersaglio all'ancora: ingombro geometrico esteso al cerchio di brandeggio
-                let cpaToSwingPerimeter = Math.max(0, rawCpa - swingRadius);
-                if (!isOwnShipManeuvering && !isOwnShipAtAnchor && isTcpaThreat && tcpa <= 6.0) {
-                    if (cpaToSwingPerimeter <= effectiveRedCpa && tcpa <= 4.0) {
-                        risk = "RED";
-                        riskMsg = "UNITÀ ALL'ANCORA IN ROTTA!";
-                    } else if (cpaToSwingPerimeter <= effectiveOrangeCpa) {
-                        risk = "ORANGE";
-                        riskMsg = "ATTENZIONE AREA ANCORAGGIO";
-                    }
-                } else if (currentDist < (criticalProximity + swingRadius) && !isOwnShipAtAnchor && !isOwnShipManeuvering) {
-                    risk = "RED";
-                    riskMsg = "PROSSIMITA CRITICA ANCORA!";
-                }
-            } else if (isTargetStationary) {
-                // Bersaglio fermo: preavviso TCPA solo se navighiamo in crociera (>2.5kn); silenziato in manovra/porto
-                if (!isOwnShipManeuvering && isTcpaThreat && cpa < 60 && tcpa <= 3.0) {
-                    risk = "RED";
-                    riskMsg = "BERSAGLIO FERMO IN ROTTA!";
-                } else if (currentDist < criticalProximity) {
-                    // Silenziamento selettivo: nessun allarme prossimità su bersagli fermi se siamo all'ancora o in manovra/porto
-                    if (!isOwnShipAtAnchor && !isOwnShipManeuvering) {
-                        risk = "RED";
-                        riskMsg = "PROSSIMITA CRITICA!";
-                    }
-                }
-            } else {
-                // Bersaglio in moto: valutazione ARPA
-                if (isTcpaThreat && tcpa <= maxTcpaWindow) {
-                    if (cpa <= effectiveRedCpa && tcpa <= (maxTcpaWindow * 0.6)) {
-                        risk = "RED";
-                        riskMsg = "RISCHIO COLLISIONE!";
-                    } else if (cpa <= effectiveOrangeCpa) {
-                        risk = "ORANGE";
-                        riskMsg = "ATTENZIONE INCROCIO";
-                    }
-                }
-            }
-
-            // Analisi COLREGs 72
-            let bearingCpa = (r2d(Math.atan2(x0 + vx * t_sec, y0 + vy * t_sec)) + 360) % 360;
-            let relBearingCpa = (bearingCpa - myHdg + 360) % 360;
-            let passSector = Math.floor(((relBearingCpa + 45) % 360) / 90);
-            let passSide = (passSector === 1) ? "Dritta" : (passSector === 3 ? "Sinistra" : (relBearingCpa < 180 ? "Dritta" : "Sinistra"));
-
-            let bearingTargetToMe = (bearingNow + 180) % 360;
-            let relBearingTargetToMe = (bearingTargetToMe - v.cog + 360) % 360;
-            let crossesBow = (relBearingNow < 180 && relBearingCpa >= 180) || (relBearingNow >= 180 && relBearingCpa < 180);
-            let isReciprocalCourse = Math.abs(cogAngularDiff - 180) <= 25.0;
-
-            if (t_sec < 0) {
-                crossOutcome = "In Allontanamento";
-                crossRule = "";
-            } else if (anchorState === 'ANCHOR_DRAGGING') {
-                let relDriftDiff = Math.abs(v.cog - bearingTargetToMe) % 360;
-                if (relDriftDiff > 180) relDriftDiff = 360 - relDriftDiff;
-                let isDriftingTowardsMe = (relDriftDiff <= 35.0);
-
-                crossOutcome = isDriftingTowardsMe ? "Speda verso di Te" : `Speda a ${passSide}`;
-                crossRule = isDriftingTowardsMe ? "PERICOLO COLLISIONE (Deriva sottovento)" : "ATTENZIONE DERIVA SOTTOVENTO";
-            } else if (anchorState === 'MOORED') {
-                crossOutcome = `Ormeggiato a ${passSide}`;
-                crossRule = "UNITÀ IN BANCHINA / FINGER";
-            } else if (isAnchored) {
-                crossOutcome = `All'Ancora a ${passSide}`;
-                crossRule = `ATTENZIONE BRANDEGGIO (${swingRadius}m)`;
-            } else if (isTargetStationary) {
-                crossOutcome = `Ostacolo a ${passSide}`;
-                crossRule = "AGGIORNA ROTTA (Bersaglio fermo)";
-            } else if (relBearingTargetToMe > 112.5 && relBearingTargetToMe < 247.5 && mySpeedKn > (v.sog + 0.3)) {
-                crossOutcome = `Sorpasso a ${passSide}`;
-                crossRule = "LASCIA ROTTA LIBERA (Unità che sorpassa)";
-            } else if (relBearingNow > 112.5 && relBearingNow < 247.5 && v.sog > (mySpeedKn + 0.3)) {
-                crossOutcome = `Ti Sorpassa a ${passSide}`;
-                crossRule = "MANTIENI ROTTA (Nave sorpassata)";
-            } else if (tCode === 30) {
-                crossOutcome = crossesBow ? "Passa a Prua" : `Sfila a ${passSide}`;
-                crossRule = "DAI PRECEDENZA (Peschereccio in pesca)";
-            } else if (isCommercial) {
-                crossOutcome = crossesBow ? "Passa a Prua" : `Sfila a ${passSide}`;
-                crossRule = "ATTENZIONE NAVE COMMERCIALE (Canale / Pescaggio)";
-            } else if (tCode === 36) {
-                crossOutcome = crossesBow ? "Passa a Prua" : `Sfila a ${passSide}`;
-                crossRule = isMyStarboardTack ? "MANTIENI ROTTA (Mure a Dritta)" : "DAI PRECEDENZA (Mure a Sinistra)";
-            } else if (isReciprocalCourse && (relBearingNow >= 350 || relBearingNow <= 10) && cpa < 300) {
-                crossOutcome = "Rotta Frontale";
-                crossRule = "ACCOSTA A DRITTA";
-            } else {
-                crossOutcome = crossesBow ? "Passa a Prua" : `Sfila a ${passSide}`;
-                if (relBearingNow > 0 && relBearingNow <= 112.5) {
-                    crossRule = "DAI PRECEDENZA (Nave da dritta)";
-                } else {
-                    crossRule = "MANTIENI ROTTA (Monitora)";
-                }
-            }
-
-            crossDir = crossRule ? `${crossOutcome}\n👉 ${crossRule}` : crossOutcome;
+            let cpa = (evalRes && !evalRes.isDiverging) ? evalRes.cpaNominalMeters : null;
+            let tcpa = (evalRes && !evalRes.isDiverging && evalRes.tcpaMinutes >= 0) ? evalRes.tcpaMinutes : -1;
+            let isDeferred = evalRes ? Boolean(evalRes.isDeferred) : false;
+            let trend = evalRes ? evalRes.trend : 'STABLE';
+            let risk = (evalRes && evalRes.alertState !== 'NO_DANGER') ? evalRes.alertState : "GREY";
+            let riskMsg = (evalRes && evalRes.alertState !== 'NO_DANGER') ? (evalRes.reason || "") : "";
+            let crossDir = "";
+            let crossOutcome = (evalRes && evalRes.isDiverging) ? "In Allontanamento" : "In Avvicinamento";
+            let crossRule = "";
 
             // Calcolo rilevamento a orologio
             let clockHour = Math.round(relBearingNow / 30) % 12;
@@ -2393,17 +2002,15 @@ module.exports = function (app) {
                 cog: v.cog,
                 sog: v.sog,
                 dist: Math.round(currentDist),
-                isAnchored: isAnchored,
+                isAnchored: false,
                 isMoored: isMoored,
                 anchorState: anchorState,
-                swingRadius: isMoored ? null : swingRadius,
-                anchorCenter: isMoored ? null : (anchorCenter ? {
-                    lat: parseFloat(anchorCenter.lat.toFixed(7)),
-                    lon: parseFloat(anchorCenter.lon.toFixed(7)),
-                    radius: swingRadius
-                } : null),
-                isMoving: v.sog >= 0.8 && !isAnchored && !isMoored,
+                swingRadius: null,
+                anchorCenter: null,
+                isMoving: v.sog >= 0.8 && !isMoored,
                 risk: risk,
+                isDeferred: isDeferred,
+                trend: trend,
                 riskMsg: riskMsg,
                 cpa: cpa,
                 tcpa: tcpa,
@@ -2768,23 +2375,32 @@ module.exports = function (app) {
             }
         }
 
-        // 8. Ordinamento Bersagli per Pericolosità (RED > ORANGE > GREY) e Distanza
+        // 8. Ordinamento Bersagli per Pericolosità (Immediati > Differiti, RED > ORANGE > GREY) e Distanza
+        collisionPipeline.pruneInactive(now);
         nearbyVessels.sort((a, b) => {
             const riskWeight = { RED: 3, ORANGE: 2, GREY: 1 };
             const wA = riskWeight[a.risk] || 1;
             const wB = riskWeight[b.risk] || 1;
+            const nonDefA = (wA > 1 && !a.isDeferred) ? 1 : 0;
+            const nonDefB = (wB > 1 && !b.isDeferred) ? 1 : 0;
+            if (nonDefA !== nonDefB) return nonDefB - nonDefA;
             if (wA !== wB) return wB - wA;
-            const dA = (a.cpa !== null && a.cpa >= 0) ? a.cpa : a.dist;
-            const dB = (b.cpa !== null && b.cpa >= 0) ? b.cpa : b.dist;
-            return dA - dB;
+            if (wA > 1) {
+                const cpaA = (a.cpa !== null && a.cpa >= 0) ? a.cpa : a.dist;
+                const cpaB = (b.cpa !== null && b.cpa >= 0) ? b.cpa : b.dist;
+                const tcpaA = (a.tcpa !== null && a.tcpa > 0) ? a.tcpa : 999;
+                const tcpaB = (b.tcpa !== null && b.tcpa > 0) ? b.tcpa : 999;
+                return (cpaA + tcpaA * 60) - (cpaB + tcpaB * 60);
+            }
+            return a.dist - b.dist;
         });
 
         lastNearbyVessels = nearbyVessels;
         lastHarborClusters = harborClusters;
 
-        // 9. Individuazione del Top Threat per il Banner della Dashboard
-        const redThreat = nearbyVessels.find(v => v.risk === "RED");
-        const orangeThreat = nearbyVessels.find(v => v.risk === "ORANGE");
+        // 9. Individuazione del Top Threat per il Banner (esclude gli allarmi differibili)
+        const redThreat = nearbyVessels.find(v => v.risk === "RED" && !v.isDeferred);
+        const orangeThreat = nearbyVessels.find(v => v.risk === "ORANGE" && !v.isDeferred);
         topThreat = redThreat || orangeThreat || null;
 
         // 10. Emissione Delta WebSocket verso la Dashboard

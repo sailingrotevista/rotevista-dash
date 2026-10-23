@@ -36,6 +36,7 @@ export const App: React.FC = () => {
     harborClusters,
     topThreat,
     snoozeThreat,
+    unsnoozeThreats,
     selectedAisTargetId,
     setSelectedAisTargetId,
     ownShipPosition,
@@ -500,12 +501,14 @@ export const App: React.FC = () => {
             isNightMode={isNightMode}
             onSwitchToWind={handleSwitchToWind}
             onSnoozeThreat={snoozeThreat}
+            onReopenTopThreat={unsnoozeThreats}
             selectedTargetId={selectedAisTargetId}
             onSelectTarget={setSelectedAisTargetId}
             ownShipName={config?.vesselName}
             propulsionMode={propulsionMode}
             onSetPropulsionMode={setPropulsionMode}
             inspectToken={inspectToken}
+            vectorMinutes={config?.aisAlerter?.vectorMinutes}
           />
         </div>
       )}

@@ -38,6 +38,7 @@
       "redCpa": 500,
       "maxTcpa": 12
     },
+    "vectorMinutes": 5,
     "criticalProximity": 45
   }
 }

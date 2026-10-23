@@ -41,6 +41,10 @@ export interface AppConfig {
   server: {
     fallbackIp: string;
   };
+  aisAlerter?: {
+    vectorMinutes?: number;
+    [key: string]: any;
+  };
   vesselName?: string;
   propulsionMode?: PropulsionMode;
 }
@@ -114,6 +118,8 @@ export interface AisTarget {
   anchorCenter?: { lat: number; lon: number; radius?: number } | null;
   isMoving: boolean;
   risk: 'GREEN' | 'RED' | 'ORANGE' | 'GREY';
+  isDeferred?: boolean;
+  trend?: 'IMPROVING' | 'STABLE' | 'WORSENING';
   riskMsg: string;
   cpa: number | null;
   tcpa: number | null;

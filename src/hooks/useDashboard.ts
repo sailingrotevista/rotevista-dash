@@ -46,6 +46,7 @@ const DEFAULT_CONFIG: AppConfig = {
     depth: { stdMax: 20, step: 10, hercSpan: 10 },
   },
   server: { fallbackIp: 'venus.local:3000' },
+  aisAlerter: { vectorMinutes: 5 },
 };
 
 function safePush(buffer: AngleBufferItem[], val: number, time: number, isTwd = false, historyMinutes = 30) {
@@ -170,8 +171,9 @@ export function useDashboard() {
   }, [appView]);
 
   const snoozeThreat = useCallback((targetId: string) => {
+    const target = latestAisRef.current.targets.find(t => t.id === targetId);
     setTopThreat(currentTop => {
-      const initialRisk = currentTop?.id === targetId ? currentTop.risk : 'ORANGE';
+      const initialRisk = target?.risk || (currentTop?.id === targetId ? currentTop.risk : 'ORANGE');
       setSnoozedThreats(prev => ({
         ...prev,
         [targetId]: { until: Date.now() + 10 * 60 * 1000, initialRisk },
@@ -180,32 +182,69 @@ export function useDashboard() {
     });
   }, []);
 
+  const unsnoozeThreats = useCallback(() => {
+    setSnoozedThreats({});
+  }, []);
+
   const activeThreat = useMemo(() => {
-    if (!topThreat || topThreat.risk === 'GREY') return null;
-    const snoozed = snoozedThreats[topThreat.id];
-    if (snoozed) {
-      const isSnoozed = Date.now() < snoozed.until;
-      const dangerEscalated = snoozed.initialRisk === 'ORANGE' && topThreat.risk === 'RED';
-      if (isSnoozed && !dangerEscalated) {
-        return null;
-      }
+    const candidates: AisTarget[] = [];
+    const seen = new Set<string>();
+    if (topThreat && (topThreat.risk === 'RED' || topThreat.risk === 'ORANGE') && !topThreat.isDeferred) {
+      candidates.push(topThreat);
+      seen.add(topThreat.id);
     }
-    return topThreat;
-  }, [topThreat, snoozedThreats]);
+    aisTargets.forEach(t => {
+      if (!seen.has(t.id) && (t.risk === 'RED' || t.risk === 'ORANGE') && !t.isDeferred) {
+        candidates.push(t);
+        seen.add(t.id);
+      }
+    });
+    const now = Date.now();
+    const valid = candidates.filter(t => {
+      const snoozed = snoozedThreats[t.id];
+      if (!snoozed) return true;
+      const isSnoozed = now < snoozed.until;
+      const dangerEscalated = snoozed.initialRisk === 'ORANGE' && t.risk === 'RED';
+      return !isSnoozed || dangerEscalated;
+    });
+    if (valid.length === 0) return null;
+    valid.sort((a, b) => {
+      if (a.risk !== b.risk) return a.risk === 'RED' ? -1 : 1;
+      const cpaA = a.cpa !== null && a.cpa >= 0 ? a.cpa : a.dist;
+      const cpaB = b.cpa !== null && b.cpa >= 0 ? b.cpa : b.dist;
+      const tcpaA = a.tcpa !== null && a.tcpa > 0 ? a.tcpa : 999;
+      const tcpaB = b.tcpa !== null && b.tcpa > 0 ? b.tcpa : 999;
+      return (cpaA + tcpaA * 60) - (cpaB + tcpaB * 60);
+    });
+    return valid[0];
+  }, [topThreat, aisTargets, snoozedThreats]);
 
   useEffect(() => {
-    if (!topThreat) return;
     setSnoozedThreats(prev => {
-      const entry = prev[topThreat.id];
-      if (!entry) return prev;
-      if (topThreat.risk === 'GREEN' || topThreat.risk === 'GREY') {
-        const next = { ...prev };
-        delete next[topThreat.id];
-        return next;
-      }
-      return prev;
+      const ids = Object.keys(prev);
+      if (ids.length === 0) return prev;
+      let changed = false;
+      const next = { ...prev };
+      const allTargets = latestAisRef.current.targets;
+
+      ids.forEach(id => {
+        const entry = next[id];
+        const t = (topThreat && topThreat.id === id ? topThreat : null) || allTargets.find(item => item.id === id);
+        if (!t || (t.risk !== 'RED' && t.risk !== 'ORANGE')) {
+          delete next[id];
+          changed = true;
+        } else if (entry.initialRisk === 'ORANGE' && t.risk === 'RED') {
+          delete next[id];
+          changed = true;
+        } else if (entry.initialRisk === 'RED' && t.risk === 'ORANGE') {
+          next[id] = { ...entry, initialRisk: 'ORANGE' };
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
     });
-  }, [topThreat]);
+  }, [topThreat, aisTargets]);
 
   // Display values for UI
   const [displayValues, setDisplayValues] = useState({
@@ -399,7 +438,7 @@ export function useDashboard() {
 
   // Process incoming data
   const processIncomingData = useCallback((path: string, val: any, timeMs?: number) => {
-    if (val === null || val === undefined || (typeof val === 'number' && isNaN(val))) return;
+    if ((val === null && path !== 'environment.ais_top_threat') || val === undefined || (typeof val === 'number' && isNaN(val))) return;
 
     if ((path === 'environment.wind.speedApparent' || path === 'environment.wind.speedTrue') && val > 51.44) return;
     if ((path === 'navigation.speedThroughWater' || path === 'navigation.speedOverGround') && val > 25.72) return;
@@ -550,7 +589,10 @@ export function useDashboard() {
           : val.some((t: AisTarget) => t.risk === 'ORANGE')
             ? 'ORANGE'
             : null;
-        if (appViewRef.current === 'ais' || nextRisk !== latestAisRef.current.highestRisk) {
+        if (nextRisk === null) {
+          setTopThreat(prev => (prev !== null ? null : prev));
+        }
+        if (appViewRef.current === 'ais' || nextRisk !== latestAisRef.current.highestRisk || nextRisk !== null) {
           latestAisRef.current.highestRisk = nextRisk;
           setAisTargets(val);
         }
@@ -609,6 +651,7 @@ export function useDashboard() {
             graphs: { ...prev.graphs, ...(data.graphs || {}) },
             averaging: { ...prev.averaging, ...(data.averaging || {}) },
             scales: { ...prev.scales, ...(data.scales || {}) },
+            aisAlerter: { ...prev.aisAlerter, ...(data.aisAlerter || {}) },
           }));
         }
       })
@@ -753,7 +796,11 @@ export function useDashboard() {
     let isDisposed = false;
 
     const startSimulation = () => {
-      if (storeRef.current.hasEverConnectedToSignalK) return;
+      if (storeRef.current.hasEverConnectedToSignalK || storeRef.current.isSimulating) return;
+      if (handshakeTimeout) {
+        clearTimeout(handshakeTimeout);
+        handshakeTimeout = null;
+      }
       storeRef.current.isSimulating = true;
       const store = storeRef.current;
       const now = Date.now();
@@ -773,16 +820,17 @@ export function useDashboard() {
         startTime: Date.now(),
       };
 
-      // Genera scenario casuale COLREG (transizione Verde -> Arancio a 15s)
-      const { target: dynamicTarget } = generateRandomColregScenario(
+      // Genera scenario multi-target COLREG (3 bersagli dinamici simultanei)
+      const { targets: dynamicTargets } = generateRandomColregScenario(
         MARINA_DI_RAGUSA_SIM_DATA.myGps,
         45, // hdg
         45, // cog
         5.2 // sog
       );
+      let evasiveTargetId = dynamicTargets[2]?.id;
 
       const staticTargets = MARINA_DI_RAGUSA_SIM_DATA.targets.filter(t => !t.isMoving);
-      let simTargets = [...staticTargets, dynamicTarget];
+      let simTargets = [...staticTargets, ...dynamicTargets];
 
       let simMyGps = { lat: MARINA_DI_RAGUSA_SIM_DATA.myGps.lat, lon: MARINA_DI_RAGUSA_SIM_DATA.myGps.lon };
 
@@ -837,11 +885,15 @@ export function useDashboard() {
         simMyGps.lon += (myDistStepMeters * Math.sin(myCogRad)) / (111139 * Math.cos(degToRad(simMyGps.lat)));
         processIncomingData('navigation.position', { latitude: simMyGps.lat, longitude: simMyGps.lon });
 
-        // Avanzamento cinematico bersagli AIS in movimento
+        // Avanzamento cinematico bersagli AIS in movimento (con virata evasiva COLREG sul 3° target tra 32s e 47s)
         simTargets = simTargets.map(t => {
           if (!t.isMoving || t.sog < 0.3) return t;
 
-          const cogRad = degToRad(t.cog || 0);
+          const nextCog =
+            t.id === evasiveTargetId && elapsed >= 32 && elapsed <= 47
+              ? ((t.cog || 0) + 3 + 360) % 360
+              : (t.cog || 0);
+          const cogRad = degToRad(nextCog);
           const distStepMeters = (t.sog * 1852) / 3600; // spostamento per 1s
           const dLat = (distStepMeters * Math.cos(cogRad)) / 111139;
           const dLon = (distStepMeters * Math.sin(cogRad)) / (111139 * Math.cos(degToRad(t.lat)));
@@ -858,12 +910,22 @@ export function useDashboard() {
 
           return {
             ...t,
+            cog: Math.round(nextCog),
             lat: newLat,
             lon: newLon,
             age: 0,
             trail: currentTrail,
           };
         });
+
+        // Se tutti i bersagli in movimento hanno superato il CPA da oltre 30s, rigenera un nuovo scenario
+        const hasApproachingDynamic = simTargets.some(t => t.isMoving && (t.tcpa === null || t.tcpa > 0 || elapsed < 60));
+        if (!hasApproachingDynamic) {
+          sim.startTime = Date.now();
+          const nextScenario = generateRandomColregScenario(simMyGps, sim.hdg, simCog, sogKts);
+          evasiveTargetId = nextScenario.targets[2]?.id;
+          simTargets = [...staticTargets, ...nextScenario.targets];
+        }
 
         // Ricalcolo ARPA e valutazioni rischio real-time per tutti i bersagli
         const arpaRes = recalculateArpaForTargets(
@@ -1078,6 +1140,7 @@ export function useDashboard() {
         ws.onerror = () => {
           if (isDisposed) return;
           if (!storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating) {
+            if (handshakeTimeout) clearTimeout(handshakeTimeout);
             handshakeTimeout = setTimeout(() => {
               if (!isDisposed && !storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating && !storeRef.current.isSocketOpen) {
                 startSimulation();
@@ -1086,7 +1149,7 @@ export function useDashboard() {
           }
         };
       } catch (err) {
-        if (!isDisposed && !storeRef.current.hasEverConnectedToSignalK) {
+        if (!isDisposed && !storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating) {
           startSimulation();
         }
       }
@@ -1094,7 +1157,7 @@ export function useDashboard() {
 
     // Timeout handshake iniziale: se entro 4000ms Signal K non è raggiungibile e non abbiamo ricevuto segnale, avvia la simulazione
     handshakeTimeout = setTimeout(() => {
-      if (!isDisposed && !storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSocketOpen) {
+      if (!isDisposed && !storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating && !storeRef.current.isSocketOpen) {
         startSimulation();
       }
     }, 4000);
@@ -1768,6 +1831,7 @@ export function useDashboard() {
     harborClusters,
     topThreat: activeThreat,
     snoozeThreat,
+    unsnoozeThreats,
     selectedAisTargetId,
     setSelectedAisTargetId,
     ownShipPosition,

@@ -12,12 +12,14 @@ interface AisViewProps {
   isNightMode: boolean;
   onSwitchToWind: () => void;
   onSnoozeThreat: (targetId: string) => void;
+  onReopenTopThreat?: () => void;
   selectedTargetId: string | null;
   onSelectTarget: (targetId: string | null) => void;
   ownShipName?: string;
   propulsionMode?: PropulsionMode;
   onSetPropulsionMode?: (mode: PropulsionMode) => void;
   inspectToken?: number;
+  vectorMinutes?: number;
 }
 
 const getVesselTypeIcon = (type: number | string, name?: string): string => {
@@ -79,12 +81,14 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   isNightMode,
   onSwitchToWind,
   onSnoozeThreat,
+  onReopenTopThreat,
   selectedTargetId,
   onSelectTarget,
   ownShipName = 'MY VESSEL',
   propulsionMode = 'SAIL',
   onSetPropulsionMode,
   inspectToken,
+  vectorMinutes = 5,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -104,11 +108,12 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   }, [onSelectTarget]);
 
   const [followMode, setFollowMode] = useState<FollowMode>('own');
+  const [followedTargetId, setFollowedTargetId] = useState<string | null>(null);
   const [mapZoom, setMapZoom] = useState<number>(16);
   const [showListDrawer, setShowListDrawer] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [selectedTarget, setSelectedTarget] = useState<AisTarget | null>(null);
-  const [targetDetailTab, setTargetDetailTab] = useState<'telemetry' | 'info'>('telemetry');
+  const [targetDetailTab, setTargetDetailTab] = useState<'telemetry' | 'info'>('info');
   const [copiedMmsi, setCopiedMmsi] = useState<boolean>(false);
   const [ackedLabels, setAckedLabels] = useState<Record<string, string>>({});
   const [propulsionToast, setPropulsionToast] = useState<{ text: string; mode: PropulsionMode } | null>(null);
@@ -116,16 +121,17 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
   const selectedTargetRef = useRef<AisTarget | null>(null);
   selectedTargetRef.current = selectedTarget;
+  const showListDrawerRef = useRef<boolean>(false);
+  showListDrawerRef.current = showListDrawer;
   const followModeRef = useRef<FollowMode>('own');
   followModeRef.current = followMode;
   const lastIntendedZoomRef = useRef<number | null>(null);
+  const smoothMarkersRef = useRef<Record<string, L.Marker>>({});
 
   // Calcola il centro geografico corretto adattandosi a Desktop (Orizzontale) e Mobile (Verticale)
   const getOffsetCenter = useCallback(
     (latLng: [number, number], zoomOverride?: number): L.LatLng => {
-      if (!mapRef.current) return L.latLng(latLng[0], latLng[1]);
-      const isCardOpen = showListDrawer || Boolean(selectedTarget);
-      if (!isCardOpen) {
+      if (!mapRef.current || !showListDrawer) {
         return L.latLng(latLng[0], latLng[1]);
       }
 
@@ -150,17 +156,46 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       const offsetCenterPoint = targetPoint.add([pixelOffsetX, pixelOffsetY]);
       return mapRef.current.unproject(offsetCenterPoint, zoom);
     },
-    [showListDrawer, Boolean(selectedTarget)]
+    [showListDrawer]
   );
 
-  // Sync selectedTarget with selectedTargetId or targets updates
+  // Sync selectedTarget and ackedLabels with targets risk transitions
   useEffect(() => {
     if (selectedTargetId) {
       const found = targets.find(t => t.id === selectedTargetId);
-      if (found) setSelectedTarget(found);
+      if (found) {
+        setSelectedTarget(found);
+      } else {
+        setSelectedTarget(null);
+        onSelectTargetRef.current(null);
+      }
     } else {
       setSelectedTarget(null);
     }
+
+    setAckedLabels(prev => {
+      const ids = Object.keys(prev);
+      if (ids.length === 0) return prev;
+      let changed = false;
+      const next = { ...prev };
+
+      ids.forEach(id => {
+        const ackedRisk = next[id];
+        const t = targets.find(item => item.id === id);
+        if (!t || (t.risk !== 'RED' && t.risk !== 'ORANGE')) {
+          delete next[id];
+          changed = true;
+        } else if (ackedRisk === 'ORANGE' && t.risk === 'RED') {
+          delete next[id];
+          changed = true;
+        } else if (ackedRisk === 'RED' && t.risk === 'ORANGE') {
+          next[id] = 'ORANGE';
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
   }, [selectedTargetId, targets]);
 
   // Initialize Leaflet Map
@@ -231,14 +266,21 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     });
     map.on('click', () => {
       lastIntendedZoomRef.current = null;
-      if (selectedTargetRef.current && followModeRef.current === 'none') {
+      if (selectedTargetRef.current || showListDrawerRef.current) {
         setSelectedTarget(null);
         onSelectTargetRef.current(null);
         setShowListDrawer(false);
-      } else {
-        setFollowMode('none');
-        followModeRef.current = 'none';
       }
+    });
+    map.on('zoomanim', (e: L.ZoomAnimEvent) => {
+      Object.values(smoothMarkersRef.current).forEach(m => {
+        const el = m.getElement();
+        if (!el || !el.dataset.baseZoom) return;
+        const scale = Math.pow(2, e.zoom - parseFloat(el.dataset.baseZoom));
+        if (el.dataset.vecLen) el.style.setProperty('--vec-len', `${(parseFloat(el.dataset.vecLen) * scale).toFixed(1)}px`);
+        if (el.dataset.cpaLen) el.style.setProperty('--cpa-len', `${(parseFloat(el.dataset.cpaLen) * scale).toFixed(1)}px`);
+        if (el.dataset.ghostDist) el.style.setProperty('--ghost-dist', `${(parseFloat(el.dataset.ghostDist) * scale).toFixed(1)}px`);
+      });
     });
     map.on('zoomend', () => setMapZoom(Math.round(map.getZoom())));
 
@@ -270,6 +312,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
+      smoothMarkersRef.current = {};
     };
   }, []);
 
@@ -318,7 +361,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
   // Center on Target handler (centrato nella porzione di schermo libera con follow attivo)
   const handleCenterOnTarget = useCallback(
-    (target: AisTarget) => {
+    (target: AisTarget, openDrawer?: boolean) => {
       if (!mapRef.current) return;
       if (!cameraSnapshotRef.current) {
         cameraSnapshotRef.current = {
@@ -327,8 +370,13 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
           followMode,
         };
       }
+      setFollowedTargetId(target.id);
       setFollowMode('target');
-      const targetCenter = getOffsetCenter([target.lat, target.lon]);
+      followModeRef.current = 'target';
+      const isDrawerVisible = openDrawer !== undefined ? openDrawer : showListDrawerRef.current;
+      const targetCenter = isDrawerVisible
+        ? getOffsetCenter([target.lat, target.lon])
+        : L.latLng(target.lat, target.lon);
       mapRef.current.panTo(targetCenter, { animate: true });
     },
     [getOffsetCenter, followMode]
@@ -429,6 +477,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       setSelectedTarget(null);
       onSelectTarget(null);
     }
+    setFollowedTargetId(null);
+    setShowListDrawer(false);
 
     const map = mapRef.current;
     const isInHarbor = harborClusters.some(c => c.dist < 500);
@@ -460,6 +510,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
   // Follow Mode: progressivo con soglia di movimento (~20px) per evitare traslazioni ad ogni refresh
   const lastFollowPosRef = useRef<{ lat: number; lon: number; mode: FollowMode; targetId?: string } | null>(null);
+  const followedTarget = useMemo(
+    () => selectedTarget || (followedTargetId ? targets.find(t => t.id === followedTargetId) || null : null),
+    [selectedTarget, followedTargetId, targets]
+  );
 
   useEffect(() => {
     if (!isActive || !mapRef.current || followMode === 'none') {
@@ -469,8 +523,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
     const pos = followMode === 'own'
       ? [ownShipPosition.lat, ownShipPosition.lon] as [number, number]
-      : selectedTarget
-        ? [selectedTarget.lat, selectedTarget.lon] as [number, number]
+      : followedTarget
+        ? [followedTarget.lat, followedTarget.lon] as [number, number]
         : null;
 
     if (!pos) return;
@@ -478,7 +532,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     const map = mapRef.current;
     const targetCenter = getOffsetCenter(pos);
     const modeKey = followMode;
-    const currentTargetId = selectedTarget?.id;
+    const currentTargetId = followedTarget?.id;
 
     const hasModeChanged =
       !lastFollowPosRef.current ||
@@ -501,25 +555,32 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       lastFollowPosRef.current = { lat: pos[0], lon: pos[1], mode: modeKey, targetId: currentTargetId };
       map.panTo(targetCenter, { animate: true, duration: 2.0, easeLinearity: 0.25 });
     }
-  }, [isActive, ownShipPosition.lat, ownShipPosition.lon, selectedTarget?.lat, selectedTarget?.lon, followMode, selectedTarget?.id, getOffsetCenter]);
+  }, [isActive, ownShipPosition.lat, ownShipPosition.lon, followedTarget?.lat, followedTarget?.lon, followMode, followedTarget?.id, getOffsetCenter]);
 
   // Seleziona e inquadra con smart zoom il triangolo di collisione quando cambia inspectToken o selectedTargetId dall'esterno
   const prevInspectTokenRef = useRef<number | undefined>(undefined);
   const prevSelectedTargetIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const isTokenUpdate = inspectToken !== undefined && inspectToken !== prevInspectTokenRef.current;
-    const isTargetChange = selectedTargetId !== null && selectedTargetId !== prevSelectedTargetIdRef.current;
+    const isTokenUpdate =
+      inspectToken !== undefined &&
+      inspectToken > 0 &&
+      inspectToken !== prevInspectTokenRef.current;
+    const isExternalTargetChange =
+      selectedTargetId !== null &&
+      selectedTargetId !== prevSelectedTargetIdRef.current &&
+      selectedTargetRef.current?.id !== selectedTargetId;
 
-    if (isTokenUpdate || isTargetChange) {
+    if (isTokenUpdate || isExternalTargetChange) {
       const found = targets.find(t => t.id === selectedTargetId);
       if (found) {
         setSelectedTarget(found);
+        setTargetDetailTab('info');
         setShowListDrawer(true);
         if (found.risk === 'RED' || found.risk === 'ORANGE' || isTokenUpdate) {
           zoomToCollisionTriangle(found);
         } else {
-          handleCenterOnTarget(found);
+          handleCenterOnTarget(found, true);
         }
       }
     }
@@ -678,59 +739,142 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   useEffect(() => {
     if (!isActive || !mapRef.current || !markersLayerRef.current) return;
     markersLayerRef.current.clearLayers();
+    const activeKeys = new Set<string>();
 
-    // 1. Own Ship Marker
+    const upsertSmoothMarker = (
+      key: string,
+      latLng: [number, number],
+      className: string,
+      html: string,
+      size: [number, number],
+      anchor: [number, number],
+      zIndex: number,
+      opacity = 1.0,
+      interactive = false,
+      onClick?: () => void,
+      cssVars?: { rot?: number; vecLen?: number; cpaLen?: number; ghostDist?: number }
+    ) => {
+      activeKeys.add(key);
+      const map = mapRef.current;
+      let m = smoothMarkersRef.current[key];
+      if (!m && map) {
+        m = L.marker(latLng, {
+          opacity,
+          icon: L.divIcon({ className, html, iconSize: size, iconAnchor: anchor }),
+          zIndexOffset: zIndex,
+          interactive,
+        }).addTo(map);
+        smoothMarkersRef.current[key] = m;
+        const initEl = m.getElement();
+        if (initEl) initEl.dataset.tpl = html;
+      } else if (m) {
+        m.setLatLng(latLng);
+        m.setOpacity(opacity);
+        m.setZIndexOffset(zIndex);
+        const el = m.getElement();
+        if (el && el.dataset.tpl !== html) {
+          el.innerHTML = html;
+          el.dataset.tpl = html;
+        }
+      }
+      const el = m?.getElement();
+      if (el && map) {
+        const currentZoom = map.getZoom();
+        const pt = map.project(latLng, currentZoom).subtract(map.getPixelOrigin());
+        el.style.transform = `translate3d(${pt.x.toFixed(2)}px, ${pt.y.toFixed(2)}px, 0px)`;
+        el.dataset.baseZoom = String(currentZoom);
+        if (cssVars?.rot !== undefined) {
+          const prevRot = el.dataset.rot !== undefined ? parseFloat(el.dataset.rot) : cssVars.rot;
+          const delta = ((cssVars.rot - prevRot + 540) % 360) - 180;
+          const nextRot = prevRot + delta;
+          el.dataset.rot = String(nextRot);
+          el.style.setProperty('--vessel-rot', `${nextRot.toFixed(2)}deg`);
+        }
+        if (cssVars?.vecLen !== undefined) {
+          el.dataset.vecLen = String(cssVars.vecLen);
+          el.style.setProperty('--vec-len', `${cssVars.vecLen.toFixed(1)}px`);
+        }
+        if (cssVars?.cpaLen !== undefined) {
+          el.dataset.cpaLen = String(cssVars.cpaLen);
+          el.style.setProperty('--cpa-len', `${cssVars.cpaLen.toFixed(1)}px`);
+        }
+        if (cssVars?.ghostDist !== undefined) {
+          el.dataset.ghostDist = String(cssVars.ghostDist);
+          el.style.setProperty('--ghost-dist', `${cssVars.ghostDist.toFixed(1)}px`);
+        }
+      }
+      if (m && onClick) {
+        m.off('click');
+        m.on('click', (e: L.LeafletMouseEvent) => {
+          L.DomEvent.stopPropagation(e);
+          onClick();
+        });
+      }
+      return m;
+    };
+
+    // Determina la minaccia primaria in assoluto e il bersaglio attivo per le Ghost Ships
+    const primaryThreatId = (() => {
+      const threats = targets.filter(
+        t => (t.risk === 'RED' || t.risk === 'ORANGE') && !t.isDeferred && t.sog >= 0.5 && t.tcpa !== null && t.tcpa !== undefined && t.tcpa > 0
+      );
+      if (threats.length === 0) return null;
+      threats.sort((a, b) => {
+        if (a.risk !== b.risk) return a.risk === 'RED' ? -1 : 1;
+        const cpaA = a.cpa ?? a.dist;
+        const cpaB = b.cpa ?? b.dist;
+        const tcpaA = a.tcpa ?? 999;
+        const tcpaB = b.tcpa ?? 999;
+        return (cpaA + tcpaA * 60) - (cpaB + tcpaB * 60);
+      });
+      return threats[0].id;
+    })();
+    const activeGhostTargetId = selectedTarget ? selectedTarget.id : primaryThreatId;
+    const activeGhostTarget = activeGhostTargetId ? targets.find(t => t.id === activeGhostTargetId) || null : null;
+
+    // 1. Own Ship Marker, Integrated 6-min Course Vector & Own Ghost Ship
+    const mPerPx =
+      (40075016.686 * Math.abs(Math.cos((ownShipPosition.lat * Math.PI) / 180))) /
+      Math.pow(2, (mapRef.current.getZoom() || mapZoom) + 8);
+    const vecMins = vectorMinutes > 0 ? vectorMinutes : 5;
     const ownHeading = ownShipCourse.hdg || ownShipCourse.cog || 0;
+    const ownVecPx = ownShipCourse.sog >= 0.5 ? ((ownShipCourse.sog * 1852) * (vecMins / 60)) / mPerPx : 0;
+    const ownGhostPx =
+      activeGhostTarget && activeGhostTarget.sog >= 0.5 && activeGhostTarget.tcpa && activeGhostTarget.tcpa > 0 && ownShipCourse.sog >= 0.5
+        ? ((ownShipCourse.sog * 1852) * (activeGhostTarget.tcpa / 60)) / mPerPx
+        : 0;
+    const ownVecHtml = ownVecPx > 0
+      ? `<div class="vessel-course-vector" style="border-left:2px dashed #00c3ff;opacity:0.9;"></div>`
+      : '';
+    const ownGhostHtml = ownGhostPx >= 45 && activeGhostTarget
+      ? `<div class="cpa-ghost-vessel" data-ghost-id="${activeGhostTarget.id}"><svg viewBox="0 0 30 30" width="30" height="30"><path d="M 15,2 L 25,25 L 15,19 L 5,25 Z" fill="#00c3ff" stroke="#0369a1" stroke-width="1.8" stroke-linejoin="round" /></svg></div>`
+      : '';
     const ownIconHtml = `
-      <div class="own-ship-icon-wrapper" style="transform: rotate(${ownHeading}deg);">
-        <svg viewBox="0 0 40 40" width="36" height="36">
-          <circle cx="20" cy="20" r="16" fill="rgba(0, 195, 255, 0.2)" stroke="#00c3ff" stroke-width="1.5" />
-          <path d="M 20,6 L 27,28 L 20,24 L 13,28 Z" fill="#00c3ff" stroke="#ffffff" stroke-width="1.5" />
-          <circle cx="20" cy="20" r="3" fill="#ffffff" />
+      <div class="own-ship-icon-wrapper" style="filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35));">
+        ${ownVecHtml}
+        ${ownGhostHtml}
+        <svg viewBox="0 0 30 30" width="30" height="30">
+          <path d="M 15,2 L 25,25 L 15,19 L 5,25 Z" fill="#00c3ff" stroke="#0369a1" stroke-width="1.8" stroke-linejoin="round" />
         </svg>
       </div>
     `;
 
-    const isOwnDimmed = Boolean(selectedTarget);
-    const ownMarker = L.marker([ownShipPosition.lat, ownShipPosition.lon], {
-      opacity: isOwnDimmed ? 0.35 : 1.0,
-      icon: L.divIcon({
-        className: 'own-ship-marker',
-        html: ownIconHtml,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
-      }),
-      zIndexOffset: 1000,
-    });
-    ownShipMarkerRef.current = ownMarker;
-    markersLayerRef.current.addLayer(ownMarker);
-
-    // Own Ship Heading/Speed Vector (6 min projection)
-    if (ownShipCourse.sog >= 0.5) {
-      const projDist = (ownShipCourse.sog * 1852) * (6 / 60);
-      const projLat = ownShipPosition.lat + (projDist * Math.cos((ownHeading * Math.PI) / 180)) / 111139;
-      const projLon =
-        ownShipPosition.lon +
-        (projDist * Math.sin((ownHeading * Math.PI) / 180)) /
-          (111139 * Math.cos((ownShipPosition.lat * Math.PI) / 180));
-
-      const headingLine = L.polyline(
-        [
-          [ownShipPosition.lat, ownShipPosition.lon],
-          [projLat, projLon],
-        ],
-        {
-          color: '#00c3ff',
-          weight: 2,
-          dashArray: '4, 4',
-          opacity: isOwnDimmed ? 0.25 : 0.9,
-          interactive: false,
-        }
-      );
-      markersLayerRef.current.addLayer(headingLine);
-    }
+    ownShipMarkerRef.current = upsertSmoothMarker(
+      'own',
+      [ownShipPosition.lat, ownShipPosition.lon],
+      'own-ship-marker',
+      ownIconHtml,
+      [30, 30],
+      [15, 15],
+      1000,
+      1.0,
+      false,
+      undefined,
+      { rot: ownHeading, vecLen: ownVecPx, ghostDist: ownGhostPx }
+    ) || null;
 
     // 2. Targets Markers
+
     targets.forEach(t => {
       const isRed = t.risk === 'RED';
       const isOrange = t.risk === 'ORANGE';
@@ -795,83 +939,122 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
       const pulseHtml = isRed ? `<div class="target-radar-pulse"></div>` : '';
       const selectionRing = isSelected ? `<div class="target-selection-ring"></div>` : '';
+      const isDimmed = Boolean(selectedTarget && selectedTarget.id !== t.id);
+
+      let targetVecHtml = '';
+      let targetGhostHtml = '';
+      let targetVecPx = 0;
+      let targetCpaPx = 0;
+      let targetGhostPx = 0;
+      if (isDragging && t.sog >= 0.3) {
+        targetVecPx = ((t.sog * 1852) * (10 / 60)) / mPerPx;
+        targetVecHtml = `<div class="vessel-course-vector" style="border-left:2px dashed #ff2d55;opacity:0.9;"></div>`;
+      } else if (!isAnchored && !isMoored && t.sog >= 0.3) {
+        targetVecPx = ((t.sog * 1852) * (vecMins / 60)) / mPerPx;
+        const vecWidth = isSelected ? 2.2 : 1.5;
+        let cpaExtHtml = '';
+        if (t.id === activeGhostTargetId && t.sog >= 0.5 && t.tcpa !== null && t.tcpa !== undefined && t.tcpa > 0) {
+          targetGhostPx = ((t.sog * 1852) * (t.tcpa / 60)) / mPerPx;
+          if (t.tcpa > vecMins) {
+            targetCpaPx = targetGhostPx;
+            const cpaColor = isRed ? '#ff2d55' : isOrange ? '#ff9500' : color;
+            cpaExtHtml = `<div class="vessel-cpa-vector" style="border-left:${isSelected ? 1.8 : 1.2}px dashed ${cpaColor};opacity:0.6;"></div>`;
+          }
+          if (targetGhostPx >= 45) {
+            targetGhostHtml = `<div class="cpa-ghost-vessel"><svg viewBox="0 0 30 30" width="28" height="28"><path d="M 15,2 L 25,25 L 15,19 L 5,25 Z" fill="${mtFill}" stroke="${mtStroke}" stroke-width="1.8" stroke-linejoin="round" /></svg></div>`;
+          }
+        }
+        targetVecHtml = `${cpaExtHtml}<div class="vessel-course-vector" style="width:${vecWidth}px;background:${color};opacity:0.85;"></div>`;
+      }
 
       const targetDivHtml = `
-        <div class="ais-target-icon-wrap ${isRed ? 'is-danger-threat' : ''} ${isOrange ? 'is-warning-threat' : ''}" style="transform: rotate(${isClusterStationary ? 0 : rotation}deg);">
+        <div class="ais-target-icon-wrap ${isRed ? 'is-danger-threat' : ''} ${isOrange ? 'is-warning-threat' : ''}">
+          ${targetVecHtml}
+          ${targetGhostHtml}
           ${pulseHtml}
           ${selectionRing}
           ${iconSvg}
         </div>
       `;
 
-      const isDimmed = Boolean(selectedTarget && selectedTarget.id !== t.id);
-
-      const targetMarker = L.marker([t.lat, t.lon], {
-        opacity: isDimmed ? 0.35 : 1.0,
-        icon: L.divIcon({
-          className: 'ais-target-marker',
-          html: targetDivHtml,
-          iconSize: [28, 28],
-          iconAnchor: [14, 14],
-        }),
-        zIndexOffset: isSelected ? 1000 : isRed ? 800 : isOrange ? 600 : 200,
-      });
-
-      targetMarker.on('click', () => {
+      const isPrimaryThreat = t.id === primaryThreatId;
+      const isExtendedLabel = isSelected || isPrimaryThreat;
+      const handleTargetInteract = () => {
         setAckedLabels(prev => {
           if (!prev[t.id]) return prev;
           const next = { ...prev };
           delete next[t.id];
           return next;
         });
-        setSelectedTarget(t);
-        onSelectTarget(t.id);
-        setShowListDrawer(true);
-        handleCenterOnTarget(t);
-      });
+        if (!isSelected) {
+          const openMenuImmediately = isPrimaryThreat;
+          setSelectedTarget(t);
+          onSelectTarget(t.id);
+          if (openMenuImmediately) {
+            setTargetDetailTab('info');
+            setShowListDrawer(true);
+          } else {
+            setShowListDrawer(false);
+          }
+          handleCenterOnTarget(t, openMenuImmediately);
+        } else if (!showListDrawerRef.current) {
+          setTargetDetailTab('info');
+          setShowListDrawer(true);
+          handleCenterOnTarget(t, true);
+        } else {
+          setShowListDrawer(false);
+          handleCenterOnTarget(t, false);
+        }
+      };
 
-      markersLayerRef.current?.addLayer(targetMarker);
+      upsertSmoothMarker(
+        `t:${t.id}`,
+        [t.lat, t.lon],
+        'ais-target-marker',
+        targetDivHtml,
+        [28, 28],
+        [14, 14],
+        isSelected ? 1000 : isRed ? 800 : isOrange ? 600 : 200,
+        isDimmed ? 0.35 : 1.0,
+        true,
+        handleTargetInteract,
+        { rot: isClusterStationary ? 0 : rotation, vecLen: targetVecPx, cpaLen: targetCpaPx, ghostDist: targetGhostPx }
+      );
 
-      // Etichetta flottante laterale
+      // Etichetta flottante laterale (sincronizzata via upsertSmoothMarker)
       const ackedRisk = ackedLabels[t.id];
       const isAcked = Boolean(ackedRisk && !(ackedRisk === 'ORANGE' && isRed));
-      const shouldShowFloatingLabel = !isAcked && !(t.inCluster && !t.isMoving && !isSelected) && (isRed || isOrange || isSelected);
+      const shouldShowFloatingLabel = !isAcked && !(t.inCluster && !t.isMoving && !isSelected) && (isRed || isOrange || isExtendedLabel);
 
       if (shouldShowFloatingLabel) {
         const titleColor = isRed ? '#dc2626' : isOrange ? '#ea580c' : '#0f172a';
         const metricColor = isRed ? '#dc2626' : isOrange ? '#ea580c' : '#0284c7';
         const borderColor = isRed ? 'rgba(220,38,38,0.55)' : isOrange ? 'rgba(234,88,12,0.55)' : 'rgba(2,132,199,0.55)';
         const isTargetMoving = t.isMoving !== undefined ? t.isMoving : (!t.isAnchored && !isMoored && t.sog >= 0.3);
+        const placeLeft = isTargetMoving && t.cog >= 20 && t.cog <= 160;
+        const offsetTransform = placeLeft ? 'translate(calc(-100% - 16px), -50%)' : 'translate(16px, -50%)';
         const statusLine = isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : (t.inCluster || isMoored ? 'IN PORT' : "AT ANCHOR");
         const tcpaTxt = t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` in ${Math.round(t.tcpa)} min` : '';
         const cpaOrDistLine = isRed
           ? `🚨 ${t.riskMsg || 'COLLISION!'}${t.cpa !== null && t.cpa !== undefined ? ` • CPA: ${formatDist(t.cpa)}` : ''}${tcpaTxt}`
           : `${isOrange ? '⚠️ ' : ''}${t.cpa !== null && t.cpa !== undefined ? `CPA: ${formatDist(t.cpa)}` : `Dist: ${formatDist(t.dist)}`}${tcpaTxt}`;
+        const compactMetrics = `${t.cpa !== null && t.cpa !== undefined ? `CPA ${formatDist(t.cpa)}` : formatDist(t.dist)}${t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` • ${Math.round(t.tcpa)}m` : ''}`;
+        const labelHtml = isExtendedLabel
+          ? `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to inspect target"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${t.name || 'Unknown'}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${cpaOrDistLine}</span></div></div>`
+          : `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:4px;background:rgba(255,255,255,0.78);border:1.5px solid ${borderColor};border-radius:8px;padding:2px 6px;box-shadow:0 2px 6px rgba(0,0,0,0.14);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to select target"><span style="font-size:12px;line-height:1;">${isRed ? '🚨' : '⚠️'}</span><span style="font-size:11px;font-weight:900;color:${metricColor};letter-spacing:-0.3px;">${compactMetrics}</span></div>`;
 
-        const labelMarker = L.marker([t.lat, t.lon], {
-          opacity: isDimmed ? 0.35 : 1.0,
-          icon: L.divIcon({
-            className: 'ais-threat-floating-label',
-            html: `<div style="display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);backdrop-filter:blur(6px);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to select target"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${t.name || 'Unknown'}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${cpaOrDistLine}</span></div></div>`,
-            iconSize: [320, 56],
-            iconAnchor: [-14, 28],
-          }),
-          zIndexOffset: (isSelected ? 1000 : isRed ? 800 : isOrange ? 600 : 200) + 100,
-          interactive: true,
-        });
-
-        labelMarker.on('click', (ev: L.LeafletMouseEvent) => {
-          if (ev.originalEvent) {
-            L.DomEvent.stopPropagation(ev.originalEvent);
-            L.DomEvent.preventDefault(ev.originalEvent);
-          }
-          setSelectedTarget(t);
-          onSelectTarget(t.id);
-          setShowListDrawer(true);
-          handleCenterOnTarget(t);
-        });
-
-        markersLayerRef.current?.addLayer(labelMarker);
+        upsertSmoothMarker(
+          `lbl:${t.id}`,
+          [t.lat, t.lon],
+          'ais-threat-floating-label',
+          labelHtml,
+          [0, 0],
+          [0, 0],
+          isSelected ? 1100 : (t.id === activeGhostTargetId ? 900 : 50),
+          isExtendedLabel ? (isDimmed ? 0.35 : 1.0) : (isDimmed ? 0.35 : 0.82),
+          true,
+          handleTargetInteract
+        );
       }
 
       // Swing Circle & Anchor rode for anchored vessels (solo se in rada, non in banchina)
@@ -905,52 +1088,6 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         }
       }
 
-      // Target Velocity Vector line (or Dragging Vector line)
-      if (isDragging && t.sog >= 0.3) {
-        const projDist = (t.sog * 1852) * (10 / 60); // Vettore deriva 10 min
-        const projLat = t.lat + (projDist * Math.cos((rotation * Math.PI) / 180)) / 111139;
-        const projLon =
-          t.lon +
-          (projDist * Math.sin((rotation * Math.PI) / 180)) /
-            (111139 * Math.cos((t.lat * Math.PI) / 180));
-
-        const driftLine = L.polyline(
-          [
-            [t.lat, t.lon],
-            [projLat, projLon],
-          ],
-          {
-            color: '#ff2d55',
-            weight: 2,
-            dashArray: '3, 3',
-            opacity: isDimmed ? 0.3 : 0.9,
-            interactive: false,
-          }
-        );
-        markersLayerRef.current?.addLayer(driftLine);
-      } else if (!isAnchored && !isMoored && t.sog >= 0.3) {
-        const projDist = (t.sog * 1852) * (6 / 60);
-        const projLat = t.lat + (projDist * Math.cos((rotation * Math.PI) / 180)) / 111139;
-        const projLon =
-          t.lon +
-          (projDist * Math.sin((rotation * Math.PI) / 180)) /
-            (111139 * Math.cos((t.lat * Math.PI) / 180));
-
-        const velLine = L.polyline(
-          [
-            [t.lat, t.lon],
-            [projLat, projLon],
-          ],
-          {
-            color: color,
-            weight: isSelected ? 2.2 : 1.5,
-            opacity: isDimmed ? 0.25 : 0.85,
-            interactive: false,
-          }
-        );
-        markersLayerRef.current?.addLayer(velLine);
-      }
-
       // Breadcrumb Trail
       if (t.trail && t.trail.length > 1) {
         const trailPts = t.trail.map(pt => [pt.lat, pt.lon] as [number, number]);
@@ -964,7 +1101,14 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         markersLayerRef.current?.addLayer(trailLine);
       }
     });
-  }, [isActive, targets, ownShipPosition, ownShipCourse, selectedTarget, ackedLabels, onSelectTarget, handleCenterOnTarget]);
+
+    Object.keys(smoothMarkersRef.current).forEach(k => {
+      if (!activeKeys.has(k)) {
+        smoothMarkersRef.current[k].remove();
+        delete smoothMarkersRef.current[k];
+      }
+    });
+  }, [isActive, targets, ownShipPosition, ownShipCourse, selectedTarget, ackedLabels, mapZoom, onSelectTarget, handleCenterOnTarget, vectorMinutes]);
 
   // Zoom handlers (ancorati al bersaglio/propria barca se selezionati, altrimenti al centro dello schermo)
   const handleZoomIn = useCallback(() => {
@@ -973,7 +1117,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     const newZoom = Math.min(mapRef.current.getMaxZoom() || 18, currentZoom + 1);
     lastIntendedZoomRef.current = newZoom;
 
-    if (selectedTarget) {
+    if (followMode === 'target' && followedTarget) {
+      const newCenter = getOffsetCenter([followedTarget.lat, followedTarget.lon], newZoom);
+      mapRef.current.setView(newCenter, newZoom, { animate: true });
+    } else if (selectedTarget) {
       const newCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon], newZoom);
       mapRef.current.setView(newCenter, newZoom, { animate: true });
     } else if (followMode === 'own') {
@@ -982,7 +1129,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     } else {
       mapRef.current.zoomIn();
     }
-  }, [selectedTarget, followMode, ownShipPosition, getOffsetCenter]);
+  }, [selectedTarget, followedTarget, followMode, ownShipPosition, getOffsetCenter]);
 
   const handleZoomOut = useCallback(() => {
     if (!mapRef.current) return;
@@ -990,7 +1137,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     const newZoom = Math.max(mapRef.current.getMinZoom() || 3, currentZoom - 1);
     lastIntendedZoomRef.current = newZoom;
 
-    if (selectedTarget) {
+    if (followMode === 'target' && followedTarget) {
+      const newCenter = getOffsetCenter([followedTarget.lat, followedTarget.lon], newZoom);
+      mapRef.current.setView(newCenter, newZoom, { animate: true });
+    } else if (selectedTarget) {
       const newCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon], newZoom);
       mapRef.current.setView(newCenter, newZoom, { animate: true });
     } else if (followMode === 'own') {
@@ -999,7 +1149,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     } else {
       mapRef.current.zoomOut();
     }
-  }, [selectedTarget, followMode, ownShipPosition, getOffsetCenter]);
+  }, [selectedTarget, followedTarget, followMode, ownShipPosition, getOffsetCenter]);
 
   // Target summary stats
   const stats = useMemo(() => {
@@ -1019,13 +1169,18 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     };
   }, [targets]);
 
-  // Sorted targets for register drawer
+  // Sorted targets for register drawer (Gerarchia ARPA: Gravità -> TCPA convergente -> CPA/Distanza)
   const sortedTargets = useMemo(() => {
     const list = [...targets];
     const weight = { RED: 3, ORANGE: 2, GREY: 1 };
     return list.sort((a, b) => {
       const wDiff = (weight[b.risk] || 1) - (weight[a.risk] || 1);
       if (wDiff !== 0) return wDiff;
+      if (a.risk === 'RED' || a.risk === 'ORANGE') {
+        const tcpaA = a.tcpa !== null && a.tcpa !== undefined && a.tcpa > 0 ? a.tcpa : Infinity;
+        const tcpaB = b.tcpa !== null && b.tcpa !== undefined && b.tcpa > 0 ? b.tcpa : Infinity;
+        if (Math.abs(tcpaA - tcpaB) > 0.5) return tcpaA - tcpaB;
+      }
       const da = a.cpa !== null ? a.cpa : a.dist;
       const db = b.cpa !== null ? b.cpa : b.dist;
       return da - db;
@@ -1042,7 +1197,13 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         {/* TOP LEFT GROUP: BETA TAG & STATUS COUNTERS */}
         <div className="ais-top-left-group">
           <div className="ais-beta-tag">Beta</div>
-          <div className="ais-status-counters">
+          <div
+            className="ais-status-counters"
+            onClick={onReopenTopThreat}
+            title="Tocca per ripristinare il banner d'allarme silenziato"
+            role="button"
+            tabIndex={0}
+          >
             <span className="counter-item counter-total">
               <span className="counter-val">{stats.total}</span>
               <span className="counter-lbl">Vessels</span>
@@ -1073,7 +1234,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         <div className="ais-top-actions">
           <button
             type="button"
-            className={`ais-tool-btn ${showListDrawer || selectedTarget ? 'btn-active' : ''}`}
+            className={`ais-tool-btn ${showListDrawer ? 'btn-active' : ''}`}
             onClick={() => {
               if (selectedTarget) {
                 handleReturnToList();
@@ -1133,7 +1294,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       </div>
 
       {/* FLOATING TARGETS DROPDOWN CARD */}
-      {(showListDrawer || selectedTarget) && (
+      {showListDrawer && (
         <div
           ref={cardRef}
           className="ais-dropdown-card"
@@ -1403,7 +1564,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                         }
                         setSelectedTarget(item);
                         onSelectTarget(item.id);
-                        handleCenterOnTarget(item);
+                        setTargetDetailTab('info');
+                        handleCenterOnTarget(item, true);
                       }}
                     >
                       <div className="target-left-group">
