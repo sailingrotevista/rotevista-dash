@@ -11,6 +11,9 @@ public/index.html
 .vite/
 *.tsbuildinfo
 
+# Artefatti AI Studio
+.aistudio/
+
 # File di sistema macOS e log
 .DS_Store
 *.log

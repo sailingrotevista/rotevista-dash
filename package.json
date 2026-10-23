@@ -27,6 +27,8 @@
   "files": [
     "index.js",
     "collisionPipeline.js",
+    "harborDetector.js",
+    "windEngine.js",
     "public",
     "icons",
     "apple-touch-icon.png",
