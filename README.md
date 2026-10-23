@@ -15,8 +15,8 @@ A tactical marine dashboard and real-time ARPA AIS monitoring system for sailboa
 - **Historical Weather Radar:** 8-ring historical true wind direction (TWD) and true wind speed (TWS) radar with Open-Meteo future forecast interpolation and live boat heading alignment.
 
 ### 📡 Tactical AIS & ARPA Collision Prevention
-- **Interactive Marine Chart:** Integrated Leaflet map with custom vessel vector icons, heading vectors, and dynamic distance range rings.
-- **Kinematic ARPA Engine:** Continuous CPA (Closest Point of Approach) and TCPA (Time to CPA) calculations with color-coded risk levels (Red Collision Warning, Orange Crossing Threat).
+- **Interactive Marine Chart:** Integrated Leaflet map with custom vessel vector icons, heading vectors, proportional historical breadcrumb wakes (1/3 standard, full vector length on selected target), and dynamic distance range rings.
+- **Kinematic ARPA Engine:** Continuous CPA (Closest Point of Approach) and TCPA (Time to CPA) calculations with color-coded risk levels (Red Collision Warning, Orange Crossing Threat) across map targets, list items, and detail cards.
 - **COLREGs-72 Decision Logic:** Dynamic evaluation of maritime rules of the road (give-way / stand-on status adapted to Sail vs Motor propulsion modes).
 - **Anchor Drag & Port Monitoring:** Automatic anchor drag alarms and harbor vessel clustering for uncluttered harbor views.
 - **Top Tactical Alarm Banner:** High-priority ARPA banner with 1-click target inspection and snooze controls.
