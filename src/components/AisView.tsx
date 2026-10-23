@@ -70,7 +70,7 @@ const formatAge = (seconds: number): string => {
   return `${hours}H AGO`;
 };
 
-type FollowMode = 'own' | 'target' | 'none';
+type FollowMode = 'own' | 'target' | 'intersection' | 'none';
 
 export const AisView: React.FC<AisViewProps> = React.memo(({
   isActive = true,
@@ -101,7 +101,12 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   const cardRef = useRef<HTMLDivElement | null>(null);
   const listBodyRef = useRef<HTMLDivElement | null>(null);
   const listScrollTopRef = useRef<number>(0);
-  const cameraSnapshotRef = useRef<{ center: L.LatLng; zoom: number; followMode: FollowMode } | null>(null);
+  const cameraSnapshotRef = useRef<{
+    center: L.LatLng;
+    zoom: number;
+    followMode: FollowMode;
+    followedTargetId: string | null;
+  } | null>(null);
   const onSelectTargetRef = useRef(onSelectTarget);
   useEffect(() => {
     onSelectTargetRef.current = onSelectTarget;
@@ -109,6 +114,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
   const [followMode, setFollowMode] = useState<FollowMode>('own');
   const [followedTargetId, setFollowedTargetId] = useState<string | null>(null);
+  const followedTargetIdRef = useRef<string | null>(null);
+  followedTargetIdRef.current = followedTargetId;
   const [mapZoom, setMapZoom] = useState<number>(16);
   const [showListDrawer, setShowListDrawer] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
@@ -126,6 +133,11 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   const followModeRef = useRef<FollowMode>('own');
   followModeRef.current = followMode;
   const lastIntendedZoomRef = useRef<number | null>(null);
+  const userFollowZoomRef = useRef<number>(16);
+  const ownShipPositionRef = useRef(ownShipPosition);
+  ownShipPositionRef.current = ownShipPosition;
+  const targetsRef = useRef<AisTarget[]>(targets);
+  targetsRef.current = targets;
   const smoothMarkersRef = useRef<Record<string, L.Marker>>({});
 
   // Calcola il centro geografico corretto adattandosi a Desktop (Orizzontale) e Mobile (Verticale)
@@ -170,6 +182,23 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         onSelectTargetRef.current(null);
       }
     } else {
+      if (selectedTargetRef.current && cameraSnapshotRef.current && mapRef.current) {
+        const snap = cameraSnapshotRef.current;
+        cameraSnapshotRef.current = null;
+        setFollowMode(snap.followMode);
+        followModeRef.current = snap.followMode;
+        setFollowedTargetId(snap.followedTargetId);
+        followedTargetIdRef.current = snap.followedTargetId;
+        setShowListDrawer(false);
+        let restoreCenter = snap.center;
+        if (snap.followMode === 'own') {
+          restoreCenter = L.latLng(ownShipPositionRef.current.lat, ownShipPositionRef.current.lon);
+        } else if (snap.followMode === 'target' && snap.followedTargetId) {
+          const ft = targetsRef.current.find(t => t.id === snap.followedTargetId);
+          if (ft) restoreCenter = L.latLng(ft.lat, ft.lon);
+        }
+        mapRef.current.setView(restoreCenter, snap.zoom, { animate: true });
+      }
       setSelectedTarget(null);
     }
 
@@ -270,6 +299,22 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         setSelectedTarget(null);
         onSelectTargetRef.current(null);
         setShowListDrawer(false);
+        if (cameraSnapshotRef.current && mapRef.current) {
+          const snap = cameraSnapshotRef.current;
+          cameraSnapshotRef.current = null;
+          setFollowMode(snap.followMode);
+          followModeRef.current = snap.followMode;
+          setFollowedTargetId(snap.followedTargetId);
+          followedTargetIdRef.current = snap.followedTargetId;
+          let restoreCenter = snap.center;
+          if (snap.followMode === 'own') {
+            restoreCenter = L.latLng(ownShipPositionRef.current.lat, ownShipPositionRef.current.lon);
+          } else if (snap.followMode === 'target' && snap.followedTargetId) {
+            const ft = targetsRef.current.find(t => t.id === snap.followedTargetId);
+            if (ft) restoreCenter = L.latLng(ft.lat, ft.lon);
+          }
+          mapRef.current.setView(restoreCenter, snap.zoom, { animate: true });
+        }
       }
     });
     map.on('zoomanim', (e: L.ZoomAnimEvent) => {
@@ -359,18 +404,49 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 
-  // Center on Target handler (centrato nella porzione di schermo libera con follow attivo)
+  const restoreCameraSnapshot = useCallback((drawerVisible = false) => {
+    if (cameraSnapshotRef.current && mapRef.current) {
+      const snap = cameraSnapshotRef.current;
+      cameraSnapshotRef.current = null;
+      setFollowMode(snap.followMode);
+      followModeRef.current = snap.followMode;
+      setFollowedTargetId(snap.followedTargetId);
+      followedTargetIdRef.current = snap.followedTargetId;
+      let restoreCenter = snap.center;
+      if (snap.followMode === 'own') {
+        const pos: [number, number] = [ownShipPositionRef.current.lat, ownShipPositionRef.current.lon];
+        restoreCenter = drawerVisible ? getOffsetCenter(pos, snap.zoom) : L.latLng(pos[0], pos[1]);
+      } else if (snap.followMode === 'target' && snap.followedTargetId) {
+        const ft = targetsRef.current.find(t => t.id === snap.followedTargetId);
+        if (ft) {
+          restoreCenter = drawerVisible ? getOffsetCenter([ft.lat, ft.lon], snap.zoom) : L.latLng(ft.lat, ft.lon);
+        }
+      }
+      mapRef.current.setView(restoreCenter, snap.zoom, { animate: true });
+      return true;
+    }
+    return false;
+  }, [getOffsetCenter]);
+
+  // Center on Target handler (distingue tra follow persistente da mappa e browsing temporaneo da lista)
   const handleCenterOnTarget = useCallback(
-    (target: AisTarget, openDrawer?: boolean) => {
+    (target: AisTarget, openDrawer?: boolean, isTemporaryBrowsing = false) => {
       if (!mapRef.current) return;
-      if (!cameraSnapshotRef.current) {
-        cameraSnapshotRef.current = {
-          center: mapRef.current.getCenter(),
-          zoom: mapRef.current.getZoom(),
-          followMode,
-        };
+      if (isTemporaryBrowsing) {
+        if (!cameraSnapshotRef.current) {
+          cameraSnapshotRef.current = {
+            center: mapRef.current.getCenter(),
+            zoom: mapRef.current.getZoom(),
+            followMode: followModeRef.current,
+            followedTargetId: followedTargetIdRef.current,
+          };
+        }
+      } else {
+        cameraSnapshotRef.current = null;
+        userFollowZoomRef.current = Math.round(mapRef.current.getZoom());
       }
       setFollowedTargetId(target.id);
+      followedTargetIdRef.current = target.id;
       setFollowMode('target');
       followModeRef.current = 'target';
       const isDrawerVisible = openDrawer !== undefined ? openDrawer : showListDrawerRef.current;
@@ -379,13 +455,30 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         : L.latLng(target.lat, target.lon);
       mapRef.current.panTo(targetCenter, { animate: true });
     },
-    [getOffsetCenter, followMode]
+    [getOffsetCenter]
   );
 
-  // Smart zoom per inquadrare il triangolo di collisione nello spazio visibile disponibile
+  // Smart zoom per inquadrare e seguire il triangolo di collisione nello spazio visibile disponibile
   const zoomToCollisionTriangle = useCallback(
-    (target: AisTarget) => {
+    (target: AisTarget, isTemporaryInspect = false) => {
       if (!mapRef.current) return;
+
+      if (followModeRef.current !== 'intersection') {
+        userFollowZoomRef.current = Math.round(mapRef.current.getZoom());
+      }
+
+      if (isTemporaryInspect) {
+        if (!cameraSnapshotRef.current) {
+          cameraSnapshotRef.current = {
+            center: mapRef.current.getCenter(),
+            zoom: mapRef.current.getZoom(),
+            followMode: followModeRef.current,
+            followedTargetId: followedTargetIdRef.current,
+          };
+        }
+      } else {
+        cameraSnapshotRef.current = null;
+      }
 
       const deg2rad = Math.PI / 180;
       const ownLat = ownShipPosition.lat;
@@ -430,7 +523,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         paddingBottomRight = [390, 60];
       }
 
-      setFollowMode('none');
+      setFollowedTargetId(target.id);
+      followedTargetIdRef.current = target.id;
+      setFollowMode('intersection');
+      followModeRef.current = 'intersection';
       mapRef.current.fitBounds(bounds, {
         paddingTopLeft,
         paddingBottomRight,
@@ -447,14 +543,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     setSelectedTarget(null);
     onSelectTarget(null);
     setShowListDrawer(true);
-    if (cameraSnapshotRef.current && mapRef.current) {
-      const snap = cameraSnapshotRef.current;
-      cameraSnapshotRef.current = null;
-      setFollowMode(snap.followMode);
-      mapRef.current.setView(snap.center, snap.zoom, { animate: true });
-    } else {
-      setFollowMode('own');
-    }
+    restoreCameraSnapshot(true);
     requestAnimationFrame(() => {
       if (prevTargetId) {
         const targetEl = document.getElementById(`target-item-${prevTargetId}`);
@@ -467,17 +556,19 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         listBodyRef.current.scrollTop = listScrollTopRef.current;
       }
     });
-  }, [selectedTarget, onSelectTarget]);
+  }, [selectedTarget, onSelectTarget, restoreCameraSnapshot]);
 
   // Center on Own Ship & Contextual Standard Zoom
   const handleCenterOnOwnShip = useCallback(() => {
     if (!mapRef.current) return;
 
+    cameraSnapshotRef.current = null;
     if (selectedTarget) {
       setSelectedTarget(null);
       onSelectTarget(null);
     }
     setFollowedTargetId(null);
+    followedTargetIdRef.current = null;
     setShowListDrawer(false);
 
     const map = mapRef.current;
@@ -490,6 +581,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       // 1° Click: ripristina followMode = 'own' e centra arrotondando lo zoom a intero
       const nextZoom = Math.round(map.getZoom());
       lastIntendedZoomRef.current = nextZoom;
+      userFollowZoomRef.current = nextZoom;
       setFollowMode('own');
       followModeRef.current = 'own';
       lastFollowPosRef.current = { lat: ownShipPosition.lat, lon: ownShipPosition.lon, mode: 'own' };
@@ -500,6 +592,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       const effectiveZoom = lastIntendedZoomRef.current ?? Math.round(map.getZoom());
       const targetZoom = effectiveZoom === standardZoom ? alternateZoom : standardZoom;
       lastIntendedZoomRef.current = targetZoom;
+      userFollowZoomRef.current = targetZoom;
       setFollowMode('own');
       followModeRef.current = 'own';
       lastFollowPosRef.current = { lat: ownShipPosition.lat, lon: ownShipPosition.lon, mode: 'own' };
@@ -511,13 +604,51 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   // Follow Mode: progressivo con soglia di movimento (~20px) per evitare traslazioni ad ogni refresh
   const lastFollowPosRef = useRef<{ lat: number; lon: number; mode: FollowMode; targetId?: string } | null>(null);
   const followedTarget = useMemo(
-    () => selectedTarget || (followedTargetId ? targets.find(t => t.id === followedTargetId) || null : null),
-    [selectedTarget, followedTargetId, targets]
+    () => (followedTargetId ? targets.find(t => t.id === followedTargetId) || null : selectedTarget),
+    [followedTargetId, targets, selectedTarget]
   );
 
   useEffect(() => {
     if (!isActive || !mapRef.current || followMode === 'none') {
       if (followMode === 'none') lastFollowPosRef.current = null;
+      return;
+    }
+
+    const map = mapRef.current;
+
+    if (followMode === 'intersection') {
+      const isThreatActive =
+        followedTarget &&
+        (followedTarget.risk === 'RED' || followedTarget.risk === 'ORANGE') &&
+        (followedTarget.tcpa === null || followedTarget.tcpa === undefined || followedTarget.tcpa > 0);
+
+      if (!isThreatActive) {
+        cameraSnapshotRef.current = null;
+        setFollowedTargetId(null);
+        followedTargetIdRef.current = null;
+        setFollowMode('own');
+        followModeRef.current = 'own';
+        const targetZoom = userFollowZoomRef.current ?? Math.round(map.getZoom());
+        const ownCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], targetZoom);
+        lastFollowPosRef.current = { lat: ownShipPosition.lat, lon: ownShipPosition.lon, mode: 'own' };
+        map.setView(ownCenter, targetZoom, { animate: true });
+        return;
+      }
+
+      const midPos: [number, number] = [
+        (ownShipPosition.lat + followedTarget.lat) / 2,
+        (ownShipPosition.lon + followedTarget.lon) / 2,
+      ];
+      if (!lastFollowPosRef.current || lastFollowPosRef.current.mode !== 'intersection' || lastFollowPosRef.current.targetId !== followedTarget.id) {
+        lastFollowPosRef.current = { lat: midPos[0], lon: midPos[1], mode: 'intersection', targetId: followedTarget.id };
+        return;
+      }
+      const lastPt = map.latLngToContainerPoint([lastFollowPosRef.current.lat, lastFollowPosRef.current.lon]);
+      const currentPt = map.latLngToContainerPoint(midPos);
+      if (Math.hypot(currentPt.x - lastPt.x, currentPt.y - lastPt.y) > 100) {
+        lastFollowPosRef.current = { lat: midPos[0], lon: midPos[1], mode: 'intersection', targetId: followedTarget.id };
+        map.panTo(getOffsetCenter(midPos), { animate: true, duration: 2.0, easeLinearity: 0.25 });
+      }
       return;
     }
 
@@ -529,7 +660,6 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
     if (!pos) return;
 
-    const map = mapRef.current;
     const targetCenter = getOffsetCenter(pos);
     const modeKey = followMode;
     const currentTargetId = followedTarget?.id;
@@ -555,7 +685,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       lastFollowPosRef.current = { lat: pos[0], lon: pos[1], mode: modeKey, targetId: currentTargetId };
       map.panTo(targetCenter, { animate: true, duration: 2.0, easeLinearity: 0.25 });
     }
-  }, [isActive, ownShipPosition.lat, ownShipPosition.lon, followedTarget?.lat, followedTarget?.lon, followMode, followedTarget?.id, getOffsetCenter]);
+  }, [isActive, ownShipPosition.lat, ownShipPosition.lon, followedTarget?.lat, followedTarget?.lon, followedTarget?.risk, followedTarget?.tcpa, followMode, followedTarget?.id, getOffsetCenter]);
 
   // Seleziona e inquadra con smart zoom il triangolo di collisione quando cambia inspectToken o selectedTargetId dall'esterno
   const prevInspectTokenRef = useRef<number | undefined>(undefined);
@@ -578,9 +708,9 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         setTargetDetailTab('info');
         setShowListDrawer(true);
         if (found.risk === 'RED' || found.risk === 'ORANGE' || isTokenUpdate) {
-          zoomToCollisionTriangle(found);
+          zoomToCollisionTriangle(found, true);
         } else {
-          handleCenterOnTarget(found, true);
+          handleCenterOnTarget(found, true, true);
         }
       }
     }
@@ -868,8 +998,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       [15, 15],
       1000,
       1.0,
-      false,
-      undefined,
+      true,
+      handleCenterOnOwnShip,
       { rot: ownHeading, vecLen: ownVecPx, ghostDist: ownGhostPx }
     ) || null;
 
@@ -986,6 +1116,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
           delete next[t.id];
           return next;
         });
+        const isThreat = isRed || isOrange;
         if (!isSelected) {
           const openMenuImmediately = isPrimaryThreat;
           setSelectedTarget(t);
@@ -996,14 +1127,26 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
           } else {
             setShowListDrawer(false);
           }
-          handleCenterOnTarget(t, openMenuImmediately);
+          if (isThreat) {
+            zoomToCollisionTriangle(t, false);
+          } else {
+            handleCenterOnTarget(t, openMenuImmediately, false);
+          }
         } else if (!showListDrawerRef.current) {
           setTargetDetailTab('info');
           setShowListDrawer(true);
-          handleCenterOnTarget(t, true);
+          if (isThreat) {
+            zoomToCollisionTriangle(t, false);
+          } else {
+            handleCenterOnTarget(t, true, false);
+          }
         } else {
           setShowListDrawer(false);
-          handleCenterOnTarget(t, false);
+          if (isThreat) {
+            zoomToCollisionTriangle(t, false);
+          } else {
+            handleCenterOnTarget(t, false, false);
+          }
         }
       };
 
@@ -1116,6 +1259,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     const currentZoom = mapRef.current.getZoom();
     const newZoom = Math.min(mapRef.current.getMaxZoom() || 18, currentZoom + 1);
     lastIntendedZoomRef.current = newZoom;
+    if (followMode !== 'intersection') userFollowZoomRef.current = newZoom;
 
     if (followMode === 'target' && followedTarget) {
       const newCenter = getOffsetCenter([followedTarget.lat, followedTarget.lon], newZoom);
@@ -1136,6 +1280,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     const currentZoom = mapRef.current.getZoom();
     const newZoom = Math.max(mapRef.current.getMinZoom() || 3, currentZoom - 1);
     lastIntendedZoomRef.current = newZoom;
+    if (followMode !== 'intersection') userFollowZoomRef.current = newZoom;
 
     if (followMode === 'target' && followedTarget) {
       const newCenter = getOffsetCenter([followedTarget.lat, followedTarget.lon], newZoom);
@@ -1297,13 +1442,27 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       {showListDrawer && (
         <div
           ref={cardRef}
-          className="ais-dropdown-card"
+          className={`ais-dropdown-card ${
+            selectedTarget?.risk === 'RED'
+              ? 'risk-red'
+              : selectedTarget?.risk === 'ORANGE'
+                ? 'risk-orange'
+                : ''
+          }`}
           onWheelCapture={e => e.stopPropagation()}
           onTouchMoveCapture={e => e.stopPropagation()}
         >
           {selectedTarget && (
             /* TARGET DETAIL VIEW */
-            <div className="ais-card-detail">
+            <div
+              className={`ais-card-detail ${
+                selectedTarget.risk === 'RED'
+                  ? 'risk-red'
+                  : selectedTarget.risk === 'ORANGE'
+                    ? 'risk-orange'
+                    : ''
+              }`}
+            >
               <div className="ais-detail-header">
                 <button
                   type="button"
@@ -1353,7 +1512,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                     setSelectedTarget(null);
                     setShowListDrawer(false);
                     onSelectTarget(null);
-                    setFollowMode('own');
+                    restoreCameraSnapshot();
                   }}
                   title="Close"
                 >
@@ -1447,7 +1606,11 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                   )}
 
                   {selectedTarget.crossDir && (
-                    <div className="ais-detail-alert-box orange">
+                    <div
+                      className={`ais-detail-alert-box ${
+                        selectedTarget.risk === 'RED' ? 'red' : 'orange'
+                      }`}
+                    >
                       <span className="alert-title">COLREGs-72:</span>
                       <span className="alert-desc">{selectedTarget.crossDir}</span>
                     </div>
@@ -1565,7 +1728,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                         setSelectedTarget(item);
                         onSelectTarget(item.id);
                         setTargetDetailTab('info');
-                        handleCenterOnTarget(item, true);
+                        handleCenterOnTarget(item, true, true);
                       }}
                     >
                       <div className="target-left-group">

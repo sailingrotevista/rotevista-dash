@@ -190,13 +190,23 @@ export const App: React.FC = () => {
     .filter(Boolean)
     .join(' ');
 
+  const handleSnoozeThreat = useCallback(
+    (targetId: string) => {
+      snoozeThreat(targetId);
+      if (selectedAisTargetId === targetId) {
+        setSelectedAisTargetId(null);
+      }
+    },
+    [snoozeThreat, selectedAisTargetId, setSelectedAisTargetId]
+  );
+
   return (
     <div className={`app-root-wrapper ${isNightMode ? 'night-theme' : ''}`}>
       {/* Banner Allarme Tattico ARPA (Visibile sia in Vento che in AIS) */}
       <AisTacticalBanner
         threat={topThreat}
         onInspect={handleInspectThreat}
-        onSnooze={snoozeThreat}
+        onSnooze={handleSnoozeThreat}
         isNightMode={isNightMode}
       />
 

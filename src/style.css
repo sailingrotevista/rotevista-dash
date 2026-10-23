@@ -1985,6 +1985,73 @@ body.night-mode .ais-tool-btn.btn-active,
     background: #e0f2fe;
 }
 
+/* Detail Card Risk Tone: RED & ORANGE (Day Mode) */
+.ais-dropdown-card.risk-red {
+    border-color: #f43f5e;
+}
+.ais-card-detail.risk-red .ais-detail-header,
+.ais-card-detail.risk-red .ais-detail-sub {
+    background: #fff1f2;
+    border-bottom-color: #fecdd3;
+}
+.ais-card-detail.risk-red .detail-vessel-name {
+    color: #9f1239;
+}
+.ais-card-detail.risk-red .btn-back-lista,
+.ais-card-detail.risk-red .ais-cell-val.cyan {
+    color: #e11d48;
+}
+.ais-card-detail.risk-red .btn-back-lista:hover,
+.ais-card-detail.risk-red .btn-detail-tab-toggle:hover,
+.ais-card-detail.risk-red .btn-vesselfinder:hover {
+    background: #ffe4e6;
+}
+.ais-card-detail.risk-red .btn-detail-tab-toggle,
+.ais-card-detail.risk-red .mmsi-pill,
+.ais-card-detail.risk-red .ais-sight-box,
+.ais-card-detail.risk-red .btn-vesselfinder {
+    background: #fff1f2;
+    border-color: #fda4af;
+    color: #e11d48;
+}
+.ais-card-detail.risk-red .ais-detail-cell {
+    background: #fff1f2;
+    border-color: #fecdd3;
+}
+
+.ais-dropdown-card.risk-orange {
+    border-color: #f59e0b;
+}
+.ais-card-detail.risk-orange .ais-detail-header,
+.ais-card-detail.risk-orange .ais-detail-sub {
+    background: #fffbeb;
+    border-bottom-color: #fde68a;
+}
+.ais-card-detail.risk-orange .detail-vessel-name {
+    color: #92400e;
+}
+.ais-card-detail.risk-orange .btn-back-lista,
+.ais-card-detail.risk-orange .ais-cell-val.cyan {
+    color: #d97706;
+}
+.ais-card-detail.risk-orange .btn-back-lista:hover,
+.ais-card-detail.risk-orange .btn-detail-tab-toggle:hover,
+.ais-card-detail.risk-orange .btn-vesselfinder:hover {
+    background: #fef3c7;
+}
+.ais-card-detail.risk-orange .btn-detail-tab-toggle,
+.ais-card-detail.risk-orange .mmsi-pill,
+.ais-card-detail.risk-orange .ais-sight-box,
+.ais-card-detail.risk-orange .btn-vesselfinder {
+    background: #fffbeb;
+    border-color: #fcd34d;
+    color: #d97706;
+}
+.ais-card-detail.risk-orange .ais-detail-cell {
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
 /* ==========================================================================
    MODALITÀ NOTTE (TACTICAL RED) - CARTA BERSAGLI E DETTAGLIO TARGET
    ========================================================================== */
