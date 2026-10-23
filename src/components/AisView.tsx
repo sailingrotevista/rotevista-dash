@@ -139,6 +139,30 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   const targetsRef = useRef<AisTarget[]>(targets);
   targetsRef.current = targets;
   const smoothMarkersRef = useRef<Record<string, L.Marker>>({});
+  const isZoomingRef = useRef<boolean>(false);
+  const interactingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [zoomSyncTick, setZoomSyncTick] = useState<number>(0);
+
+  const releaseMapTransitions = useCallback((delayMs = 90) => {
+    if (interactingTimerRef.current) {
+      clearTimeout(interactingTimerRef.current);
+    }
+    interactingTimerRef.current = setTimeout(() => {
+      interactingTimerRef.current = null;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!isZoomingRef.current && !(mapRef.current as any)?._animatingZoom) {
+            mapContainerRef.current?.classList.remove('map-interacting');
+          }
+        });
+      });
+    }, delayMs);
+  }, []);
+
+  const suspendMapTransitions = useCallback((fallbackReleaseMs = 220) => {
+    mapContainerRef.current?.classList.add('map-interacting');
+    releaseMapTransitions(fallbackReleaseMs);
+  }, [releaseMapTransitions]);
 
   // Calcola il centro geografico corretto adattandosi a Desktop (Orizzontale) e Mobile (Verticale)
   const getOffsetCenter = useCallback(
@@ -183,6 +207,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       }
     } else {
       if (selectedTargetRef.current && cameraSnapshotRef.current && mapRef.current) {
+        suspendMapTransitions();
         const snap = cameraSnapshotRef.current;
         cameraSnapshotRef.current = null;
         setFollowMode(snap.followMode);
@@ -192,12 +217,20 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         setShowListDrawer(false);
         let restoreCenter = snap.center;
         if (snap.followMode === 'own') {
-          restoreCenter = L.latLng(ownShipPositionRef.current.lat, ownShipPositionRef.current.lon);
+          const pos = ownShipPositionRef.current;
+          restoreCenter = L.latLng(pos.lat, pos.lon);
+          lastFollowPosRef.current = { lat: pos.lat, lon: pos.lon, mode: 'own' };
         } else if (snap.followMode === 'target' && snap.followedTargetId) {
           const ft = targetsRef.current.find(t => t.id === snap.followedTargetId);
-          if (ft) restoreCenter = L.latLng(ft.lat, ft.lon);
+          if (ft) {
+            restoreCenter = L.latLng(ft.lat, ft.lon);
+            lastFollowPosRef.current = { lat: ft.lat, lon: ft.lon, mode: 'target', targetId: ft.id };
+          }
+        } else {
+          lastFollowPosRef.current = null;
         }
         mapRef.current.setView(restoreCenter, snap.zoom, { animate: true });
+        releaseMapTransitions();
       }
       setSelectedTarget(null);
     }
@@ -283,12 +316,24 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     const markersGroup = L.layerGroup().addTo(map);
     markersLayerRef.current = markersGroup;
 
+    map.on('movestart dragstart viewreset', () => {
+      suspendMapTransitions();
+    });
+    map.on('zoomstart', () => {
+      isZoomingRef.current = true;
+      suspendMapTransitions();
+    });
+    map.on('moveend dragend', () => {
+      releaseMapTransitions();
+    });
+
     map.on('dragstart', () => {
       lastIntendedZoomRef.current = null;
       setFollowMode('none');
       followModeRef.current = 'none';
     });
     map.on('wheel', () => {
+      suspendMapTransitions();
       lastIntendedZoomRef.current = null;
       setFollowMode('none');
       followModeRef.current = 'none';
@@ -296,6 +341,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     map.on('click', () => {
       lastIntendedZoomRef.current = null;
       if (selectedTargetRef.current || showListDrawerRef.current) {
+        suspendMapTransitions();
         setSelectedTarget(null);
         onSelectTargetRef.current(null);
         setShowListDrawer(false);
@@ -308,30 +354,61 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
           followedTargetIdRef.current = snap.followedTargetId;
           let restoreCenter = snap.center;
           if (snap.followMode === 'own') {
-            restoreCenter = L.latLng(ownShipPositionRef.current.lat, ownShipPositionRef.current.lon);
+            const pos = ownShipPositionRef.current;
+            restoreCenter = L.latLng(pos.lat, pos.lon);
+            lastFollowPosRef.current = { lat: pos.lat, lon: pos.lon, mode: 'own' };
           } else if (snap.followMode === 'target' && snap.followedTargetId) {
             const ft = targetsRef.current.find(t => t.id === snap.followedTargetId);
-            if (ft) restoreCenter = L.latLng(ft.lat, ft.lon);
+            if (ft) {
+              restoreCenter = L.latLng(ft.lat, ft.lon);
+              lastFollowPosRef.current = { lat: ft.lat, lon: ft.lon, mode: 'target', targetId: ft.id };
+            }
+          } else {
+            lastFollowPosRef.current = null;
           }
           mapRef.current.setView(restoreCenter, snap.zoom, { animate: true });
         }
+        releaseMapTransitions();
       }
     });
-    map.on('zoomanim', (e: L.ZoomAnimEvent) => {
+    const scaleMarkerSubElements = (targetZoom: number) => {
       Object.values(smoothMarkersRef.current).forEach(m => {
         const el = m.getElement();
         if (!el || !el.dataset.baseZoom) return;
-        const scale = Math.pow(2, e.zoom - parseFloat(el.dataset.baseZoom));
+        const scale = Math.pow(2, targetZoom - parseFloat(el.dataset.baseZoom));
         if (el.dataset.vecLen) el.style.setProperty('--vec-len', `${(parseFloat(el.dataset.vecLen) * scale).toFixed(1)}px`);
         if (el.dataset.cpaLen) el.style.setProperty('--cpa-len', `${(parseFloat(el.dataset.cpaLen) * scale).toFixed(1)}px`);
         if (el.dataset.ghostDist) el.style.setProperty('--ghost-dist', `${(parseFloat(el.dataset.ghostDist) * scale).toFixed(1)}px`);
+        if (el.dataset.isRings) el.style.setProperty('--ring-scale', scale.toFixed(4));
       });
+    };
+
+    map.on('zoomanim', (e: L.ZoomAnimEvent) => {
+      isZoomingRef.current = true;
+      suspendMapTransitions(350);
+      scaleMarkerSubElements(e.zoom);
     });
-    map.on('zoomend', () => setMapZoom(Math.round(map.getZoom())));
+    map.on('zoom', () => {
+      suspendMapTransitions(220);
+      if (!(map as any)._animatingZoom) {
+        scaleMarkerSubElements(map.getZoom());
+      }
+    });
+    map.on('move', () => {
+      suspendMapTransitions(220);
+    });
+    map.on('zoomend', () => {
+      isZoomingRef.current = false;
+      suspendMapTransitions(90);
+      setMapZoom(Math.round(map.getZoom()));
+      setZoomSyncTick(t => t + 1);
+      releaseMapTransitions(90);
+    });
 
     const mapEl = mapContainerRef.current;
     const handleTouchInteraction = (e: TouchEvent) => {
       if (e.touches.length >= 2) {
+        suspendMapTransitions(250);
         lastIntendedZoomRef.current = null;
         setFollowMode('none');
         followModeRef.current = 'none';
@@ -353,13 +430,14 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     mapRef.current = map;
 
     return () => {
+      if (interactingTimerRef.current) clearTimeout(interactingTimerRef.current);
       mapEl?.removeEventListener('touchstart', handleTouchInteraction);
       resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
       smoothMarkersRef.current = {};
     };
-  }, []);
+  }, [suspendMapTransitions, releaseMapTransitions]);
 
   // Update base tiles on NightMode toggle
   useEffect(() => {
@@ -405,6 +483,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   }, [isActive]);
 
   const restoreCameraSnapshot = useCallback((drawerVisible = false) => {
+    suspendMapTransitions();
     if (cameraSnapshotRef.current && mapRef.current) {
       const snap = cameraSnapshotRef.current;
       cameraSnapshotRef.current = null;
@@ -416,22 +495,29 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       if (snap.followMode === 'own') {
         const pos: [number, number] = [ownShipPositionRef.current.lat, ownShipPositionRef.current.lon];
         restoreCenter = drawerVisible ? getOffsetCenter(pos, snap.zoom) : L.latLng(pos[0], pos[1]);
+        lastFollowPosRef.current = { lat: pos[0], lon: pos[1], mode: 'own' };
       } else if (snap.followMode === 'target' && snap.followedTargetId) {
         const ft = targetsRef.current.find(t => t.id === snap.followedTargetId);
         if (ft) {
           restoreCenter = drawerVisible ? getOffsetCenter([ft.lat, ft.lon], snap.zoom) : L.latLng(ft.lat, ft.lon);
+          lastFollowPosRef.current = { lat: ft.lat, lon: ft.lon, mode: 'target', targetId: ft.id };
         }
+      } else {
+        lastFollowPosRef.current = null;
       }
       mapRef.current.setView(restoreCenter, snap.zoom, { animate: true });
+      releaseMapTransitions();
       return true;
     }
+    releaseMapTransitions();
     return false;
-  }, [getOffsetCenter]);
+  }, [getOffsetCenter, suspendMapTransitions, releaseMapTransitions]);
 
   // Center on Target handler (distingue tra follow persistente da mappa e browsing temporaneo da lista)
   const handleCenterOnTarget = useCallback(
     (target: AisTarget, openDrawer?: boolean, isTemporaryBrowsing = false) => {
       if (!mapRef.current) return;
+      suspendMapTransitions();
       if (isTemporaryBrowsing) {
         if (!cameraSnapshotRef.current) {
           cameraSnapshotRef.current = {
@@ -449,13 +535,15 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       followedTargetIdRef.current = target.id;
       setFollowMode('target');
       followModeRef.current = 'target';
+      lastFollowPosRef.current = { lat: target.lat, lon: target.lon, mode: 'target', targetId: target.id };
       const isDrawerVisible = openDrawer !== undefined ? openDrawer : showListDrawerRef.current;
       const targetCenter = isDrawerVisible
         ? getOffsetCenter([target.lat, target.lon])
         : L.latLng(target.lat, target.lon);
       mapRef.current.panTo(targetCenter, { animate: true });
+      releaseMapTransitions();
     },
-    [getOffsetCenter]
+    [getOffsetCenter, suspendMapTransitions, releaseMapTransitions]
   );
 
   // Smart zoom per inquadrare e seguire il triangolo di collisione nello spazio visibile disponibile
@@ -523,18 +611,26 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         paddingBottomRight = [390, 60];
       }
 
+      suspendMapTransitions();
       setFollowedTargetId(target.id);
       followedTargetIdRef.current = target.id;
       setFollowMode('intersection');
       followModeRef.current = 'intersection';
+      lastFollowPosRef.current = {
+        lat: (ownLat + targetLat) / 2,
+        lon: (ownLon + targetLon) / 2,
+        mode: 'intersection',
+        targetId: target.id,
+      };
       mapRef.current.fitBounds(bounds, {
         paddingTopLeft,
         paddingBottomRight,
         animate: true,
         maxZoom: 16,
       });
+      releaseMapTransitions();
     },
-    [ownShipPosition, ownShipCourse]
+    [ownShipPosition, ownShipCourse, suspendMapTransitions, releaseMapTransitions]
   );
 
   // Ripristina inquadratura mappa e posizione scroll lista al ritorno dal dettaglio
@@ -562,6 +658,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   const handleCenterOnOwnShip = useCallback(() => {
     if (!mapRef.current) return;
 
+    suspendMapTransitions();
     cameraSnapshotRef.current = null;
     if (selectedTarget) {
       setSelectedTarget(null);
@@ -599,7 +696,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       const newTargetCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], targetZoom);
       map.setView(newTargetCenter, targetZoom, { animate: true });
     }
-  }, [ownShipPosition, ownShipCourse, harborClusters, getOffsetCenter, selectedTarget, onSelectTarget]);
+    releaseMapTransitions();
+  }, [ownShipPosition, ownShipCourse, harborClusters, getOffsetCenter, selectedTarget, onSelectTarget, suspendMapTransitions, releaseMapTransitions]);
 
   // Follow Mode: progressivo con soglia di movimento (~20px) per evitare traslazioni ad ogni refresh
   const lastFollowPosRef = useRef<{ lat: number; lon: number; mode: FollowMode; targetId?: string } | null>(null);
@@ -771,67 +869,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
 
 
-  // Render Dynamic Range Rings (scaling from 15m at zoom 19+ up to unlimited NM on zoom out)
+  // Clean up legacy rings layer if present
   useEffect(() => {
-    if (!isActive || !ringsLayerRef.current) return;
-    ringsLayerRef.current.clearLayers();
-
-    const center: [number, number] = selectedTarget
-      ? [selectedTarget.lat, selectedTarget.lon]
-      : [ownShipPosition.lat, ownShipPosition.lon];
-
-    let ringRanges: Array<{ radiusMeters: number; label: string }> = [];
-    if (mapZoom >= 19) {
-      ringRanges = [{ radiusMeters: 15, label: '15m' }, { radiusMeters: 30, label: '30m' }, { radiusMeters: 45, label: '45m' }];
-    } else if (mapZoom === 18) {
-      ringRanges = [{ radiusMeters: 25, label: '25m' }, { radiusMeters: 50, label: '50m' }, { radiusMeters: 75, label: '75m' }];
-    } else if (mapZoom === 17) {
-      ringRanges = [{ radiusMeters: 50, label: '50m' }, { radiusMeters: 100, label: '100m' }, { radiusMeters: 150, label: '150m' }];
-    } else if (mapZoom === 16) {
-      ringRanges = [{ radiusMeters: 100, label: '100m' }, { radiusMeters: 200, label: '200m' }, { radiusMeters: 300, label: '300m' }];
-    } else if (mapZoom === 15) {
-      ringRanges = [{ radiusMeters: 250, label: '250m' }, { radiusMeters: 500, label: '500m' }, { radiusMeters: 750, label: '750m' }];
-    } else if (mapZoom === 14) {
-      ringRanges = [{ radiusMeters: 500, label: '500m' }, { radiusMeters: 926, label: '0.5 NM' }, { radiusMeters: 1852, label: '1 NM' }];
-    } else if (mapZoom === 13) {
-      ringRanges = [{ radiusMeters: 926, label: '0.5 NM' }, { radiusMeters: 1852, label: '1 NM' }, { radiusMeters: 3704, label: '2 NM' }];
-    } else if (mapZoom === 12) {
-      ringRanges = [{ radiusMeters: 1852, label: '1 NM' }, { radiusMeters: 3704, label: '2 NM' }, { radiusMeters: 9260, label: '5 NM' }];
-    } else {
-      const baseNm = Math.round(2 * Math.pow(2, 11 - Math.max(2, mapZoom)));
-      ringRanges = [baseNm, baseNm * 2, baseNm * 4].map(nm => ({
-        radiusMeters: nm * 1852,
-        label: `${nm} NM`,
-      }));
-    }
-
-    const ringColor = selectedTarget ? '#06b6d4' : (isNightMode ? '#38bdf8' : '#0369a1');
-
-    ringRanges.forEach(ring => {
-      const circle = L.circle(center, {
-        radius: ring.radiusMeters,
-        color: ringColor,
-        weight: selectedTarget ? 1.6 : 1.2,
-        opacity: isNightMode ? 0.65 : 0.75,
-        dashArray: selectedTarget ? '6, 6' : '4, 7',
-        fill: false,
-        interactive: false,
-      });
-      ringsLayerRef.current?.addLayer(circle);
-
-      const latOffset = ring.radiusMeters / 111139;
-      const tagMarker = L.marker([center[0] + latOffset, center[1]], {
-        icon: L.divIcon({
-          className: 'range-ring-label',
-          html: `<span>${ring.label}</span>`,
-          iconSize: [64, 16],
-          iconAnchor: [32, 8],
-        }),
-        interactive: false,
-      });
-      ringsLayerRef.current?.addLayer(tagMarker);
-    });
-  }, [isActive, ownShipPosition, selectedTarget, mapZoom, isNightMode]);
+    ringsLayerRef.current?.clearLayers();
+  }, [isActive]);
 
   // Render Harbor Clusters Hulls
   useEffect(() => {
@@ -868,6 +909,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   // Render Own Ship & AIS Target Markers
   useEffect(() => {
     if (!isActive || !mapRef.current || !markersLayerRef.current) return;
+    if (isZoomingRef.current || (mapRef.current as any)._animatingZoom) return;
     markersLayerRef.current.clearLayers();
     const activeKeys = new Set<string>();
 
@@ -882,7 +924,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       opacity = 1.0,
       interactive = false,
       onClick?: () => void,
-      cssVars?: { rot?: number; vecLen?: number; cpaLen?: number; ghostDist?: number }
+      cssVars?: { rot?: number; vecLen?: number; cpaLen?: number; ghostDist?: number; isRings?: boolean }
     ) => {
       activeKeys.add(key);
       const map = mapRef.current;
@@ -898,9 +940,16 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         const initEl = m.getElement();
         if (initEl) initEl.dataset.tpl = html;
       } else if (m) {
-        m.setLatLng(latLng);
-        m.setOpacity(opacity);
-        m.setZIndexOffset(zIndex);
+        const curPos = m.getLatLng();
+        if (curPos.lat !== latLng[0] || curPos.lng !== latLng[1]) {
+          m.setLatLng(latLng);
+        }
+        if (m.options.opacity !== opacity) {
+          m.setOpacity(opacity);
+        }
+        if (m.options.zIndexOffset !== zIndex) {
+          m.setZIndexOffset(zIndex);
+        }
         const el = m.getElement();
         if (el && el.dataset.tpl !== html) {
           el.innerHTML = html;
@@ -908,10 +957,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         }
       }
       const el = m?.getElement();
-      if (el && map) {
+      if (el && map && !isZoomingRef.current) {
         const currentZoom = map.getZoom();
-        const pt = map.project(latLng, currentZoom).subtract(map.getPixelOrigin());
-        el.style.transform = `translate3d(${pt.x.toFixed(2)}px, ${pt.y.toFixed(2)}px, 0px)`;
         el.dataset.baseZoom = String(currentZoom);
         if (cssVars?.rot !== undefined) {
           const prevRot = el.dataset.rot !== undefined ? parseFloat(el.dataset.rot) : cssVars.rot;
@@ -931,6 +978,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         if (cssVars?.ghostDist !== undefined) {
           el.dataset.ghostDist = String(cssVars.ghostDist);
           el.style.setProperty('--ghost-dist', `${cssVars.ghostDist.toFixed(1)}px`);
+        }
+        if (cssVars?.isRings) {
+          el.dataset.isRings = '1';
+          el.style.setProperty('--ring-scale', '1');
         }
       }
       if (m && onClick) {
@@ -1002,6 +1053,77 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       handleCenterOnOwnShip,
       { rot: ownHeading, vecLen: ownVecPx, ghostDist: ownGhostPx }
     ) || null;
+
+    // 1b. Dynamic Coaxial Range Rings & Labels (traslano con translate3d insieme alla barca/target)
+    const ringCenter: [number, number] = selectedTarget
+      ? [selectedTarget.lat, selectedTarget.lon]
+      : [ownShipPosition.lat, ownShipPosition.lon];
+    const ringTargetKey = selectedTarget ? `rings:${selectedTarget.id}` : 'rings:own';
+    const ringMPerPx =
+      (40075016.686 * Math.abs(Math.cos((ringCenter[0] * Math.PI) / 180))) /
+      Math.pow(2, (mapRef.current.getZoom() || mapZoom) + 8);
+
+    let ringRanges: Array<{ radiusMeters: number; label: string }> = [];
+    if (mapZoom >= 19) {
+      ringRanges = [{ radiusMeters: 15, label: '15m' }, { radiusMeters: 30, label: '30m' }, { radiusMeters: 45, label: '45m' }];
+    } else if (mapZoom === 18) {
+      ringRanges = [{ radiusMeters: 25, label: '25m' }, { radiusMeters: 50, label: '50m' }, { radiusMeters: 75, label: '75m' }];
+    } else if (mapZoom === 17) {
+      ringRanges = [{ radiusMeters: 50, label: '50m' }, { radiusMeters: 100, label: '100m' }, { radiusMeters: 150, label: '150m' }];
+    } else if (mapZoom === 16) {
+      ringRanges = [{ radiusMeters: 100, label: '100m' }, { radiusMeters: 200, label: '200m' }, { radiusMeters: 300, label: '300m' }];
+    } else if (mapZoom === 15) {
+      ringRanges = [{ radiusMeters: 250, label: '250m' }, { radiusMeters: 500, label: '500m' }, { radiusMeters: 750, label: '750m' }];
+    } else if (mapZoom === 14) {
+      ringRanges = [{ radiusMeters: 500, label: '500m' }, { radiusMeters: 926, label: '0.5 NM' }, { radiusMeters: 1852, label: '1 NM' }];
+    } else if (mapZoom === 13) {
+      ringRanges = [{ radiusMeters: 926, label: '0.5 NM' }, { radiusMeters: 1852, label: '1 NM' }, { radiusMeters: 3704, label: '2 NM' }];
+    } else if (mapZoom === 12) {
+      ringRanges = [{ radiusMeters: 1852, label: '1 NM' }, { radiusMeters: 3704, label: '2 NM' }, { radiusMeters: 9260, label: '5 NM' }];
+    } else {
+      const baseNm = Math.round(2 * Math.pow(2, 11 - Math.max(2, mapZoom)));
+      ringRanges = [baseNm, baseNm * 2, baseNm * 4].map(nm => ({
+        radiusMeters: nm * 1852,
+        label: `${nm} NM`,
+      }));
+    }
+
+    const ringColor = selectedTarget ? '#06b6d4' : (isNightMode ? '#38bdf8' : '#0369a1');
+    const ringWeight = selectedTarget ? 1.6 : 1.2;
+    const ringOpacity = isNightMode ? 0.65 : 0.75;
+    const ringDash = selectedTarget ? '6, 6' : '4, 7';
+    const maxRingPx = Math.ceil(ringRanges[ringRanges.length - 1].radiusMeters / ringMPerPx) + 4;
+    const svgDim = maxRingPx * 2;
+
+    const circlesSvgHtml = ringRanges
+      .map(r => {
+        const rPx = r.radiusMeters / ringMPerPx;
+        return `<circle cx="${maxRingPx}" cy="${maxRingPx}" r="${rPx.toFixed(1)}" fill="none" stroke="${ringColor}" stroke-width="${ringWeight}" stroke-opacity="${ringOpacity}" stroke-dasharray="${ringDash}" />`;
+      })
+      .join('');
+
+    const labelsHtml = ringRanges
+      .map(r => {
+        const rPx = r.radiusMeters / ringMPerPx;
+        return `<div class="range-ring-label-item" style="--r-px:${rPx.toFixed(1)}px;"><span>${r.label}</span></div>`;
+      })
+      .join('');
+
+    const ringsHtml = `<svg class="range-rings-svg" width="${svgDim}" height="${svgDim}" viewBox="0 0 ${svgDim} ${svgDim}">${circlesSvgHtml}</svg>${labelsHtml}`;
+
+    upsertSmoothMarker(
+      ringTargetKey,
+      ringCenter,
+      'range-rings-marker',
+      ringsHtml,
+      [0, 0],
+      [0, 0],
+      -500,
+      1.0,
+      false,
+      undefined,
+      { isRings: true }
+    );
 
     // 2. Targets Markers
 
@@ -1260,11 +1382,12 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         delete smoothMarkersRef.current[k];
       }
     });
-  }, [isActive, targets, ownShipPosition, ownShipCourse, selectedTarget, ackedLabels, mapZoom, onSelectTarget, handleCenterOnTarget, vectorMinutes]);
+  }, [isActive, targets, ownShipPosition, ownShipCourse, selectedTarget, ackedLabels, mapZoom, zoomSyncTick, isNightMode, onSelectTarget, handleCenterOnTarget, handleCenterOnOwnShip, vectorMinutes]);
 
   // Zoom handlers (ancorati al bersaglio/propria barca se selezionati, altrimenti al centro dello schermo)
   const handleZoomIn = useCallback(() => {
     if (!mapRef.current) return;
+    suspendMapTransitions();
     const currentZoom = mapRef.current.getZoom();
     const newZoom = Math.min(mapRef.current.getMaxZoom() || 18, currentZoom + 1);
     lastIntendedZoomRef.current = newZoom;
@@ -1282,10 +1405,12 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     } else {
       mapRef.current.zoomIn();
     }
-  }, [selectedTarget, followedTarget, followMode, ownShipPosition, getOffsetCenter]);
+    releaseMapTransitions();
+  }, [selectedTarget, followedTarget, followMode, ownShipPosition, getOffsetCenter, suspendMapTransitions, releaseMapTransitions]);
 
   const handleZoomOut = useCallback(() => {
     if (!mapRef.current) return;
+    suspendMapTransitions();
     const currentZoom = mapRef.current.getZoom();
     const newZoom = Math.max(mapRef.current.getMinZoom() || 3, currentZoom - 1);
     lastIntendedZoomRef.current = newZoom;
@@ -1303,7 +1428,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     } else {
       mapRef.current.zoomOut();
     }
-  }, [selectedTarget, followedTarget, followMode, ownShipPosition, getOffsetCenter]);
+    releaseMapTransitions();
+  }, [selectedTarget, followedTarget, followMode, ownShipPosition, getOffsetCenter, suspendMapTransitions, releaseMapTransitions]);
 
   // Target summary stats
   const stats = useMemo(() => {

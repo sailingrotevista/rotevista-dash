@@ -1383,13 +1383,34 @@ body.night-mode .ais-tool-btn.btn-active,
     box-shadow: 0 0 14px rgba(255, 51, 51, 0.8) !important;
 }
 
-/* Range Ring Distance Label */
-.range-ring-label {
+/* Range Ring Distance Label & Coaxial Rings */
+.range-ring-label,
+.range-rings-marker {
     background: transparent !important;
     border: none !important;
+    pointer-events: none !important;
 }
 
-.range-ring-label span {
+.range-rings-svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform: translate(-50%, -50%) scale(var(--ring-scale, 1));
+    pointer-events: none;
+    overflow: visible;
+}
+
+.range-ring-label-item {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, calc(-50% - (var(--r-px, 0px) * var(--ring-scale, 1))));
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.range-ring-label span,
+.range-ring-label-item span {
     background: rgba(15, 23, 42, 0.75);
     color: #94a3b8;
     padding: 1px 5px;
@@ -1398,6 +1419,7 @@ body.night-mode .ais-tool-btn.btn-active,
     font-weight: 700;
     font-family: monospace;
     border: 1px solid rgba(255, 255, 255, 0.1);
+    display: inline-block;
 }
 
 /* DivIcon Markers */
@@ -1463,28 +1485,49 @@ body.night-mode .ais-tool-btn.btn-active,
     100% { transform: scale(1.6); opacity: 0; }
 }
 
-/* Ghost Ships at CPA & Smooth Vessel Motion */
+/* Ghost Ships at CPA & Markers: Transizione fluida a mappa ferma, sospesa in movimento/zoom */
 .own-ship-marker,
 .ais-target-marker,
 .cpa-ghost-marker,
-.ais-threat-floating-label {
+.ais-threat-floating-label,
+.range-rings-marker,
+.range-ring-label {
     background: transparent !important;
     border: none !important;
     transition: transform 1.05s linear;
-    will-change: transform;
 }
 
-.leaflet-zoom-anim .own-ship-marker,
-.leaflet-zoom-anim .ais-target-marker,
-.leaflet-zoom-anim .cpa-ghost-marker,
-.leaflet-zoom-anim .ais-threat-floating-label,
-.leaflet-zoom-anim .cpa-ghost-vessel {
+.leaflet-map-pane.leaflet-zoom-anim .own-ship-marker,
+.leaflet-map-pane.leaflet-zoom-anim .ais-target-marker,
+.leaflet-map-pane.leaflet-zoom-anim .cpa-ghost-marker,
+.leaflet-map-pane.leaflet-zoom-anim .ais-threat-floating-label,
+.leaflet-map-pane.leaflet-zoom-anim .range-rings-marker,
+.leaflet-map-pane.leaflet-zoom-anim .range-ring-label,
+.leaflet-map-pane.leaflet-zoom-anim .cpa-ghost-vessel,
+.leaflet-map-pane.leaflet-zoom-anim .range-rings-svg,
+.leaflet-map-pane.leaflet-zoom-anim .range-ring-label-item {
     transition: transform 0.25s cubic-bezier(0, 0, 0.25, 1) !important;
 }
 
-.leaflet-zoom-anim .vessel-course-vector,
-.leaflet-zoom-anim .vessel-cpa-vector {
+.leaflet-map-pane.leaflet-zoom-anim .vessel-course-vector,
+.leaflet-map-pane.leaflet-zoom-anim .vessel-cpa-vector {
     transition: height 0.25s cubic-bezier(0, 0, 0.25, 1) !important;
+}
+
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .own-ship-marker,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .ais-target-marker,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .cpa-ghost-marker,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .ais-threat-floating-label,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .range-rings-marker,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .range-ring-label,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .own-ship-icon-wrapper,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .ais-target-icon-wrap,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .vessel-course-vector,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .vessel-cpa-vector,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .cpa-ghost-vessel,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .range-rings-svg,
+.map-interacting .leaflet-map-pane:not(.leaflet-zoom-anim) .range-ring-label-item {
+    transition: none !important;
 }
 
 .cpa-ghost-vessel {
