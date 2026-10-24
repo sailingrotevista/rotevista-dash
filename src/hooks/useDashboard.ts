@@ -27,6 +27,14 @@ import {
 } from '../utils/math';
 import { MARINA_DI_RAGUSA_SIM_DATA } from '../utils/marinaDiRagusaSimData';
 import { generateRandomColregScenario, recalculateArpaForTargets } from '../utils/colregScenarioGenerator';
+import { isThreatSnoozed, reconcileSnooze } from '../utils/aisSnooze.mjs';
+import { MixedAisSimulation, mergeAisTargets } from '../utils/mixedAisSimulation.mjs';
+import { BannerThreatSelector } from '../utils/aisPriority.mjs';
+
+// Explicit opt-in keeps the simulator usable even with a reachable Signal K proxy.
+const FORCE_SIMULATION = new URLSearchParams(window.location.search).get('simulate') === '1';
+const MIXED_SIMULATION = new URLSearchParams(window.location.search).get('simulate') === 'mixed';
+const REQUIRE_LIVE_DATA = !FORCE_SIMULATION;
 
 const DEFAULT_CONFIG: AppConfig = {
   alarms: { depthDanger: 2.5, depthWarning: 3.5 },
@@ -146,7 +154,7 @@ export function useDashboard() {
   const [harborClusters, setHarborClusters] = useState<HarborCluster[]>([]);
   const [topThreat, setTopThreat] = useState<AisTarget | null>(null);
   const [selectedAisTargetId, setSelectedAisTargetId] = useState<string | null>(null);
-  const [snoozedThreats, setSnoozedThreats] = useState<Record<string, { until: number; initialRisk: string }>>({});
+  const [snoozedThreats, setSnoozedThreats] = useState<Record<string, { until: number; initialRisk: string; lostPositionTime?: number }>>({});
   const [ownShipPosition, setOwnShipPosition] = useState<{ lat: number; lon: number }>({ lat: 36.780956, lon: 14.545439 });
   const [ownShipCourse, setOwnShipCourse] = useState<{ hdg: number; cog: number; sog: number }>({ hdg: 45, cog: 45, sog: 0.0 });
 
@@ -176,7 +184,8 @@ export function useDashboard() {
       const initialRisk = target?.risk || (currentTop?.id === targetId ? currentTop.risk : 'ORANGE');
       setSnoozedThreats(prev => ({
         ...prev,
-        [targetId]: { until: Date.now() + 10 * 60 * 1000, initialRisk },
+        [targetId]: { until: Date.now() + 10 * 60 * 1000, initialRisk,
+          ...(target?.contactLost ? { lostPositionTime: target.lastPositionTime } : {}) },
       }));
       return currentTop;
     });
@@ -186,6 +195,8 @@ export function useDashboard() {
     setSnoozedThreats({});
   }, []);
 
+  const bannerSelectorRef = useRef(new BannerThreatSelector());
+  const [bannerSelectionTick, setBannerSelectionTick] = useState(0);
   const activeThreat = useMemo(() => {
     const candidates: AisTarget[] = [];
     const seen = new Set<string>();
@@ -193,37 +204,29 @@ export function useDashboard() {
     if (
       topThreat &&
       (topThreat.risk === 'RED' || topThreat.risk === 'ORANGE') &&
-      !topThreat.isDeferred &&
       !isHarborTarget(topThreat)
     ) {
       candidates.push(topThreat);
       seen.add(topThreat.id);
     }
     aisTargets.forEach(t => {
-      if (!seen.has(t.id) && (t.risk === 'RED' || t.risk === 'ORANGE') && !t.isDeferred && !isHarborTarget(t)) {
+      if (!seen.has(t.id) && (t.risk === 'RED' || t.risk === 'ORANGE') && !isHarborTarget(t)) {
         candidates.push(t);
         seen.add(t.id);
       }
     });
     const now = Date.now();
     const valid = candidates.filter(t => {
-      const snoozed = snoozedThreats[t.id];
-      if (!snoozed) return true;
-      const isSnoozed = now < snoozed.until;
-      const dangerEscalated = snoozed.initialRisk === 'ORANGE' && t.risk === 'RED';
-      return !isSnoozed || dangerEscalated;
+      return !isThreatSnoozed(t, snoozedThreats[t.id], now);
     });
-    if (valid.length === 0) return null;
-    valid.sort((a, b) => {
-      if (a.risk !== b.risk) return a.risk === 'RED' ? -1 : 1;
-      const cpaA = a.cpa !== null && a.cpa >= 0 ? a.cpa : a.dist;
-      const cpaB = b.cpa !== null && b.cpa >= 0 ? b.cpa : b.dist;
-      const tcpaA = a.tcpa !== null && a.tcpa > 0 ? a.tcpa : 999;
-      const tcpaB = b.tcpa !== null && b.tcpa > 0 ? b.tcpa : 999;
-      return (cpaA + tcpaA * 60) - (cpaB + tcpaB * 60);
-    });
-    return valid[0];
-  }, [topThreat, aisTargets, snoozedThreats]);
+    return bannerSelectorRef.current.select(valid, now);
+  }, [topThreat, aisTargets, snoozedThreats, bannerSelectionTick]);
+  const priorityDeadline = bannerSelectorRef.current.pendingDeadline;
+  useEffect(() => {
+    if (priorityDeadline === null) return;
+    const timer = setTimeout(() => setBannerSelectionTick(value => value + 1), Math.max(0, priorityDeadline - Date.now()));
+    return () => clearTimeout(timer);
+  }, [priorityDeadline]);
 
   useEffect(() => {
     setSnoozedThreats(prev => {
@@ -236,14 +239,12 @@ export function useDashboard() {
       ids.forEach(id => {
         const entry = next[id];
         const t = (topThreat && topThreat.id === id ? topThreat : null) || allTargets.find(item => item.id === id);
-        if (!t || (t.risk !== 'RED' && t.risk !== 'ORANGE')) {
+        const updated = reconcileSnooze(t, entry, Date.now());
+        if (!updated) {
           delete next[id];
           changed = true;
-        } else if (entry.initialRisk === 'ORANGE' && t.risk === 'RED') {
-          delete next[id];
-          changed = true;
-        } else if (entry.initialRisk === 'RED' && t.risk === 'ORANGE') {
-          next[id] = { ...entry, initialRisk: 'ORANGE' };
+        } else if (updated !== entry) {
+          next[id] = updated;
           changed = true;
         }
       });
@@ -443,6 +444,8 @@ export function useDashboard() {
   }, []);
 
   // Process incoming data
+  const realAisTargetsRef = useRef<AisTarget[]>([]);
+  const simulatedAisTargetsRef = useRef<AisTarget[]>([]);
   const processIncomingData = useCallback((path: string, val: any, timeMs?: number) => {
     if ((val === null && path !== 'environment.ais_top_threat') || val === undefined || (typeof val === 'number' && isNaN(val))) return;
 
@@ -454,9 +457,12 @@ export function useDashboard() {
     const now = timeMs || Date.now();
     const localNow = Date.now();
 
-    store.timestamps[path] = localNow;
-    store.raw[path] = val;
-    store.lastMessageReceivedTime = localNow;
+    const syntheticUpdate = path === 'simulation.ais_targets';
+    if (!syntheticUpdate) {
+      store.timestamps[path] = localNow;
+      store.raw[path] = val;
+      store.lastMessageReceivedTime = localNow;
+    }
 
     const historyMinutes = configRef.current.graphs.historyMinutes;
 
@@ -587,8 +593,13 @@ export function useDashboard() {
       }
     }
 
-    if (path === 'environment.ais_targets') {
+    if (path === 'environment.ais_targets' || syntheticUpdate) {
       if (Array.isArray(val)) {
+        if (MIXED_SIMULATION) {
+          if (syntheticUpdate) simulatedAisTargetsRef.current = val;
+          else realAisTargetsRef.current = val;
+          val = mergeAisTargets(realAisTargetsRef.current, simulatedAisTargetsRef.current);
+        }
         latestAisRef.current.targets = val;
         const nextRisk: 'RED' | 'ORANGE' | null = val.some((t: AisTarget) => t.risk === 'RED')
           ? 'RED'
@@ -617,7 +628,14 @@ export function useDashboard() {
           prev.cpa === nextThreat.cpa &&
           prev.tcpa === nextThreat.tcpa &&
           prev.dist === nextThreat.dist &&
-          prev.sog === nextThreat.sog
+          prev.sog === nextThreat.sog &&
+          prev.age === nextThreat.age &&
+          prev.lastPositionTime === nextThreat.lastPositionTime &&
+          prev.isProjected === nextThreat.isProjected &&
+          prev.contactLost === nextThreat.contactLost &&
+          prev.contactLostAt === nextThreat.contactLostAt &&
+          prev.motionDataSync?.status === nextThreat.motionDataSync?.status &&
+          prev.effectiveThresholds?.horizonTcpa === nextThreat.effectiveThresholds?.horizonTcpa
         ) {
           return prev;
         }
@@ -648,12 +666,12 @@ export function useDashboard() {
   }, []);
 
   const fetchConfig = useCallback(() => {
-    fetch('/rotevista-config', { cache: 'no-store' })
+    fetch(FORCE_SIMULATION ? '/settings.json' : '/rotevista-config', { cache: 'no-store' })
       .then(async res => {
         const contentType = res.headers.get('content-type') || '';
         if (!res.ok || !contentType.includes('application/json')) throw new Error('Not available');
         const json = await res.json();
-        storeRef.current.hasEverConnectedToSignalK = true;
+        if (!FORCE_SIMULATION) storeRef.current.hasEverConnectedToSignalK = true;
         return json;
       })
       .catch(() => {
@@ -819,7 +837,7 @@ export function useDashboard() {
     let isDisposed = false;
 
     const startSimulation = () => {
-      if (storeRef.current.hasEverConnectedToSignalK || storeRef.current.isSimulating) return;
+      if (REQUIRE_LIVE_DATA || storeRef.current.hasEverConnectedToSignalK || storeRef.current.isSimulating) return;
       if (handshakeTimeout) {
         clearTimeout(handshakeTimeout);
         handshakeTimeout = null;
@@ -843,7 +861,7 @@ export function useDashboard() {
         startTime: Date.now(),
       };
 
-      // Genera scenario multi-target COLREG (3 bersagli dinamici simultanei)
+      // Four dynamic targets, including HORIZON entering warning after ~2 minutes.
       const { targets: dynamicTargets } = generateRandomColregScenario(
         MARINA_DI_RAGUSA_SIM_DATA.myGps,
         45, // hdg
@@ -999,7 +1017,7 @@ export function useDashboard() {
     };
 
     const connectWs = () => {
-      if (isDisposed) return;
+      if (isDisposed || FORCE_SIMULATION) return;
       const addr = window.location.host;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       try {
@@ -1072,7 +1090,7 @@ export function useDashboard() {
 
                 // AIS targets & threats da storico
                 if (Array.isArray(data.ais_targets) && data.ais_targets.length > 0) {
-                  setAisTargets(data.ais_targets);
+                  processIncomingData('environment.ais_targets', data.ais_targets);
                 } else {
                   fetchAisTargets();
                 }
@@ -1155,7 +1173,7 @@ export function useDashboard() {
         ws.onclose = () => {
           if (isDisposed) return;
           storeRef.current.isSocketOpen = false;
-          if (!storeRef.current.hasEverConnectedToSignalK) {
+          if (!REQUIRE_LIVE_DATA && !storeRef.current.hasEverConnectedToSignalK) {
             if (!storeRef.current.isSimulating) {
               startSimulation();
             }
@@ -1184,14 +1202,14 @@ export function useDashboard() {
     };
 
     // Timeout handshake iniziale: se entro 4000ms Signal K non è raggiungibile e non abbiamo ricevuto segnale, avvia la simulazione
-    handshakeTimeout = setTimeout(() => {
+    if (!FORCE_SIMULATION) handshakeTimeout = setTimeout(() => {
       if (!isDisposed && !storeRef.current.hasEverConnectedToSignalK && !storeRef.current.isSimulating && !storeRef.current.isSocketOpen) {
         startSimulation();
       }
     }, 4000);
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !isDisposed) {
+      if (document.visibilityState === 'visible' && !isDisposed && !FORCE_SIMULATION) {
         fetchConfig();
         if (storeRef.current.hasEverConnectedToSignalK) {
           fetch('/rotevista-history')
@@ -1226,7 +1244,7 @@ export function useDashboard() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    const initialWsTimer = setTimeout(connectWs, 50);
+    const initialWsTimer = setTimeout(FORCE_SIMULATION ? startSimulation : connectWs, 50);
 
     return () => {
       isDisposed = true;
@@ -1245,9 +1263,39 @@ export function useDashboard() {
       }
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (handshakeTimeout) clearTimeout(handshakeTimeout);
-      if (simTimer) clearInterval(simTimer);
+      if (simTimer) {
+        clearInterval(simTimer);
+        storeRef.current.isSimulating = false;
+      }
     };
   }, [processIncomingData, seedDemoHistory, fetchConfig]);
+
+  // Mixed mode retains live own-ship navigation and server-evaluated AIS contacts.
+  // Only synthetic contacts are advanced and evaluated in the browser.
+  useEffect(() => {
+    if (!MIXED_SIMULATION) return;
+    const simulation = new MixedAisSimulation(generateRandomColregScenario, recalculateArpaForTargets);
+    const tick = () => {
+      const store = storeRef.current;
+      const now = Date.now();
+      const position = store.raw['navigation.position'];
+      const positionTime = store.timestamps['navigation.position'];
+      if (!store.isSocketOpen || !positionTime || now - positionTime > 30000 ||
+          !Number.isFinite(position?.latitude) || !Number.isFinite(position?.longitude)) {
+        simulation.reset();
+        processIncomingData('simulation.ais_targets', []);
+        return;
+      }
+      const cog = radToDeg(store.raw['navigation.courseOverGroundTrue'] ?? store.raw['navigation.headingTrue'] ?? 0);
+      const own = { position: { lat: position.latitude, lon: position.longitude }, cog,
+        hdg: radToDeg(store.raw['navigation.headingTrue'] ?? degToRad(cog)),
+        sog: msToKts(store.raw['navigation.speedOverGround'] ?? 0) };
+      const targets = simulation.tick(own, now, configRef.current.aisAlerter?.vectorMinutes || 15, propulsionModeRef.current);
+      processIncomingData('simulation.ais_targets', targets);
+    };
+    const timer = setInterval(tick, 1000);
+    return () => { clearInterval(timer); simulation.reset(); };
+  }, [processIncomingData]);
 
   // Main 1Hz Tactical Display Loop
   useEffect(() => {
@@ -1790,6 +1838,7 @@ export function useDashboard() {
         nextStatusText = isSocketOpen ? 'ATTESA DATI...' : 'OFFLINE';
         nextStatusClass = 'offline';
       }
+      if (MIXED_SIMULATION) nextStatusText = `${nextStatusText} + SIM`;
       setConnectionStatus(prev =>
         prev.text === nextStatusText && prev.className === nextStatusClass
           ? prev
@@ -1861,6 +1910,7 @@ export function useDashboard() {
     harborClusters,
     topThreat: activeThreat,
     snoozeThreat,
+    isMixedSimulation: MIXED_SIMULATION,
     unsnoozeThreats,
     selectedAisTargetId,
     setSelectedAisTargetId,

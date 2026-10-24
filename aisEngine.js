@@ -9,6 +9,26 @@
  */
 
 const { TargetMotionTracker, compactAisTrail } = require('./targetMotionTracker');
+const { PLUGIN_BASE_TCPA_MINUTES } = require('./collisionConfig');
+const { COLLISION_THRESHOLD_DEFAULTS } = require('./collisionPipeline');
+
+const OWN_GEOMETRY_RETRY_MS = 60000;
+const MOTION_DATA_MAX_SKEW_FRACTION = 0.2;
+
+function evaluateMotionDataSync(positionTime, cogTime, sogTime, horizonMinutes) {
+    const skew = time => Number.isFinite(positionTime) && Number.isFinite(time) ? Math.abs(positionTime - time) / 1000 : null;
+    const cogSkewSeconds = skew(cogTime);
+    const sogSkewSeconds = skew(sogTime);
+    const maxSkewSeconds = Number.isFinite(horizonMinutes) && horizonMinutes > 0
+        ? horizonMinutes * 60 * MOTION_DATA_MAX_SKEW_FRACTION : null;
+    const outOfSync = maxSkewSeconds !== null && [cogSkewSeconds, sogSkewSeconds].some(value => value !== null && value > maxSkewSeconds);
+    return { status: outOfSync ? 'OUT_OF_SYNC' : maxSkewSeconds === null || cogSkewSeconds === null || sogSkewSeconds === null ? 'UNKNOWN' : 'IN_SYNC',
+        cogSkewSeconds, sogSkewSeconds, maxSkewSeconds };
+}
+const OWN_GEOMETRY_PATHS = [
+    'design.length', 'design.length.overall', 'design.beam',
+    'sensors.gps.fromBow', 'sensors.gps.fromCenter',
+];
 
 const MID_MAP = {
     247: "🇮🇹 ITA", 237: "🇬🇷 GRC", 238: "🇭🇷 CRO", 239: "🇬🇷 GRC", 240: "🇬🇷 GRC", 241: "🇬🇷 GRC",
@@ -66,6 +86,8 @@ class AisEngine {
         this.lastHarborClusters = [];
         this.topThreat = null;
         this.lastOwnGps = { lat: null, lon: null, t: 0 };
+        this.ownGeometry = {};
+        this.lastOwnGeometryProbe = null;
         this.aisDiagnostics = {
             status: 'INITIALIZING',
             myGps: null,
@@ -90,6 +112,7 @@ class AisEngine {
     getDiagnostics() {
         return {
             ...this.aisDiagnostics,
+            ownShipGeometry: this.getOwnGeometry(),
             cacheCount: Object.keys(this.aisPersistentCache).length,
             nearbyCount: this.lastNearbyVessels.length,
             serverTime: new Date().toISOString()
@@ -100,9 +123,63 @@ class AisEngine {
         return this.aisPersistentCache;
     }
 
+    updateOwnGeometry(path, value) {
+        if (!OWN_GEOMETRY_PATHS.includes(path)) return false;
+        let val = value && typeof value === 'object' && value.value !== undefined ? value.value : value;
+        const field = path.startsWith('design.length') ? 'length'
+            : path === 'design.beam' ? 'beam'
+            : path.endsWith('fromBow') ? 'fromBow' : 'fromCenter';
+        if (field === 'length' && val && typeof val === 'object') {
+            val = val.overall;
+            if (val && typeof val === 'object') val = val.value;
+        }
+        if (val === null) delete this.ownGeometry[field];
+        else if (typeof val === 'number' && Number.isFinite(val) &&
+            (field === 'fromCenter' || (field === 'fromBow' ? val >= 0 : val > 0))) {
+            this.ownGeometry[field] = val;
+        }
+        return true;
+    }
+
+    refreshOwnGeometry(now = Date.now(), force = false) {
+        const applied = this.getOwnGeometry();
+        const complete = ['length', 'beam', 'antBow', 'antPort'].every(key => applied[key] !== undefined);
+        if (!force && (complete || (this.lastOwnGeometryProbe !== null && now - this.lastOwnGeometryProbe < OWN_GEOMETRY_RETRY_MS))) return;
+        this.lastOwnGeometryProbe = now;
+        for (const path of OWN_GEOMETRY_PATHS) {
+            try {
+                let value = typeof this.app.getSelfPath === 'function' ? this.app.getSelfPath(path) : undefined;
+                if (value == null && typeof this.app.getPath === 'function') {
+                    value = this.app.getPath(`vessels.${this.app.selfId || 'self'}.${path}`);
+                }
+                if (value != null) this.updateOwnGeometry(path, value);
+            } catch (err) {
+                // The startup tree may not yet contain static vessel data; retry later.
+            }
+        }
+    }
+
+    getOwnGeometry() {
+        const { length, beam, fromBow, fromCenter } = this.ownGeometry;
+        const geometry = {};
+        if (length !== undefined) geometry.length = length;
+        if (beam !== undefined) geometry.beam = beam;
+        if (length !== undefined && fromBow !== undefined && fromBow <= length) {
+            geometry.antBow = fromBow;
+            geometry.antStern = length - fromBow;
+        }
+        if (beam !== undefined && fromCenter !== undefined && Math.abs(fromCenter) <= beam / 2) {
+            // Signal K convention: fromCenter positive to port, negative to starboard.
+            geometry.antPort = beam / 2 - fromCenter;
+            geometry.antStarboard = beam / 2 + fromCenter;
+        }
+        return geometry;
+    }
+
     process() {
         try {
             const now = Date.now();
+            this.refreshOwnGeometry(now);
             const raw = this.windEngine.getRaw();
             const app = this.app;
             const currentConfig = this.getConfig() || {};
@@ -180,31 +257,15 @@ class AisEngine {
             const maxTrailAgeMs = (Number.isFinite(configuredTrailMinutes) && configuredTrailMinutes > 0
                 ? configuredTrailMinutes : 15) * 60 * 1000;
             const ignoreOwnTarget = String(cfg.ignoreOwnTarget !== undefined ? cfg.ignoreOwnTarget : (cfg.ignoreOwnCallsign || "106125")).trim().toLowerCase();
-            const pCraft = cfg.pleasureCraft || {};
-            const yachtRedCpa = pCraft.redCpa !== undefined ? pCraft.redCpa : (cfg.yachtRedCpa || 300);
-            const yachtOrangeCpa = pCraft.orangeCpa !== undefined ? pCraft.orangeCpa : (cfg.yachtOrangeCpa || 700);
-            const yachtMaxTcpa = pCraft.maxTcpa !== undefined ? pCraft.maxTcpa : (cfg.yachtMaxTcpa || 10);
-            const cShips = cfg.commercialShips || {};
-            const commercialRedCpa = cShips.redCpa !== undefined ? cShips.redCpa : (cfg.commercialRedCpa || 800);
-            const commercialOrangeCpa = cShips.orangeCpa !== undefined ? cShips.orangeCpa : (cfg.commercialOrangeCpa || 1852);
-            const commercialMaxTcpa = cShips.maxTcpa !== undefined ? cShips.maxTcpa : (cfg.commercialMaxTcpa || 15);
-            const wBoats = cfg.workboats || {};
-            const workRedCpa = wBoats.redCpa !== undefined ? wBoats.redCpa : (cfg.workRedCpa || 350);
-            const workOrangeCpa = wBoats.orangeCpa !== undefined ? wBoats.orangeCpa : Math.round(workRedCpa * 2.15);
-            const workMaxTcpa = wBoats.maxTcpa !== undefined ? wBoats.maxTcpa : (cfg.workMaxTcpa || 12);
             this.collisionPipeline.updateConfig({
-                yachtRedCpaMeters: yachtRedCpa,
-                yachtOrangeCpaMeters: yachtOrangeCpa,
-                yachtHorizonTcpaMin: yachtMaxTcpa,
-                commercialRedCpaMeters: commercialRedCpa,
-                commercialOrangeCpaMeters: commercialOrangeCpa,
-                commercialHorizonTcpaMin: commercialMaxTcpa,
-                workRedCpaMeters: workRedCpa,
-                workOrangeCpaMeters: workOrangeCpa,
-                workHorizonTcpaMin: workMaxTcpa
+                yachtRedCpaMeters: cfg.pleasureCraft?.redCpa ?? cfg.yachtRedCpa ?? 250,
+                commercialRedCpaMeters: cfg.commercialShips?.redCpa ?? cfg.commercialRedCpa ?? 800,
+                workRedCpaMeters: cfg.workboats?.redCpa ?? cfg.workRedCpa ?? 400,
+                baseTcpaMinutes: cfg.baseTcpaMinutes ?? PLUGIN_BASE_TCPA_MINUTES,
             });
 
             const ownShipInput = {
+                ...this.getOwnGeometry(),
                 lat: myGps.lat,
                 lon: myGps.lon,
                 sog: mySpeedKn,
@@ -341,13 +402,20 @@ class AisEngine {
                     }
 
                     const realAisTime = Math.min(parsedTime, now);
+                    const motionTimestamp = (node, value) => {
+                        if (value === null || value === undefined || !Number.isFinite(Number(value))) return null;
+                        const timestamp = Date.parse(node?.timestamp);
+                        return Number.isFinite(timestamp) && timestamp <= now + 30000 ? timestamp : null;
+                    };
+                    const lastCogTime = motionTimestamp(cogNode, cogVal);
+                    const lastSogTime = motionTimestamp(sogNode, sogVal);
 
                     const cachedTarget = this.aisPersistentCache[key];
                     if (cachedTarget && realAisTime < cachedTarget.lastSeen) continue;
                     const mooredHint = navStateRaw.includes('moored') || navStateRaw === '5' || Boolean(cachedTarget && cachedTarget.isMoored);
                     const anchoredHint = navStateRaw.includes('anchor') || navStateRaw === '1';
                     const motion = this.motionTracker.update(key, {
-                        lat: vLat, lon: vLon, t: realAisTime, sog, cog,
+                        lat: vLat, lon: vLon, t: realAisTime, sourceTime: parsedTime, sog, cog,
                     }, { now, historyMs: maxTrailAgeMs, moored: mooredHint, anchored: anchoredHint });
 
                     let shipType = 0;
@@ -377,6 +445,14 @@ class AisEngine {
                         let bVal = v.design.beam.value !== undefined ? v.design.beam.value : v.design.beam;
                         beam = (typeof bVal === 'object' && bVal !== null) ? parseFloat(bVal.value) : parseFloat(bVal);
                     }
+                    const readAisOffset = name => {
+                        const node = v.sensors && v.sensors.ais && v.sensors.ais[name];
+                        const value = node && typeof node === 'object' ? node.value : node;
+                        return typeof value === 'number' && Number.isFinite(value) ? value : null;
+                    };
+                    const previous = this.aisPersistentCache[key];
+                    const fromBow = readAisOffset('fromBow') ?? (previous ? previous.fromBow : null);
+                    const fromCenter = readAisOffset('fromCenter') ?? (previous ? previous.fromCenter : null);
                     let draft = null;
                     if (v.design && v.design.draft) {
                         let dVal = v.design.draft.value !== undefined ? v.design.draft.value : v.design.draft;
@@ -419,12 +495,19 @@ class AisEngine {
                         callsign: callsign || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].callsign : ""),
                         length: length || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].length : null),
                         beam: beam || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].beam : null),
+                        fromBow,
+                        fromCenter,
                         draft: draft || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].draft : null),
                         destination: destination || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].destination : ""),
                         eta: eta || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].eta : ""),
                         aisClass: aisClass,
                         hdg: hdg !== null ? Math.round((hdg + 360) % 360) : (this.aisPersistentCache[key] ? this.aisPersistentCache[key].hdg : null),
                         lastSeen: realAisTime,
+                        positionSourceTime: parsedTime,
+                        lastCogTime,
+                        lastSogTime,
+                        contactLost: Boolean(cachedTarget?.contactLost && realAisTime <= cachedTarget.lastSeen),
+                        contactLostAt: cachedTarget?.contactLost && realAisTime <= cachedTarget.lastSeen ? cachedTarget.contactLostAt : undefined,
                         motionState: motion.motionState,
                         isMoored: this.aisPersistentCache[key] ? Boolean(this.aisPersistentCache[key].isMoored) : false
                     };
@@ -440,9 +523,16 @@ class AisEngine {
                     v.lastSeen = now;
                     age = 0;
                 }
-                let maxAgeAllowed = (motion ? motion.isMoving : v.sog >= 0.8) ? 360000 : 900000;
+                let maxAgeAllowed = (motion ? motion.isMoving : v.sog >= 0.8)
+                    ? COLLISION_THRESHOLD_DEFAULTS.movingTargetMaxAgeSeconds * 1000
+                    : COLLISION_THRESHOLD_DEFAULTS.stationaryTargetMaxAgeSeconds * 1000;
                 if (age > maxAgeAllowed) {
-                    delete this.aisPersistentCache[key];
+                    const alarm = this.collisionPipeline.targetStates.get(key)?.currentState;
+                    if (alarm === 'RED' || alarm === 'ORANGE') {
+                        v.contactLost = true;
+                        v.contactLostAt = v.lastSeen + maxAgeAllowed;
+                    }
+                    else delete this.aisPersistentCache[key];
                 }
             }
 
@@ -462,7 +552,7 @@ class AisEngine {
                     continue;
                 }
                 let currentDist = distanceMeters(myGps.lat, myGps.lon, v.lat, v.lon);
-                if (currentDist > MAX_DISTANCE_METERS) continue;
+                if (currentDist > MAX_DISTANCE_METERS && !v.contactLost) continue;
 
                 const motion = this.motionTracker.get(key, now, maxTrailAgeMs);
                 const isMoving = motion ? motion.isMoving : v.sog >= 0.8;
@@ -477,8 +567,10 @@ class AisEngine {
                 let outLat = v.lat;
                 let outLon = v.lon;
 
-                // Dead-reckoning dal primo intervallo di 15s e SOG >= 1.5 kn
-                if (isMoving && age >= 15000 && v.sog >= 1.5) {
+                // Project real movement recognized by the tracker, including slow
+                // departures. Stationary jitter and unconfirmed motion stay fixed.
+                const isProjected = isMoving && age >= 15000 && Number.isFinite(v.sog) && v.sog > 0;
+                if (isProjected) {
                     let t_hours = age / 3600000;
                     let distProj = (v.sog * 1852) * t_hours;
                     outLat = v.lat + (distProj * Math.cos(d2r(v.cog))) / 111139;
@@ -496,20 +588,35 @@ class AisEngine {
                     lon: outLon,
                     sog: isMoving ? v.sog : 0,
                     cog: v.cog,
+                    hdg: v.hdg,
                     isMoving,
+                    contactLost: Boolean(v.contactLost),
                     motionState: motion ? motion.motionState : undefined,
+                    predictionStability: motion ? motion.predictionStability : undefined,
                     shipType: tCode,
                     lastUpdate: v.lastSeen,
                     isClassB: v.aisClass !== "A",
                     length: v.length,
                     beam: v.beam,
+                    ...(v.length > 0 && v.fromBow != null && v.fromBow >= 0 && v.fromBow <= v.length
+                        ? { antBow: v.fromBow, antStern: v.length - v.fromBow } : {}),
+                    ...(v.beam > 0 && v.fromCenter != null && Math.abs(v.fromCenter) <= v.beam / 2
+                        ? { antPort: v.beam / 2 - v.fromCenter, antStarboard: v.beam / 2 + v.fromCenter } : {}),
                     isMoored: isMoored,
                     anchorState: anchorState
                 }, now);
 
-                let cpa = evalRes ? evalRes.cpaNominalMeters : null;
+                // Keep only the existing encounter after contact loss. Once its
+                // normal recovery completes, remove the expired contact entirely.
+                if (v.contactLost && (!evalRes || evalRes.alertState === 'NO_DANGER')) {
+                    delete this.aisPersistentCache[key];
+                    this.motionTracker.remove(key);
+                    this.collisionPipeline.targetStates.delete(key);
+                    continue;
+                }
+
+                let cpa = evalRes ? Math.round(evalRes.cpaNominalMeters) : null;
                 let tcpa = (evalRes && evalRes.tcpaMinutes >= 0) ? evalRes.tcpaMinutes : -1;
-                let isDeferred = evalRes ? Boolean(evalRes.isDeferred) : false;
                 let trend = evalRes ? evalRes.trend : 'STABLE';
                 let risk = (evalRes && evalRes.alertState !== 'NO_DANGER') ? evalRes.alertState : "GREY";
                 let riskMsg = (evalRes && evalRes.alertState !== 'NO_DANGER') ? (evalRes.reason || "") : "";
@@ -536,8 +643,17 @@ class AisEngine {
                     motionState: motion ? motion.motionState : undefined,
                     stationarySince: motion ? motion.stationarySince : null,
                     lastPositionTime: v.lastSeen,
+                    isProjected,
+                    contactLost: Boolean(v.contactLost),
+                    contactLostAt: v.contactLostAt,
+                    predictionStability: motion ? motion.predictionStability : undefined,
+                    effectiveThresholds: evalRes?.effectiveThresholds,
+                    lastCogTime: v.lastCogTime,
+                    lastSogTime: v.lastSogTime,
+                    motionDataSync: evaluateMotionDataSync(v.positionSourceTime, v.lastCogTime, v.lastSogTime, evalRes?.effectiveThresholds?.horizonTcpa),
+                    warningBasis: evalRes?.warningBasis,
+                    instabilityWarning: evalRes?.instabilityWarning,
                     risk: risk,
-                    isDeferred: isDeferred,
                     trend: trend,
                     riskMsg: riskMsg,
                     cpa: cpa,
@@ -570,7 +686,6 @@ class AisEngine {
                 if (v.isMoored || v.inCluster) {
                     v.isMoving = false;
                     v.risk = "GREY";
-                    v.isDeferred = false;
                     v.riskMsg = "";
                     v.cpa = null;
                     v.tcpa = -1;
@@ -580,16 +695,16 @@ class AisEngine {
                 }
             }
 
-            // 8. Ordinamento Bersagli per Pericolosità (Immediati > Differiti, RED > ORANGE > GREY) e Distanza
+            // 8. Ordinamento Bersagli per Pericolosità (RED > ORANGE > GREY) e Distanza
             this.collisionPipeline.pruneInactive(now);
             this.collisionPipeline.sortTargets(nearbyVessels);
 
             this.lastNearbyVessels = nearbyVessels;
             this.lastHarborClusters = harborClusters;
 
-            // 9. Individuazione del Top Threat per il Banner (esclude gli allarmi differibili)
-            const redThreat = nearbyVessels.find(v => v.risk === "RED" && !v.isDeferred);
-            const orangeThreat = nearbyVessels.find(v => v.risk === "ORANGE" && !v.isDeferred);
+            // 9. Individuazione del Top Threat per il Banner
+            const redThreat = nearbyVessels.find(v => v.risk === "RED");
+            const orangeThreat = nearbyVessels.find(v => v.risk === "ORANGE");
             this.topThreat = redThreat || orangeThreat || null;
 
             // 10. Emissione Delta WebSocket verso la Dashboard
@@ -625,5 +740,6 @@ module.exports = {
     d2r,
     r2d,
     distanceMeters,
-    compactAisTrail
+    compactAisTrail,
+    evaluateMotionDataSync,
 };

@@ -1,11 +1,15 @@
-import React from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AisTarget } from '../types';
+
+const BANNER_SNOOZE_DELAY_MS = 3000;
+const AIS_AGE_NOTICE_WINDOW_FRACTION = 0.2;
 
 interface AisTacticalBannerProps {
   threat: AisTarget | null;
   onInspect: (target: AisTarget) => void;
   onSnooze: (targetId: string) => void;
   isNightMode?: boolean;
+  isInspecting?: boolean;
 }
 
 export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
@@ -13,15 +17,51 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
   onInspect,
   onSnooze,
   isNightMode,
+  isInspecting = false,
 }) => {
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const hasBanner = Boolean(threat && threat.risk !== 'GREY');
+  useLayoutEffect(() => {
+    const banner = bannerRef.current;
+    const wrapper = banner?.parentElement;
+    if (!banner || !wrapper) return;
+    const measure = () => wrapper.style.setProperty('--ais-banner-height', `${banner.offsetHeight}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(banner);
+    return () => {
+      observer.disconnect();
+      wrapper.style.removeProperty('--ais-banner-height');
+    };
+  }, [hasBanner]);
+  const snoozeKey = !isInspecting && threat && (threat.risk === 'RED' || threat.risk === 'ORANGE')
+    ? `${threat.id}:${threat.risk}` : null;
+  const [readySnoozeKey, setReadySnoozeKey] = useState<string | null>(null);
+  useEffect(() => {
+    setReadySnoozeKey(null);
+    if (!snoozeKey) return;
+    const timer = setTimeout(() => setReadySnoozeKey(snoozeKey), BANNER_SNOOZE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [snoozeKey]);
+  // Comparing identities also hides the button on the first render of a new
+  // target, before the effect runs. Metric updates do not restart the delay.
+  const canSnooze = snoozeKey !== null && readySnoozeKey === snoozeKey;
+
   if (!threat || threat.risk === 'GREY') return null;
 
   const isCollisionDanger = threat.risk === 'RED';
   const cpaText = threat.cpa !== null ? (threat.cpa < 1852 ? `${threat.cpa} m` : `${(threat.cpa / 1852).toFixed(2)} NM`) : '--';
   const tcpaText = threat.tcpa !== null && threat.tcpa >= 0 ? `${threat.tcpa.toFixed(1)} min` : '--';
+  const horizonMinutes = threat.effectiveThresholds?.horizonTcpa;
+  const showAgeNotice = Number.isFinite(threat.age) && Number.isFinite(horizonMinutes) &&
+    horizonMinutes > 0 && threat.age > horizonMinutes * 60 * AIS_AGE_NOTICE_WINDOW_FRACTION;
+  const ageText = threat.age < 60 ? `${Math.floor(threat.age)} sec` : `${Math.floor(threat.age / 60)} min`;
+  const positionText = threat.isProjected === true ? 'Estimated position'
+    : threat.isProjected === false ? 'Last reported position' : 'Position data';
 
   return (
     <div
+      ref={bannerRef}
       className={`ais-tactical-banner ${isCollisionDanger ? 'banner-collision-red' : 'banner-warning-orange'} ${
         isNightMode ? 'night-theme' : ''
       }`}
@@ -30,7 +70,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
       <div className="banner-content">
         <div className="banner-header-row">
           <span className="banner-badge">
-            {isCollisionDanger ? '🚨 ARPA COLLISION ALARM' : '⚠️ CROSSING WARNING'}
+            {isCollisionDanger ? '🚨 ARPA COLLISION ALARM' : threat.warningBasis === 'INSTABILITY' ? '⚠️ VARIABLE TRAJECTORY WARNING' : '⚠️ CROSSING WARNING'}
           </span>
           <span className="banner-vessel-name">
             {threat.name || threat.id}
@@ -77,11 +117,13 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
           </div>
         </div>
 
-        {threat.crossDir && (
-          <div className="banner-colregs-row">
-            <span className="colregs-label">COLREGs:</span>
-            <span className="colregs-text">{threat.crossDir.replace('\n', ' ')}</span>
+        {(threat.contactLost || showAgeNotice) && (
+          <div className="banner-age-notice">
+            {threat.contactLost ? 'AIS contact lost · estimated position' : positionText} · last AIS {ageText} ago
           </div>
+        )}
+        {threat.motionDataSync?.status === 'OUT_OF_SYNC' && (
+          <div className="banner-age-notice">Motion data out of sync</div>
         )}
       </div>
 
@@ -97,7 +139,9 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
         <button
           type="button"
           className="banner-btn btn-snooze"
-          onClick={() => onSnooze(threat.id)}
+          disabled={!canSnooze}
+          style={{ visibility: canSnooze ? 'visible' : 'hidden' }}
+          onClick={() => { if (canSnooze) onSnooze(threat.id); }}
           title="Snooze alarm for 10 minutes"
         >
           SNOOZE 10M

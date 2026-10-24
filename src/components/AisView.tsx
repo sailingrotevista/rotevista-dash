@@ -2,6 +2,10 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AisTarget, HarborCluster, PropulsionMode } from '../types';
+import { getAvailableMapArea, getMapCenterOffset } from '../utils/mapViewport.mjs';
+import { chooseAisLabelPlacement, escapeAisLabelText } from '../utils/aisLabelPlacement.mjs';
+import { openDashboardMenu } from '../utils/dashboardModes.mjs';
+import { compareAisTargets } from '../utils/aisPriority.mjs';
 
 // PARAMETRI VISIVI ETÀ AIS — tempi in secondi, opacità da 0 a 1.
 // L'età è quella dell'ultimo fix ricevuto: le proiezioni non la azzerano.
@@ -42,6 +46,8 @@ interface AisViewProps {
   isNightMode: boolean;
   onSwitchToWind: () => void;
   onSnoozeThreat: (targetId: string) => void;
+  onInspectionChange?: (isInspecting: boolean) => void;
+  mixedSimulation?: boolean;
   onReopenTopThreat?: () => void;
   selectedTargetId: string | null;
   onSelectTarget: (targetId: string | null) => void;
@@ -113,6 +119,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   isNightMode,
   onSwitchToWind,
   onSnoozeThreat,
+  onInspectionChange,
+  mixedSimulation = false,
   onReopenTopThreat,
   selectedTargetId,
   onSelectTarget,
@@ -152,6 +160,9 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   const [showListDrawer, setShowListDrawer] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [selectedTarget, setSelectedTarget] = useState<AisTarget | null>(null);
+  useEffect(() => {
+    onInspectionChange?.(Boolean(isActive && showListDrawer && selectedTarget));
+  }, [isActive, showListDrawer, selectedTarget?.id, onInspectionChange]);
   const [targetDetailTab, setTargetDetailTab] = useState<'telemetry' | 'info'>('info');
   const [copiedMmsi, setCopiedMmsi] = useState<boolean>(false);
   const [ackedLabels, setAckedLabels] = useState<Record<string, string>>({});
@@ -171,6 +182,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   const targetsRef = useRef<AisTarget[]>(targets);
   targetsRef.current = targets;
   const smoothMarkersRef = useRef<Record<string, L.Marker>>({});
+  const labelSidesRef = useRef<Record<string, string>>({});
+  const labelSizesRef = useRef(new Map<string, { width: number; height: number }>());
   const isZoomingRef = useRef<boolean>(false);
   const interactingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [zoomSyncTick, setZoomSyncTick] = useState<number>(0);
@@ -196,35 +209,38 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     releaseMapTransitions(fallbackReleaseMs);
   }, [releaseMapTransitions]);
 
-  // Calcola il centro geografico corretto adattandosi a Desktop (Orizzontale) e Mobile (Verticale)
+  // Measure the actual map and panel, independently of device orientation.
+  const getVisibleMapArea = useCallback(() => {
+    const map = mapRef.current;
+    const element = mapContainerRef.current;
+    if (!map || !element) return null;
+    const bounds = element.getBoundingClientRect();
+    const size = map.getSize();
+    const panel = showListDrawerRef.current ? cardRef.current?.getBoundingClientRect() : null;
+    const controls = element.parentElement?.querySelector('.ais-map-controls-dock')?.getBoundingClientRect();
+    const topBar = element.parentElement?.querySelector('.ais-top-left-group')?.getBoundingClientRect();
+    return getAvailableMapArea(size.x, size.y, panel ? {
+      left: panel.left - bounds.left, right: panel.right - bounds.left,
+      top: panel.top - bounds.top, bottom: panel.bottom - bounds.top,
+    } : null, {
+      left: 16,
+      right: controls ? Math.max(16, bounds.right - controls.left + 12) : 16,
+      top: topBar ? Math.max(16, topBar.bottom - bounds.top + 12) : 16,
+      bottom: 72,
+    });
+  }, []);
+
   const getOffsetCenter = useCallback(
     (latLng: [number, number], zoomOverride?: number): L.LatLng => {
-      if (!mapRef.current || !showListDrawer) {
-        return L.latLng(latLng[0], latLng[1]);
-      }
-
-      const zoom = zoomOverride !== undefined ? zoomOverride : mapRef.current.getZoom();
-      const rect = cardRef.current?.getBoundingClientRect();
-      const isMobilePortrait = window.innerWidth < 640 || window.innerWidth < window.innerHeight;
-
-      let pixelOffsetX = 0;
-      let pixelOffsetY = 0;
-
-      if (isMobilePortrait) {
-        // Mobile Portrait: la scheda è in alto, posiziona il target al centro della fascia libera inferiore
-        const cardBottom = rect ? rect.bottom : 320;
-        pixelOffsetY = -Math.max(0, cardBottom / 2);
-      } else {
-        // Desktop / Landscape: la scheda è a destra, posiziona il target al centro della fascia libera sinistra
-        const cardLeft = rect ? rect.left : Math.max(80, window.innerWidth - (360 + 68));
-        pixelOffsetX = Math.max(0, (window.innerWidth - cardLeft) / 2);
-      }
-
-      const targetPoint = mapRef.current.project(latLng, zoom);
-      const offsetCenterPoint = targetPoint.add([pixelOffsetX, pixelOffsetY]);
-      return mapRef.current.unproject(offsetCenterPoint, zoom);
-    },
-    [showListDrawer]
+      const map = mapRef.current;
+      if (!map || !showListDrawerRef.current) return L.latLng(latLng[0], latLng[1]);
+      const area = getVisibleMapArea();
+      if (!area) return L.latLng(latLng[0], latLng[1]);
+      const size = map.getSize();
+      const offset = getMapCenterOffset(size.x, size.y, area);
+      const zoom = zoomOverride ?? map.getZoom();
+      return map.unproject(map.project(latLng, zoom).add(offset), zoom);
+    }, [getVisibleMapArea]
   );
 
   // Sync selectedTarget and ackedLabels with targets risk transitions
@@ -357,6 +373,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     });
     map.on('moveend dragend', () => {
       releaseMapTransitions();
+      setZoomSyncTick(value => value + 1);
     });
 
     map.on('dragstart', () => {
@@ -569,11 +586,15 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       followModeRef.current = 'target';
       lastFollowPosRef.current = { lat: target.lat, lon: target.lon, mode: 'target', targetId: target.id };
       const isDrawerVisible = openDrawer !== undefined ? openDrawer : showListDrawerRef.current;
-      const targetCenter = isDrawerVisible
-        ? getOffsetCenter([target.lat, target.lon])
-        : L.latLng(target.lat, target.lon);
-      mapRef.current.panTo(targetCenter, { animate: true });
-      releaseMapTransitions();
+      // React must replace the list with target details before measuring the panel.
+      requestAnimationFrame(() => {
+        if (!mapRef.current) return;
+        const targetCenter = isDrawerVisible
+          ? getOffsetCenter([target.lat, target.lon])
+          : L.latLng(target.lat, target.lon);
+        mapRef.current.panTo(targetCenter, { animate: true });
+        releaseMapTransitions();
+      });
     },
     [getOffsetCenter, suspendMapTransitions, releaseMapTransitions]
   );
@@ -630,18 +651,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       }
 
       const bounds = L.latLngBounds(pts);
-      const isMobilePortrait = window.innerWidth < 640 || window.innerWidth < window.innerHeight;
-
-      let paddingTopLeft: [number, number] = [60, 100];
-      let paddingBottomRight: [number, number] = [60, 60];
-
-      if (isMobilePortrait) {
-        paddingTopLeft = [40, 260];
-        paddingBottomRight = [40, 60];
-      } else {
-        paddingTopLeft = [60, 100];
-        paddingBottomRight = [390, 60];
-      }
+      const size = mapRef.current.getSize();
+      const area = getVisibleMapArea();
+      const paddingTopLeft: [number, number] = area ? [area.left, area.top] : [40, 40];
+      const paddingBottomRight: [number, number] = area ? [size.x - area.right, size.y - area.bottom] : [40, 40];
 
       suspendMapTransitions();
       setFollowedTargetId(target.id);
@@ -662,7 +675,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       });
       releaseMapTransitions();
     },
-    [ownShipPosition, ownShipCourse, suspendMapTransitions, releaseMapTransitions]
+    [ownShipPosition, ownShipCourse, getVisibleMapArea, suspendMapTransitions, releaseMapTransitions]
   );
 
   // Ripristina inquadratura mappa e posizione scroll lista al ritorno dal dettaglio
@@ -750,7 +763,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       const isThreatActive =
         followedTarget &&
         (followedTarget.risk === 'RED' || followedTarget.risk === 'ORANGE') &&
-        (followedTarget.tcpa === null || followedTarget.tcpa === undefined || followedTarget.tcpa > 0);
+        (followedTarget.tcpa === null || followedTarget.tcpa === undefined || followedTarget.tcpa >= 0);
 
       if (!isThreatActive) {
         cameraSnapshotRef.current = null;
@@ -816,6 +829,47 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       map.panTo(targetCenter, { animate: true, duration: 2.0, easeLinearity: 0.25 });
     }
   }, [isActive, ownShipPosition.lat, ownShipPosition.lon, followedTarget?.lat, followedTarget?.lon, followedTarget?.risk, followedTarget?.tcpa, followMode, followedTarget?.id, getOffsetCenter]);
+
+  const collisionLayoutRef = useRef(zoomToCollisionTriangle);
+  collisionLayoutRef.current = zoomToCollisionTriangle;
+
+  // Panel content, tabs and viewport changes can alter the free map area.
+  useEffect(() => {
+    if (!isActive || !mapRef.current) return;
+    let frame = 0;
+    const recenter = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const map = mapRef.current;
+        if (!map || followModeRef.current === 'none') return;
+        const target = targetsRef.current.find(t => t.id === followedTargetIdRef.current);
+        if (followModeRef.current === 'intersection' && target) {
+          collisionLayoutRef.current(target, Boolean(cameraSnapshotRef.current));
+        } else {
+          const pos = followModeRef.current === 'own' ? ownShipPositionRef.current : target;
+          if (pos) map.panTo(getOffsetCenter([pos.lat, pos.lon]), { animate: true });
+        }
+      });
+    };
+    const observer = new ResizeObserver(recenter);
+    const panel = cardRef.current;
+    const panelAnimationEnded = (event: Event) => {
+      if (event.target === panel) recenter();
+    };
+    if (panel) {
+      observer.observe(panel);
+      panel.addEventListener('animationend', panelAnimationEnded);
+      panel.addEventListener('transitionend', panelAnimationEnded);
+    }
+    if (mapContainerRef.current) observer.observe(mapContainerRef.current);
+    recenter();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      panel?.removeEventListener('animationend', panelAnimationEnded);
+      panel?.removeEventListener('transitionend', panelAnimationEnded);
+    };
+  }, [isActive, showListDrawer, selectedTarget?.id, targetDetailTab, getOffsetCenter]);
 
   // Seleziona e inquadra con smart zoom il triangolo di collisione quando cambia inspectToken o selectedTargetId dall'esterno
   const prevInspectTokenRef = useRef<number | undefined>(undefined);
@@ -1029,17 +1083,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     // Determina la minaccia primaria in assoluto e il bersaglio attivo per le Ghost Ships
     const primaryThreatId = (() => {
       const threats = targets.filter(
-        t => (t.risk === 'RED' || t.risk === 'ORANGE') && !t.isDeferred && t.sog >= 0.5 && t.tcpa !== null && t.tcpa !== undefined && t.tcpa > 0
+        t => (t.risk === 'RED' || t.risk === 'ORANGE') && t.sog >= 0.5 && t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0
       );
       if (threats.length === 0) return null;
-      threats.sort((a, b) => {
-        if (a.risk !== b.risk) return a.risk === 'RED' ? -1 : 1;
-        const cpaA = a.cpa ?? a.dist;
-        const cpaB = b.cpa ?? b.dist;
-        const tcpaA = a.tcpa ?? 999;
-        const tcpaB = b.tcpa ?? 999;
-        return (cpaA + tcpaA * 60) - (cpaB + tcpaB * 60);
-      });
+      threats.sort(compareAisTargets);
       return threats[0].id;
     })();
     const activeGhostTargetId = selectedTarget ? selectedTarget.id : primaryThreatId;
@@ -1157,9 +1204,23 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       { isRings: true }
     );
 
-    // 2. Targets Markers
-
-    targets.forEach(t => {
+    // Selected labels get first choice, then threats in their existing priority order.
+    const map = mapRef.current;
+    const mapSize = map.getSize();
+    const mapRect = mapContainerRef.current!.getBoundingClientRect();
+    const labelViewport = { left: 8, top: 8, right: mapSize.x - 8, bottom: mapSize.y - 8 };
+    const labelObstacles: { rect: { left: number; right: number; top: number; bottom: number }; weight: number }[] = [];
+    const root = mapContainerRef.current?.parentElement;
+    root?.querySelectorAll('.ais-dropdown-card, .ais-top-actions, .ais-top-left-group, .ais-map-controls-dock, .ais-floating-wind-btn, .ais-floating-support-btn').forEach(element => {
+      const r = element.getBoundingClientRect();
+      labelObstacles.push({ rect: { left: r.left - mapRect.left, right: r.right - mapRect.left,
+        top: r.top - mapRect.top, bottom: r.bottom - mapRect.top }, weight: 20 });
+    });
+    const ownPixel = map.latLngToContainerPoint([ownShipPosition.lat, ownShipPosition.lon]);
+    labelObstacles.push({ rect: { left: ownPixel.x - 18, right: ownPixel.x + 18, top: ownPixel.y - 18, bottom: ownPixel.y + 18 }, weight: 8 });
+    const targetPixels = new Map(targets.map(t => [t.id, map.latLngToContainerPoint([t.lat, t.lon])]));
+    const renderTargets = [...targets].sort((a, b) => Number(b.id === selectedTarget?.id) - Number(a.id === selectedTarget?.id));
+    renderTargets.forEach(t => {
       const isRed = t.risk === 'RED';
       const isOrange = t.risk === 'ORANGE';
       const isSelected = selectedTarget?.id === t.id;
@@ -1330,17 +1391,54 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         const borderColor = isRed ? 'rgba(220,38,38,0.55)' : isOrange ? 'rgba(234,88,12,0.55)' : 'rgba(2,132,199,0.55)';
         const isTargetMoving = t.isMoving !== undefined ? t.isMoving : (!t.isAnchored && !isMoored && t.sog >= 0.3);
         const placeLeft = isTargetMoving && t.cog >= 20 && t.cog <= 160;
-        const offsetTransform = placeLeft ? 'translate(calc(-100% - 16px), -50%)' : 'translate(16px, -50%)';
+        const offsetTransform = 'translate(0px, 0px)';
         const statusLine = (isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : getVesselStatusLabel(t)) +
-          (ageVisual.stale ? ` • AIS ${formatAge(t.age)}` : '');
+          (t.contactLost ? ` • AIS CONTACT LOST · ${formatAge(t.age)}` : ageVisual.stale ? ` • AIS ${formatAge(t.age)}` : '');
         const tcpaTxt = t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` in ${Math.round(t.tcpa)} min` : '';
         const cpaOrDistLine = isRed
           ? `🚨 ${t.riskMsg || 'COLLISION!'}${t.cpa !== null && t.cpa !== undefined ? ` • CPA: ${formatDist(t.cpa)}` : ''}${tcpaTxt}`
           : `${isOrange ? '⚠️ ' : ''}${t.cpa !== null && t.cpa !== undefined ? `CPA: ${formatDist(t.cpa)}` : `Dist: ${formatDist(t.dist)}`}${tcpaTxt}`;
         const compactMetrics = `${t.cpa !== null && t.cpa !== undefined ? `CPA ${formatDist(t.cpa)}` : formatDist(t.dist)}${t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` • ${Math.round(t.tcpa)}m` : ''}`;
-        const labelHtml = isExtendedLabel
-          ? `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to inspect target"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${t.name || 'Unknown'}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${cpaOrDistLine}</span></div></div>`
+        let labelHtml = isExtendedLabel
+          ? `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to inspect target"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${escapeAisLabelText(t.name || 'Unknown')}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${escapeAisLabelText(cpaOrDistLine)}</span></div></div>`
           : `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:4px;background:rgba(255,255,255,0.78);border:1.5px solid ${borderColor};border-radius:8px;padding:2px 6px;box-shadow:0 2px 6px rgba(0,0,0,0.14);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to select target"><span style="font-size:12px;line-height:1;">${isRed ? '🚨' : '⚠️'}</span><span style="font-size:11px;font-weight:900;color:${metricColor};letter-spacing:-0.3px;">${compactMetrics}</span></div>`;
+
+        // Measure actual HTML dimensions (cached), so font size and long names count.
+        const maxLabelWidth = Math.max(40, mapSize.x - 16);
+        labelHtml = labelHtml.replace('display:inline-flex;', `max-width:${maxLabelWidth}px;box-sizing:border-box;overflow:hidden;display:inline-flex;`);
+        let labelSize = labelSizesRef.current.get(labelHtml);
+        if (!labelSize) {
+          const measure = document.createElement('div');
+          measure.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;left:0;top:0;';
+          measure.innerHTML = labelHtml;
+          mapContainerRef.current!.appendChild(measure);
+          const rect = measure.firstElementChild!.getBoundingClientRect();
+          labelSize = { width: rect.width, height: rect.height };
+          measure.remove();
+          if (labelSizesRef.current.size >= 100) labelSizesRef.current.delete(labelSizesRef.current.keys().next().value!);
+          labelSizesRef.current.set(labelHtml, labelSize);
+        }
+        const anchor = targetPixels.get(t.id)!;
+        const otherSymbols = [...targetPixels.entries()].filter(([id]) => id !== t.id).map(([, pt]) => ({
+          rect: { left: pt.x - 16, right: pt.x + 16, top: pt.y - 16, bottom: pt.y + 16 }, weight: 8,
+        }));
+        const segments: { from: { x: number; y: number }; to: { x: number; y: number } }[] = [];
+        const routeLength = Math.max(targetVecPx, targetGhostPx);
+        if (routeLength > 0) {
+          const radians = t.cog * Math.PI / 180;
+          segments.push({ from: anchor, to: { x: anchor.x + Math.sin(radians) * routeLength, y: anchor.y - Math.cos(radians) * routeLength } });
+        }
+        const trailCutoff = Date.now() - vecMins * (isSelected ? 1 : 1 / 3) * 60000;
+        const trailPixels = (t.trail || []).filter(pt => Number.isFinite(pt.t) && pt.t! >= trailCutoff)
+          .map(pt => map.latLngToContainerPoint([pt.lat, pt.lon]));
+        trailPixels.push(anchor);
+        for (let i = 1; i < trailPixels.length; i++) segments.push({ from: trailPixels[i - 1], to: trailPixels[i] });
+        const placement = chooseAisLabelPlacement({ anchor, ...labelSize, viewport: labelViewport,
+          obstacles: [...labelObstacles, ...otherSymbols], segments,
+          preferredSide: placeLeft ? 'left' : 'right', previousSide: labelSidesRef.current[t.id] });
+        labelSidesRef.current[t.id] = placement.side;
+        labelObstacles.push({ rect: placement.rect, weight: 12 });
+        labelHtml = labelHtml.replace(offsetTransform, `translate(${placement.dx.toFixed(1)}px, ${placement.dy.toFixed(1)}px)`);
 
         upsertSmoothMarker(
           `lbl:${t.id}`,
@@ -1407,13 +1505,16 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       }
     });
 
+    Object.keys(labelSidesRef.current).forEach(id => {
+      if (!activeKeys.has(`lbl:${id}`)) delete labelSidesRef.current[id];
+    });
     Object.keys(smoothMarkersRef.current).forEach(k => {
       if (!activeKeys.has(k)) {
         smoothMarkersRef.current[k].remove();
         delete smoothMarkersRef.current[k];
       }
     });
-  }, [isActive, targets, ownShipPosition, ownShipCourse, selectedTarget, ackedLabels, mapZoom, zoomSyncTick, isNightMode, onSelectTarget, handleCenterOnTarget, handleCenterOnOwnShip, vectorMinutes]);
+  }, [isActive, targets, ownShipPosition, ownShipCourse, selectedTarget, ackedLabels, mapZoom, zoomSyncTick, isNightMode, onSelectTarget, handleCenterOnTarget, handleCenterOnOwnShip, vectorMinutes, showListDrawer, targetDetailTab]);
 
   // Zoom handlers (ancorati al bersaglio/propria barca se selezionati, altrimenti al centro dello schermo)
   const handleZoomIn = useCallback(() => {
@@ -1480,23 +1581,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     };
   }, [targets]);
 
-  // Sorted targets for register drawer (Gerarchia ARPA: Gravità -> TCPA convergente -> CPA/Distanza)
-  const sortedTargets = useMemo(() => {
-    const list = [...targets];
-    const weight = { RED: 3, ORANGE: 2, GREY: 1 };
-    return list.sort((a, b) => {
-      const wDiff = (weight[b.risk] || 1) - (weight[a.risk] || 1);
-      if (wDiff !== 0) return wDiff;
-      if (a.risk === 'RED' || a.risk === 'ORANGE') {
-        const tcpaA = a.tcpa !== null && a.tcpa !== undefined && a.tcpa > 0 ? a.tcpa : Infinity;
-        const tcpaB = b.tcpa !== null && b.tcpa !== undefined && b.tcpa > 0 ? b.tcpa : Infinity;
-        if (Math.abs(tcpaA - tcpaB) > 0.5) return tcpaA - tcpaB;
-      }
-      const da = a.cpa !== null ? a.cpa : a.dist;
-      const db = b.cpa !== null ? b.cpa : b.dist;
-      return da - db;
-    });
-  }, [targets]);
+  // Shared instantaneous priority; the banner separately applies a switching hold.
+  const sortedTargets = useMemo(() => [...targets].sort(compareAisTargets), [targets]);
 
   return (
     <div className={`ais-view-container ${isNightMode ? 'night-mode' : 'day-mode'}`}>
@@ -1507,7 +1593,9 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       <div className="ais-top-bar">
         {/* TOP LEFT GROUP: BETA TAG & STATUS COUNTERS */}
         <div className="ais-top-left-group">
-          <div className="ais-beta-tag">Beta 2</div>
+          <button type="button" className="ais-beta-tag" title="Open dashboard menu" aria-label="Open dashboard menu" onClick={openDashboardMenu}>
+            {mixedSimulation ? 'LIVE + SIM' : 'Beta 2'}
+          </button>
           <div
             className="ais-status-counters"
             onClick={onReopenTopThreat}
@@ -1686,6 +1774,29 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                 </button>
               </div>
 
+              {(selectedTarget.risk === 'RED' || selectedTarget.risk === 'ORANGE') && (
+                <button
+                  type="button"
+                  className="banner-btn ais-detail-snooze"
+                  aria-label={`Snooze ${selectedTarget.name || selectedTarget.id} for 10 minutes`}
+                  onClick={() => {
+                    onSnoozeThreat(selectedTarget.id);
+                    setSelectedTarget(null);
+                    setShowListDrawer(false);
+                  }}
+                >
+                  SNOOZE 10M
+                </button>
+              )}
+
+              {selectedTarget.motionDataSync?.status === 'OUT_OF_SYNC' && (
+                <div className="ais-detail-alert-box orange">
+                  <span className="alert-title">Motion data out of sync</span>
+                  <span className="alert-desc">
+                    Position, course and speed timestamps differ by more than 20% of the prediction window.
+                  </span>
+                </div>
+              )}
               <div className="ais-detail-sub">
                 <span>
                   {getVesselTypeLabel(
@@ -1720,7 +1831,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                   style={{ cursor: 'pointer' }}
                   title="Tap to switch tab"
                 >
-                  ⏱️ {formatAge(selectedTarget.age)}
+                  ⏱️ {selectedTarget.contactLost ? 'AIS CONTACT LOST · ' : ''}{formatAge(selectedTarget.age)}
                 </span>
               </div>
 
@@ -1728,6 +1839,21 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                 /* KINEMATIC TELEMETRY */
                 <div className="ais-card-body-detail">
                   <div className="ais-detail-grid">
+                    {selectedTarget.effectiveThresholds && (
+                      <div className="ais-detail-cell cell-wide">
+                        <span className="ais-cell-label">APPLIED AIS LIMITS</span>
+                        <span className="ais-cell-val" style={{ fontSize: '0.85rem' }}>
+                          ALARM {formatDist(selectedTarget.effectiveThresholds.redCpa)} • WARNING {formatDist(selectedTarget.effectiveThresholds.orangeCpa)}
+                          {' • '}{selectedTarget.effectiveThresholds.horizonTcpa.toFixed(1)} min
+                        </span>
+                      </div>
+                    )}
+                    {selectedTarget.warningBasis === 'INSTABILITY' && (
+                      <div className="ais-detail-cell cell-wide">
+                        <span className="ais-cell-label">ADDITIONAL WARNING</span>
+                        <span className="ais-cell-val" style={{ fontSize: '0.85rem' }}>Possible close approach: variable trajectory</span>
+                      </div>
+                    )}
                     <div className="ais-detail-cell">
                       <span className="ais-cell-label">SOG / COG</span>
                       <span className="ais-cell-val">
@@ -1771,16 +1897,6 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                     </div>
                   )}
 
-                  {selectedTarget.crossDir && (
-                    <div
-                      className={`ais-detail-alert-box ${
-                        selectedTarget.risk === 'RED' ? 'red' : 'orange'
-                      }`}
-                    >
-                      <span className="alert-title">COLREGs-72:</span>
-                      <span className="alert-desc">{selectedTarget.crossDir}</span>
-                    </div>
-                  )}
                 </div>
               ) : (
                 /* STATIC INFO & DIMENSIONS */
@@ -1818,16 +1934,25 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                         📻 {selectedTarget.callsign || '--'} • {selectedTarget.flag || '--'}
                       </span>
                     </div>
+                    {selectedTarget.predictionStability && (
+                      <div className="ais-detail-cell cell-wide">
+                        <span className="ais-cell-label">TRAJECTORY STABILITY</span>
+                        <span className="ais-cell-val">
+                          {{ INSUFFICIENT_DATA: 'INSUFFICIENT DATA', STABLE: 'STABLE',
+                            VARIABLE: 'VARIABLE', MANEUVERING: 'CHANGE TO CONFIRM', NOT_MOVING: 'STATIONARY' }[selectedTarget.predictionStability.state]}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
-                  <a
+                  {!selectedTarget.isSimulated && <a
                     href={`https://www.vesselfinder.com/vessels?name=${selectedTarget.id.split(':').pop()}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn-vesselfinder"
                   >
                     🌐 View Photo on VesselFinder
-                  </a>
+                  </a>}
                 </div>
               )}
             </div>
@@ -1906,7 +2031,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                           <span className="target-item-name">{item.name || item.id}</span>
                           <span className="target-item-sub">
                             {getVesselTypeLabel(item.type, item.name)} • {getVesselStatusLabel(item)}
-                            {getTargetAgeVisual(item).stale && ` • AIS ${formatAge(item.age)}`}
+                            {item.contactLost ? ` • AIS CONTACT LOST · ${formatAge(item.age)}` : getTargetAgeVisual(item).stale && ` • AIS ${formatAge(item.age)}`}
                           </span>
                         </div>
                       </div>

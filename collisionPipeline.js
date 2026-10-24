@@ -5,9 +5,9 @@
  * ============================================================================
  * Modulo computazionale puro e macchina a stati per prevenzione collisioni AIS:
  * - Modulo 1: Inviluppo geometrico scafo (LOA, Beam, GPS antenna offset)
- * - Modulo 2: Cono dinamico di incertezza (fix age, jitter pos/vel/cog)
- * - Modulo 3: Cinematica vettoriale ARPA (CPA nominale, CPA min/max nel cono, TCPA)
- * - Modulo 4: Classificazione soglie, qualifica differibilità, trend Delta-CPA,
+ * - Modulo 2: Incertezza proporzionale all'instabilità osservata dei fix reali
+ * - Modulo 3: Cinematica vettoriale ARPA (CPA tra scafi e TCPA nominali)
+ * - Modulo 4: Classificazione soglie, trend Delta-CPA,
  *             isteresi asimmetrica (escalation istantanea, hold timer per de-escalation).
  * ============================================================================
  */
@@ -22,6 +22,27 @@ const R2D = 180.0 / Math.PI;
 const MS_TO_KNOTS = 1.94384449;
 const KNOTS_TO_MS = 0.51444444;
 const METERS_PER_DEG_LAT = 111139.0;
+
+// Alarm policy. Shared defaults for live AIS and simulation.
+const COLLISION_THRESHOLD_DEFAULTS = {
+    yachtRedCpaMeters: 250,
+    commercialRedCpaMeters: 800,
+    workRedCpaMeters: 400,
+    yachtReferenceKnots: 7.5,
+    commercialReferenceKnots: 10,
+    workReferenceKnots: 10,
+    warningDistanceRatio: 2,
+    baseTcpaMinutes: 5,
+    minimumOwnSpeedKnots: 4,
+    lookaheadSpeedCoefficient: 0.5,
+    maximumLookaheadMinutes: 30,
+    instabilityPenetrationFraction: 0.1,
+    instabilityMinimumDurationSeconds: 15,
+    instabilityMaximumRadiusFraction: 0.2,
+    movingTargetMaxAgeSeconds: 360,
+    stationaryTargetMaxAgeSeconds: 900,
+    deescalationBaseTimeFraction: 0.2,
+};
 
 function d2r(deg) {
     return deg * D2R;
@@ -68,14 +89,20 @@ function getHullBoundingRadius(vessel, vesselCategory) {
     let fallback = DEFAULT_DIMENSIONS_BY_TYPE[cat] || DEFAULT_DIMENSIONS_BY_TYPE.default;
 
     let dims = vessel.dimensions || {};
-    let loa = vessel.length || (dims && dims.length) || fallback.loa;
-    let beam = vessel.beam || (dims && dims.width) || fallback.beam;
+    const positive = value => typeof value === 'number' && Number.isFinite(value) && value > 0;
+    let loa = positive(vessel.length) ? vessel.length : positive(dims.length) ? dims.length : fallback.loa;
+    let beam = positive(vessel.beam) ? vessel.beam : positive(dims.width) ? dims.width : fallback.beam;
 
     let defaultRatioA = fallback.a / fallback.loa;
+    const offset = (value, size, alternative) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= size ? value : alternative;
     let a = dims.partA !== undefined ? dims.partA : (dims.a !== undefined ? dims.a : (vessel.antBow !== undefined ? vessel.antBow : loa * defaultRatioA));
+    a = offset(a, loa, loa * defaultRatioA);
     let b = dims.partB !== undefined ? dims.partB : (dims.b !== undefined ? dims.b : (vessel.antStern !== undefined ? vessel.antStern : Math.max(1, loa - a)));
     let c = dims.partC !== undefined ? dims.partC : (dims.c !== undefined ? dims.c : (vessel.antPort !== undefined ? vessel.antPort : beam * 0.5));
     let d = dims.partD !== undefined ? dims.partD : (dims.d !== undefined ? dims.d : (vessel.antStarboard !== undefined ? vessel.antStarboard : beam * 0.5));
+    b = offset(b, loa, loa - a);
+    c = offset(c, beam, beam / 2);
+    d = offset(d, beam, beam / 2);
 
     let boundingRadius = Math.max(
         Math.sqrt(a * a + c * c),
@@ -94,6 +121,105 @@ function getHullEllipticalMargin(hull, vesselHeadingDeg, bearingTowardsOtherDeg)
     let lEff = cosA >= 0 ? hull.a : hull.b;
     let wEff = sinA >= 0 ? hull.d : hull.c;
     return Math.sqrt((lEff * cosA) * (lEff * cosA) + (wEff * sinA) * (wEff * sinA));
+}
+
+function resolveVesselCategory(target) {
+    const code = target.shipType || target.typeCode || 0;
+    if ((code >= 40 && code <= 49) || (code >= 60 && code <= 89)) return 'commercial';
+    if ((code >= 30 && code <= 32) || (code >= 50 && code <= 55)) return 'work';
+    return 'sailing';
+}
+
+function hullCorners(hull, heading) {
+    const h = d2r(heading);
+    return [[hull.a, -hull.c], [hull.a, hull.d], [-hull.b, hull.d], [-hull.b, -hull.c]]
+        .map(([forward, right]) => ({ x: forward * Math.sin(h) + right * Math.cos(h), y: forward * Math.cos(h) - right * Math.sin(h) }));
+}
+
+function resolveHullPose(vessel, hull) {
+    const validAngle = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value < 360;
+    const moving = vessel.isMoving === true || (vessel.isMoving !== false && (vessel.sog || 0) >= 0.8);
+    if (moving && validAngle(vessel.cog)) return { hull, heading: vessel.cog, orientationSource: 'COG' };
+    if (!moving && validAngle(vessel.hdg)) return { hull, heading: vessel.hdg, orientationSource: 'HEADING' };
+    // Unknown orientation: contain every possible rotation about the antenna,
+    // including an off-centre antenna. A length-wide centred box is insufficient.
+    const radius = hull.boundingRadius;
+    return { hull: { ...hull, a: radius, b: radius, c: radius, d: radius }, heading: 0, orientationSource: 'UNKNOWN_SQUARE' };
+}
+
+const cross2 = (a, b) => a.x * b.y - a.y * b.x;
+const subtract2 = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+
+function convexHull(points) {
+    // Equivalent right-angle rotations must sort identically despite sin(180°)
+    // residue; otherwise the hull scan can incorrectly discard a real corner.
+    const sorted = points.map(p => ({ x: Math.round(p.x * 1e9) / 1e9, y: Math.round(p.y * 1e9) / 1e9 }))
+        .sort((a, b) => a.x - b.x || a.y - b.y)
+        .filter((p, i, list) => i === 0 || p.x !== list[i - 1].x || p.y !== list[i - 1].y);
+    const half = list => {
+        const result = [];
+        for (const p of list) {
+            while (result.length >= 2 && cross2(subtract2(result.at(-1), result.at(-2)), subtract2(p, result.at(-1))) <= 1e-9) result.pop();
+            result.push(p);
+        }
+        return result;
+    };
+    return half(sorted).slice(0, -1).concat(half(sorted.slice().reverse()).slice(0, -1));
+}
+
+// The separation of two translating rectangles equals the distance of their
+// relative antenna position to the Minkowski difference of the hulls.
+// Test the ray origin, edge intersections and vertex projections analytically;
+// no sampling interval or arbitrary prediction horizon is needed.
+function buildHullObstacle(ownHull, ownHeading, targetHull, targetHeading) {
+    const ownCorners = hullCorners(ownHull, ownHeading);
+    const targetCorners = hullCorners(targetHull, targetHeading);
+    return convexHull(ownCorners.flatMap(a => targetCorners.map(b => subtract2(a, b))));
+}
+
+function clearanceToObstacle(position, obstacle) {
+    if (obstacle.every((a, i) => cross2(subtract2(obstacle[(i + 1) % obstacle.length], a), subtract2(position, a)) >= -1e-7)) return 0;
+    let distance = Infinity;
+    for (let i = 0; i < obstacle.length; i++) {
+        const a = obstacle[i], b = obstacle[(i + 1) % obstacle.length];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const length2 = dx * dx + dy * dy;
+        const u = length2 ? Math.max(0, Math.min(1, ((position.x - a.x) * dx + (position.y - a.y) * dy) / length2)) : 0;
+        distance = Math.min(distance, Math.hypot(position.x - a.x - u * dx, position.y - a.y - u * dy));
+    }
+    return distance;
+}
+
+function computeHullCpa(ownHull, ownHeading, targetHull, targetHeading, position, velocity, cachedObstacle) {
+    const obstacle = cachedObstacle || buildHullObstacle(ownHull, ownHeading, targetHull, targetHeading);
+    const v2 = velocity.x ** 2 + velocity.y ** 2;
+    const inside = obstacle.every((a, i) => cross2(subtract2(obstacle[(i + 1) % obstacle.length], a), subtract2(position, a)) >= -1e-7);
+    let bestDistance = Infinity, bestTime = 0;
+    const consider = (distance, time) => {
+        if (distance < bestDistance - 1e-7 || (Math.abs(distance - bestDistance) <= 1e-7 && time < bestTime)) {
+            bestDistance = distance;
+            bestTime = time;
+        }
+    };
+    if (inside) return { cpaMeters: 0, tcpaSec: 0, isDiverging: false };
+    for (let i = 0; i < obstacle.length; i++) {
+        const a = obstacle[i], b = obstacle[(i + 1) % obstacle.length];
+        const edge = subtract2(b, a), relative = subtract2(a, position);
+        const edge2 = edge.x ** 2 + edge.y ** 2;
+        const u = edge2 > 0 ? Math.max(0, Math.min(1, ((position.x - a.x) * edge.x + (position.y - a.y) * edge.y) / edge2)) : 0;
+        consider(Math.hypot(position.x - a.x - u * edge.x, position.y - a.y - u * edge.y), 0);
+        if (v2 < 1e-6) continue;
+        const time = Math.max(0, (relative.x * velocity.x + relative.y * velocity.y) / v2);
+        consider(Math.hypot(position.x + velocity.x * time - a.x, position.y + velocity.y * time - a.y), time);
+        const denominator = cross2(velocity, edge);
+        if (Math.abs(denominator) > 1e-9) {
+            const t = cross2(relative, edge) / denominator;
+            const s = cross2(relative, velocity) / denominator;
+            if (t >= 0 && s >= -1e-9 && s <= 1 + 1e-9) consider(0, t);
+        }
+    }
+    const approaching = v2 >= 1e-6 && bestTime > 1e-7;
+    return { cpaMeters: bestDistance, tcpaSec: approaching ? bestTime : -1, isDiverging: !approaching };
 }
 
 
@@ -166,7 +292,7 @@ function solveRelativeKinematics(x0, y0, myVx, myVy, targetVx, targetVy) {
     };
 }
 
-function computeCpaTcpa(ownShip, target, uncertainty) {
+function computeCpaTcpa(ownShip, target, uncertainty, hulls) {
     let myLat = ownShip.lat;
     let myLon = ownShip.lon;
     let targetLat = target.lat;
@@ -190,13 +316,21 @@ function computeCpaTcpa(ownShip, target, uncertainty) {
     let targetVy = targetSpeedMs * Math.cos(d2r(targetCog));
 
     // 1. Cinematica Nominale
-    let nominal = solveRelativeKinematics(x0, y0, myVx, myVy, targetVx, targetVy);
+    const ownHull = hulls ? hulls.ownHull : getHullBoundingRadius(ownShip, 'sailing');
+    const targetHull = hulls ? hulls.targetHull : getHullBoundingRadius(target, resolveVesselCategory(target));
+    const ownPose = resolveHullPose(ownShip, ownHull);
+    const targetPose = resolveHullPose(target, targetHull);
+    const obstacle = buildHullObstacle(ownPose.hull, ownPose.heading, targetPose.hull, targetPose.heading);
+    const antennaNominal = solveRelativeKinematics(x0, y0, myVx, myVy, targetVx, targetVy);
+    const solveHulls = (vx, vy) => computeHullCpa(ownPose.hull, ownPose.heading, targetPose.hull, targetPose.heading,
+        { x: x0, y: y0 }, { x: vx - myVx, y: vy - myVy }, obstacle);
+    const nominal = solveHulls(targetVx, targetVy);
 
     // 2. Dispersione ai bordi del cono d'incertezza (solo se il bersaglio è in movimento)
     let cpaMin = nominal.cpaMeters;
     let cpaMax = nominal.cpaMeters;
 
-    if (targetSog >= 0.8) {
+    if (uncertainty && targetSog >= 0.8) {
         let halfCone = uncertainty ? uncertainty.halfConeDeg : 0;
         let sogDelta = uncertainty ? uncertainty.sogUncertaintyKnots : 0;
 
@@ -212,9 +346,9 @@ function computeCpaTcpa(ownShip, target, uncertainty) {
             let tvSpeedMs = tv.sog * KNOTS_TO_MS;
             let tvVx = tvSpeedMs * Math.sin(d2r(tv.cog));
             let tvVy = tvSpeedMs * Math.cos(d2r(tv.cog));
-            let res = solveRelativeKinematics(x0, y0, myVx, myVy, tvVx, tvVy);
+            let res = solveHulls(tvVx, tvVy);
 
-            if (res.tcpaSec > 0) {
+            if (res.tcpaSec >= 0) {
                 if (res.cpaMeters < cpaMin) cpaMin = res.cpaMeters;
                 if (res.cpaMeters > cpaMax) cpaMax = res.cpaMeters;
             }
@@ -227,24 +361,71 @@ function computeCpaTcpa(ownShip, target, uncertainty) {
         cpaMax = cpaMax + uncertainty.posUncertaintyMeters;
     }
 
-    let tcpaSeconds = nominal.tcpaSec > 0 ? Math.round(nominal.tcpaSec) : -1;
-    let tcpaMinutes = nominal.tcpaSec > 0 ? (nominal.tcpaSec / 60.0) : -1;
+    let tcpaSeconds = nominal.tcpaSec;
+    let tcpaMinutes = nominal.tcpaSec >= 0 ? (nominal.tcpaSec / 60.0) : -1;
     let bearingNowDeg = normalizeDegrees(r2d(Math.atan2(x0, y0)));
-    let cpaBearingDeg = nominal.cpaBearingDeg !== undefined ? nominal.cpaBearingDeg : bearingNowDeg;
+    const hullTime = Math.max(0, nominal.tcpaSec);
+    const cpaX = x0 + (targetVx - myVx) * hullTime;
+    const cpaY = y0 + (targetVy - myVy) * hullTime;
+    const cpaBearingDeg = Math.hypot(cpaX, cpaY) > 0.5 ? normalizeDegrees(r2d(Math.atan2(cpaX, cpaY))) : bearingNowDeg;
 
     return {
         rangeMeters: Math.round(rangeMeters),
         rangeNM: rangeMeters / 1852.0,
         bearingNowDeg,
         cpaBearingDeg,
-        cpaNominalMeters: Math.round(nominal.cpaMeters),
-        cpaMinMeters: Math.round(cpaMin),
-        cpaMaxMeters: Math.round(cpaMax),
+        cpaNominalMeters: nominal.cpaMeters,
+        cpaMinMeters: cpaMin,
+        cpaMaxMeters: cpaMax,
         tcpaSeconds,
-        tcpaMinutes: tcpaMinutes >= 0 ? parseFloat(tcpaMinutes.toFixed(1)) : -1,
+        tcpaMinutes,
         tcpaSec: tcpaSeconds,
-        isDiverging: nominal.tcpaSec <= 0
+        isDiverging: nominal.isDiverging,
+        antennaCpaMeters: antennaNominal.cpaMeters,
+        antennaTcpaSeconds: antennaNominal.tcpaSec,
+        hullMarginMeters: Math.max(0, Math.hypot(cpaX, cpaY) - nominal.cpaMeters),
+        hullPrediction: { position: { x: x0, y: y0 }, velocity: { x: targetVx - myVx, y: targetVy - myVy }, obstacle }
     };
+}
+
+function evaluateInstabilityWarning(kinematics, stability, thresholds, now, config) {
+    if (!stability || stability.state !== 'VARIABLE' || !Number.isFinite(stability.uncertaintyGrowthMps) ||
+        stability.uncertaintyGrowthMps <= 0 || !Number.isFinite(stability.lastFixTime)) return null;
+    const age = Math.max(0, (now - stability.lastFixTime) / 1000);
+    if (age > config.movingTargetMaxAgeSeconds) return null;
+    const { position, velocity, obstacle } = kinematics.hullPrediction;
+    const horizon = thresholds.horizonTcpa * 60;
+    const limit = thresholds.orangeCpa * (1 - config.instabilityPenetrationFraction);
+    const fraction = Number.isFinite(config.instabilityMaximumRadiusFraction) && config.instabilityMaximumRadiusFraction >= 0
+        ? config.instabilityMaximumRadiusFraction : 0.2;
+    const maxRadius = thresholds.orangeCpa * fraction;
+    const gap = t => clearanceToObstacle({ x: position.x + velocity.x * t, y: position.y + velocity.y * t }, obstacle)
+        - Math.min(maxRadius, stability.uncertaintyGrowthMps * (age + t));
+    // Subtracting a capped linear radius preserves convexity. Locate the minimum
+    // and both threshold crossings without relying on isolated samples.
+    let left = 0, right = horizon;
+    for (let i = 0; i < 55; i++) {
+        const a = left + (right - left) / 3, b = right - (right - left) / 3;
+        if (gap(a) <= gap(b)) right = b;
+        else left = a;
+    }
+    let minimumTime = (left + right) / 2;
+    if (gap(0) < gap(minimumTime)) minimumTime = 0;
+    if (gap(horizon) < gap(minimumTime)) minimumTime = horizon;
+    if (gap(minimumTime) > limit) return null;
+    const crossing = (a, b, entering) => {
+        for (let i = 0; i < 45; i++) {
+            const t = (a + b) / 2;
+            if ((gap(t) <= limit) === entering) b = t;
+            else a = t;
+        }
+        return (a + b) / 2;
+    };
+    const entrySeconds = gap(0) <= limit ? 0 : crossing(0, minimumTime, true);
+    const exitSeconds = gap(horizon) <= limit ? horizon : crossing(minimumTime, horizon, false);
+    if (exitSeconds - entrySeconds < config.instabilityMinimumDurationSeconds) return null;
+    return { possibleCpaMeters: Math.max(0, gap(minimumTime)), possibleTcpaSeconds: minimumTime,
+        entrySeconds, exitSeconds, durationSeconds: exitSeconds - entrySeconds };
 }
 
 function computeSighting(relBearingDeg) {
@@ -253,14 +434,14 @@ function computeSighting(relBearingDeg) {
     if (clockHour === 0) clockHour = 12;
 
     let sightAngleTxt = "";
-    if (rel <= 10 || rel >= 350) sightAngleTxt = "Dritto di Prua";
-    else if (rel >= 80 && rel <= 100) sightAngleTxt = "Al Traverso di Dritta";
-    else if (rel >= 260 && rel <= 280) sightAngleTxt = "Al Traverso di Sinistra";
-    else if (rel >= 170 && rel <= 190) sightAngleTxt = "Dritto di Poppa";
-    else if (rel < 180) sightAngleTxt = `${Math.round(rel)}° a Dritta`;
-    else sightAngleTxt = `${Math.round(360 - rel)}° a Sinistra`;
+    if (rel <= 10 || rel >= 350) sightAngleTxt = "Straight ahead";
+    else if (rel >= 80 && rel <= 100) sightAngleTxt = "To the right";
+    else if (rel >= 260 && rel <= 280) sightAngleTxt = "To the left";
+    else if (rel >= 170 && rel <= 190) sightAngleTxt = "Directly behind";
+    else if (rel < 180) sightAngleTxt = `${Math.round(rel)}° right`;
+    else sightAngleTxt = `${Math.round(360 - rel)}° left`;
 
-    return `${sightAngleTxt} (ore ${clockHour})`;
+    return `${sightAngleTxt} (${clockHour} o'clock)`;
 }
 
 function evaluateColreg(ownShip, target, kinematics, alertState, category) {
@@ -323,7 +504,7 @@ function evaluateColreg(ownShip, target, kinematics, alertState, category) {
 }
 
 // ----------------------------------------------------------------------------
-// 5. MODULO 4: SOGLIE, DIFFERIBILITÀ, TREND E STATE MACHINE
+// 5. MODULO 4: SOGLIE, TREND E STATE MACHINE
 // ----------------------------------------------------------------------------
 const SEVERITY_LEVELS = {
     NO_DANGER: 0,
@@ -332,47 +513,30 @@ const SEVERITY_LEVELS = {
 };
 
 function compareTargets(a, b) {
-    const riskMap = { RED: 2, ORANGE: 1, GREEN: 0, GREY: 0, NO_DANGER: 0 };
-    let sevA = SEVERITY_LEVELS[a.alertState] !== undefined ? SEVERITY_LEVELS[a.alertState] : (riskMap[a.risk] || 0);
-    let sevB = SEVERITY_LEVELS[b.alertState] !== undefined ? SEVERITY_LEVELS[b.alertState] : (riskMap[b.risk] || 0);
-    let nonDefA = (sevA > 0 && !a.isDeferred) ? 1 : 0;
-    let nonDefB = (sevB > 0 && !b.isDeferred) ? 1 : 0;
-    if (nonDefA !== nonDefB) return nonDefB - nonDefA;
+    const levels = { RED: 2, ORANGE: 1, GREEN: 0, GREY: 0, NO_DANGER: 0 };
+    const severity = t => levels[t.alertState ?? t.risk] || 0;
+    const firstValid = (...values) => values.find(v => Number.isFinite(v) && v >= 0);
+    const range = t => firstValid(t.rangeMeters, t.dist) ?? Number.MAX_SAFE_INTEGER;
+    const cpa = t => Math.round(firstValid(t.cpaNominalMeters, t.cpa) ?? range(t));
+    const time = t => firstValid(t.tcpaMinutes, t.tcpa) ?? 999;
+    const sevA = severity(a), sevB = severity(b);
     if (sevA !== sevB) return sevB - sevA;
     if (sevA > 0) {
-        let tcpaA = (a.tcpaMinutes !== undefined && a.tcpaMinutes >= 0) ? a.tcpaMinutes : ((a.tcpa !== null && a.tcpa !== undefined && a.tcpa >= 0) ? a.tcpa : 999);
-        let tcpaB = (b.tcpaMinutes !== undefined && b.tcpaMinutes >= 0) ? b.tcpaMinutes : ((b.tcpa !== null && b.tcpa !== undefined && b.tcpa >= 0) ? b.tcpa : 999);
-        let cpaA = (a.cpaNominalMeters !== undefined && a.cpaNominalMeters !== null) ? a.cpaNominalMeters : ((a.cpa !== null && a.cpa !== undefined) ? a.cpa : (a.dist || 0));
-        let cpaB = (b.cpaNominalMeters !== undefined && b.cpaNominalMeters !== null) ? b.cpaNominalMeters : ((b.cpa !== null && b.cpa !== undefined) ? b.cpa : (b.dist || 0));
-        let scoreA = cpaA + (tcpaA * 60);
-        let scoreB = cpaB + (tcpaB * 60);
-        if (Math.abs(scoreA - scoreB) > 10) return scoreA - scoreB;
-        return cpaA - cpaB;
+        const scoreA = cpa(a) + time(a) * 60;
+        const scoreB = cpa(b) + time(b) * 60;
+        if (scoreA !== scoreB) return scoreA - scoreB;
+        if (cpa(a) !== cpa(b)) return cpa(a) - cpa(b);
     }
-    let distA = a.rangeMeters !== undefined ? a.rangeMeters : (a.dist || 0);
-    let distB = b.rangeMeters !== undefined ? b.rangeMeters : (b.dist || 0);
-    return distA - distB;
+    if (range(a) !== range(b)) return range(a) - range(b);
+    const idA = String(a.targetId ?? a.id ?? a.mmsi ?? a.name ?? '');
+    const idB = String(b.targetId ?? b.id ?? b.mmsi ?? b.name ?? '');
+    return idA < idB ? -1 : idA > idB ? 1 : 0;
 }
 
 class CollisionPipeline {
     constructor(userConfig = {}) {
         this.config = Object.assign({
-            yachtRedCpaMeters: 300,
-            yachtOrangeCpaMeters: 800,
-            commercialRedCpaMeters: 750,
-            commercialOrangeCpaMeters: 1850,
-            workRedCpaMeters: 350,
-            workOrangeCpaMeters: 750,
-            yachtCritTcpaMin: 6.0,
-            yachtHorizonTcpaMin: 15.0,
-            commercialCritTcpaMin: 10.0,
-            commercialHorizonTcpaMin: 22.0,
-            workCritTcpaMin: 8.0,
-            workHorizonTcpaMin: 15.0,
-            kDefer: 0.6,               // Se TCPA > 60% dell'orizzonte e allarme dovuto solo a cono: differibile
-            minRangeDeferMeters: 2500, // Non differibile sotto ~1.35 NM
-            deadbandMeters: 80,        // Margine spaziale di rientro
-            deescalateHoldTimeMs: 12000, // 12 secondi di stabilità prima di scendere di livello
+            ...COLLISION_THRESHOLD_DEFAULTS,
             maxTargetMemoryMs: 12 * 60 * 1000 // 12 min di ritenzione stato
         }, userConfig);
 
@@ -384,36 +548,26 @@ class CollisionPipeline {
     }
 
     _resolveVesselCategory(target) {
-        let code = target.shipType || target.typeCode || 0;
-        let isCommercial = (code >= 70 && code <= 89);
-        let isWork = (code >= 30 && code <= 32) || (code >= 50 && code <= 55);
-        if (isCommercial) return 'commercial';
-        if (isWork) return 'work';
-        return 'sailing';
+        return resolveVesselCategory(target);
     }
 
-    _resolveThresholds(target, category) {
-        let redCpa = this.config.yachtRedCpaMeters;
-        let orangeCpa = this.config.yachtOrangeCpaMeters;
-        let critTcpa = this.config.yachtCritTcpaMin;
-        let horizonTcpa = this.config.yachtHorizonTcpaMin;
-
-        let sog = target.sog || 0;
-
-        if (category === 'commercial') {
-            let speedFactor = Math.min(1.75, 1.0 + Math.max(0, sog - 12.0) * 0.035);
-            redCpa = Math.round(this.config.commercialRedCpaMeters * speedFactor);
-            orangeCpa = Math.round(this.config.commercialOrangeCpaMeters * speedFactor);
-            critTcpa = this.config.commercialCritTcpaMin;
-            horizonTcpa = this.config.commercialHorizonTcpaMin;
-        } else if (category === 'work') {
-            redCpa = this.config.workRedCpaMeters;
-            orangeCpa = this.config.workOrangeCpaMeters;
-            critTcpa = this.config.workCritTcpaMin;
-            horizonTcpa = this.config.workHorizonTcpaMin;
-        }
-
-        return { redCpa, orangeCpa, critTcpa, horizonTcpa };
+    _resolveThresholds(target, category, ownShip = {}) {
+        const cfg = this.config;
+        const positive = (value, fallback) => Number.isFinite(value) && value > 0 ? value : fallback;
+        const prefix = category === 'commercial' ? 'commercial' : category === 'work' ? 'work' : 'yacht';
+        const baseRed = positive(cfg[`${prefix}RedCpaMeters`], COLLISION_THRESHOLD_DEFAULTS[`${prefix}RedCpaMeters`]);
+        const referenceKnots = positive(cfg[`${prefix}ReferenceKnots`], COLLISION_THRESHOLD_DEFAULTS[`${prefix}ReferenceKnots`]);
+        const targetKnots = Number.isFinite(target.sog) ? Math.max(0, target.sog) : 0;
+        const ownKnots = Math.max(positive(cfg.minimumOwnSpeedKnots, 4), Number.isFinite(ownShip.sog) ? ownShip.sog : 0);
+        const distanceFactor = Math.max(1, targetKnots / referenceKnots);
+        const redCpa = baseRed * distanceFactor;
+        const orangeCpa = redCpa * positive(cfg.warningDistanceRatio, 2);
+        const baseMinutes = positive(cfg.baseTcpaMinutes, 5);
+        const coefficient = Number.isFinite(cfg.lookaheadSpeedCoefficient) && cfg.lookaheadSpeedCoefficient >= 0 ? cfg.lookaheadSpeedCoefficient : 0.5;
+        const horizonTcpa = Math.min(Math.max(baseMinutes, positive(cfg.maximumLookaheadMinutes, 30)),
+            baseMinutes * (1 + coefficient * Math.max(0, targetKnots / ownKnots - 1)));
+        return { redCpa, orangeCpa, critTcpa: horizonTcpa, horizonTcpa, baseRedCpa: baseRed,
+            referenceKnots, distanceFactor, baseTcpaMinutes: baseMinutes };
     }
 
     _computeTrend(history) {
@@ -461,7 +615,6 @@ class CollisionPipeline {
                 name: target.name || `MMSI ${target.mmsi || 'N/A'}`,
                 category: this._resolveVesselCategory(target),
                 alertState: 'NO_DANGER',
-                isDeferred: false,
                 trend: 'STABLE',
                 deltaCpaPerMin: 0,
                 rangeMeters: kinematics.rangeMeters,
@@ -488,60 +641,48 @@ class CollisionPipeline {
         let ownHull = getHullBoundingRadius(ownShip, 'sailing');
         let targetHull = getHullBoundingRadius(target, category);
 
-        let uncertainty = calculateUncertaintyCone(target, now);
-        let kinematics = computeCpaTcpa(ownShip, target, uncertainty);
+        const uncertainty = null; // Fixed hypothetical cones no longer drive alerts.
+        let kinematics = computeCpaTcpa(ownShip, target, uncertainty, { ownHull, targetHull });
 
-        // Dominio ellittico orientato (A3) lungo la direttrice di CPA
-        let ownHdg = (ownShip.hdg !== undefined && ownShip.hdg !== null) ? ownShip.hdg : (ownShip.cog || 0);
-        let targetHdg = (target.hdg !== undefined && target.hdg !== null) ? target.hdg : (target.cog || 0);
-        let cpaBearingFromOwn = kinematics.cpaBearingDeg;
-        let cpaBearingFromTarget = (cpaBearingFromOwn + 180) % 360;
-        let ownMargin = getHullEllipticalMargin(ownHull, ownHdg, cpaBearingFromOwn);
-        let targetMargin = getHullEllipticalMargin(targetHull, targetHdg, cpaBearingFromTarget);
-        let totalHullMargin = Math.round(ownMargin + targetMargin);
+        // CPA values already represent hull-to-hull clearances: do not subtract
+        // another geometric margin. The uncertainty layer remains separate.
+        let totalHullMargin = Math.round(kinematics.hullMarginMeters);
+        let netCpaNominal = kinematics.cpaNominalMeters;
+        let netCpaMin = kinematics.cpaMinMeters;
+        let netCpaMax = kinematics.cpaMaxMeters;
 
-        // Calcolo CPA al netto delle dimensioni ellittiche degli scafi (interi in metri)
-        let netCpaNominal = Math.round(Math.max(0, kinematics.cpaNominalMeters - totalHullMargin));
-        let netCpaMin = Math.round(Math.max(0, kinematics.cpaMinMeters - totalHullMargin));
-        let netCpaMax = Math.round(Math.max(0, kinematics.cpaMaxMeters - totalHullMargin));
+        let thresholds = this._resolveThresholds(target, category, ownShip);
 
-        let thresholds = this._resolveThresholds(target, category);
-
-        // 1. Valutazione istantanea grezza delle soglie (solo se almeno uno dei due è in movimento)
+        // Nominal alarms use the user's speed-adjusted limits and one time window.
         let rawState = 'NO_DANGER';
-        let rawIsDeferred = false;
         let reason = '';
-
-        let ownIsMoving = (ownShip.sog || 0) >= 0.8;
-        let targetIsMoving = target.isMoving === true || (target.sog || 0) >= 0.8;
-        let eitherMoving = ownIsMoving || targetIsMoving;
-
-        let tcpa = kinematics.tcpaMinutes;
-        let isMovingThreat = eitherMoving && !kinematics.isDiverging && tcpa > 0;
-
-        if (isMovingThreat) {
-            if (netCpaNominal <= thresholds.redCpa && tcpa <= thresholds.critTcpa) {
+        let rawBasis = null;
+        let instabilityWarning = null;
+        const ownIsMoving = (ownShip.sog || 0) >= 0.8;
+        const targetIsMoving = target.isMoving === true || (target.sog || 0) >= 0.8;
+        const eitherMoving = ownIsMoving || targetIsMoving;
+        const tcpa = kinematics.tcpaMinutes;
+        if (eitherMoving && !kinematics.isDiverging && tcpa >= 0 && tcpa <= thresholds.horizonTcpa) {
+            if (netCpaNominal <= thresholds.redCpa) {
                 rawState = 'RED';
+                rawBasis = 'NOMINAL';
                 reason = targetIsMoving ? 'RISCHIO COLLISIONE!' : 'ATTENZIONE OSTACOLO';
-            } else if (
-                (netCpaMin <= thresholds.redCpa && tcpa <= thresholds.critTcpa) ||
-                (netCpaNominal <= thresholds.orangeCpa && tcpa <= thresholds.horizonTcpa) ||
-                (netCpaMin <= thresholds.orangeCpa && tcpa <= thresholds.horizonTcpa)
-            ) {
+            } else if (netCpaNominal <= thresholds.orangeCpa) {
                 rawState = 'ORANGE';
+                rawBasis = 'NOMINAL';
                 reason = targetIsMoving ? 'ATTENZIONE INCROCIO' : 'ATTENZIONE OSTACOLO';
             }
         }
+        // Observed instability can add orange only; it cannot upgrade orange to red.
+        if (rawState === 'NO_DANGER' && eitherMoving) {
+            instabilityWarning = evaluateInstabilityWarning(kinematics, target.predictionStability, thresholds, now,
+                target.contactLost ? { ...this.config, movingTargetMaxAgeSeconds: Infinity } : this.config);
+            if (instabilityWarning) {
+                rawState = 'ORANGE';
+                rawBasis = 'INSTABILITY';
+                reason = 'POSSIBILE AVVICINAMENTO: TRAIETTORIA VARIABILE';
+                netCpaMin = Math.min(netCpaNominal, instabilityWarning.possibleCpaMeters);
 
-        // 2. Qualifica di Differibilità
-        if (rawState !== 'NO_DANGER') {
-            let thresholdViolated = rawState === 'RED' ? thresholds.redCpa : thresholds.orangeCpa;
-            let triggeredOnlyByUncertainty = (netCpaNominal > thresholdViolated) && (netCpaMin <= thresholdViolated);
-            let farInTime = tcpa > (this.config.kDefer * thresholds.horizonTcpa);
-            let farInDistance = kinematics.rangeMeters > this.config.minRangeDeferMeters;
-
-            if (triggeredOnlyByUncertainty && farInTime && farInDistance) {
-                rawIsDeferred = true;
             }
         }
 
@@ -551,11 +692,10 @@ class CollisionPipeline {
             state = {
                 id: targetId,
                 currentState: rawState,
-                isDeferred: rawIsDeferred,
                 reason: reason,
+                warningBasis: rawBasis,
                 history: [],
-                deescalateCandidate: null,
-                deescalateTimerStartedAt: 0,
+                deescalateTimerStartedAt: null,
                 lastSeen: now
             };
             this.targetStates.set(targetId, state);
@@ -580,55 +720,28 @@ class CollisionPipeline {
 
         let { trend, deltaCpaPerMin } = this._computeTrend(state.history);
 
-        // Se l'allarme era differibile ma il trend mostra un rapido peggioramento, revoca la differibilità
-        if (rawIsDeferred && trend === 'WORSENING') {
-            rawIsDeferred = false;
-        }
-
         let currSev = SEVERITY_LEVELS[state.currentState];
         let rawSev = SEVERITY_LEVELS[rawState];
 
-        if (rawSev > currSev) {
-            // ESCALATION ISTANTANEA (0 secondi di ritardo)
+        if (rawSev >= currSev) {
+            // Escalation is immediate; returning to the held level cancels recovery.
             state.currentState = rawState;
-            state.isDeferred = rawIsDeferred;
             state.reason = reason;
-            state.deescalateCandidate = null;
-            state.deescalateTimerStartedAt = 0;
-        } else if (rawSev < currSev) {
-            // DE-ESCALATION CON ISTERESI SPAZIALE E TEMPORALE
-            let activeThreshold = state.currentState === 'RED' ? thresholds.redCpa : thresholds.orangeCpa;
-            let safeDeadbandSatisfied = netCpaNominal > (activeThreshold + this.config.deadbandMeters);
-            let minDivergingClearDist = Math.max(35, totalHullMargin + 20);
-            let isSafelyDiverging = kinematics.isDiverging && kinematics.rangeMeters > minDivergingClearDist;
-
-            if (safeDeadbandSatisfied || isSafelyDiverging) {
-                if (state.deescalateCandidate !== rawState) {
-                    state.deescalateCandidate = rawState;
-                    state.deescalateTimerStartedAt = now;
-                } else {
-                    let holdDuration = now - state.deescalateTimerStartedAt;
-                    let requiredHold = isSafelyDiverging ? 3000 : (trend === 'IMPROVING' ? 4000 : this.config.deescalateHoldTimeMs);
-                    if (holdDuration >= requiredHold) {
-                        // Timer scaduto: transizione confermata
-                        state.currentState = rawState;
-                        state.isDeferred = rawIsDeferred;
-                        state.reason = reason;
-                        state.deescalateCandidate = null;
-                        state.deescalateTimerStartedAt = 0;
-                    }
-                }
-            } else {
-                // Condizione di sicurezza non sufficiente (all'interno della banda morta)
-                state.deescalateCandidate = null;
-                state.deescalateTimerStartedAt = 0;
-            }
+            state.warningBasis = rawBasis;
+            state.deescalateTimerStartedAt = null;
         } else {
-            // Stesso livello di gravità: aggiorna solo il flag differibile e il motivo
-            state.isDeferred = rawIsDeferred;
-            state.reason = reason;
-            state.deescalateCandidate = null;
-            state.deescalateTimerStartedAt = 0;
+            // Any continuously lower risk qualifies, even if its level changes.
+            // Use the configured base time, not the speed-expanded horizon.
+            if (state.deescalateTimerStartedAt === null) state.deescalateTimerStartedAt = now;
+            const fraction = Number.isFinite(this.config.deescalationBaseTimeFraction) && this.config.deescalationBaseTimeFraction > 0
+                ? this.config.deescalationBaseTimeFraction : 0.2;
+            const requiredHoldMs = thresholds.baseTcpaMinutes * 60000 * fraction;
+            if (now - state.deescalateTimerStartedAt >= requiredHoldMs) {
+                state.currentState = rawState;
+                state.reason = reason;
+                state.warningBasis = rawBasis;
+                state.deescalateTimerStartedAt = null;
+            }
         }
 
         let colreg = evaluateColreg(ownShip, target, kinematics, state.currentState, category);
@@ -640,10 +753,9 @@ class CollisionPipeline {
             category,
             // Stato filtrato dalla macchina a stati
             alertState: state.currentState,
-            isDeferred: state.isDeferred,
             trend,
             deltaCpaPerMin,
-            // Metriche geometriche e cinematiche (interi in metri e secondi)
+            // Metriche geometriche e cinematiche (precisione piena per le decisioni)
             rangeMeters: kinematics.rangeMeters,
             rangeNM: kinematics.rangeNM,
             bearingNowDeg: kinematics.bearingNowDeg,
@@ -655,7 +767,12 @@ class CollisionPipeline {
             isDiverging: kinematics.isDiverging,
             // Dettagli diagnostici incertezza e scafo
             hullMarginMeters: totalHullMargin,
-            uncertaintyConeDeg: uncertainty.halfConeDeg * 2,
+            antennaCpaMeters: kinematics.antennaCpaMeters,
+            antennaTcpaSeconds: kinematics.antennaTcpaSeconds,
+            uncertaintyConeDeg: 0,
+            effectiveThresholds: thresholds,
+            warningBasis: state.warningBasis,
+            instabilityWarning,
             reason: state.reason || '',
             // Valutazione incrocio COLREGs e rilevamento
             crossDir: colreg.crossDir,
@@ -719,9 +836,13 @@ const _pipelineExports = {
     CollisionPipeline,
     getHullBoundingRadius,
     getHullEllipticalMargin,
+    resolveHullPose,
     calculateUncertaintyCone,
     computeCpaTcpa,
     solveRelativeKinematics,
+    computeHullCpa,
+    evaluateInstabilityWarning,
+    COLLISION_THRESHOLD_DEFAULTS,
     computeSighting,
     evaluateColreg,
     compareTargets

@@ -1,6 +1,6 @@
 {
   "name": "@sailingrotevista/rotevista-dash",
-  "version": "9.3.0-beta.3",
+  "version": "9.3.0-beta.4",
   "description": "Wind Dashboard with navigation and course aids",
   "main": "index.js",
   "publishConfig": {
@@ -27,10 +27,12 @@
   "files": [
     "index.js",
     "collisionPipeline.js",
+    "collisionConfig.js",
     "harborDetector.js",
     "windEngine.js",
     "aisEngine.js",
     "targetMotionTracker.js",
+    "targetPredictionStability.js",
     "public",
     "icons",
     "apple-touch-icon.png",

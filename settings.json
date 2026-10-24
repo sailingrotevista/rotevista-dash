@@ -16,29 +16,42 @@
     "stabilityBreakout": 15
   },
   "scales": {
-    "stw": { "stdMax": 12, "step": 2, "hercSpan": 4 },
-    "sog": { "stdMax": 12, "step": 2, "hercSpan": 4 },
-    "tws": { "stdMax": 25, "step": 5, "hercSpan": 10 },
-    "depth": { "stdMax": 20, "step": 10, "hercSpan": 10 }
+    "stw": {
+      "stdMax": 12,
+      "step": 2,
+      "hercSpan": 4
+    },
+    "sog": {
+      "stdMax": 12,
+      "step": 2,
+      "hercSpan": 4
+    },
+    "tws": {
+      "stdMax": 25,
+      "step": 5,
+      "hercSpan": 10
+    },
+    "depth": {
+      "stdMax": 20,
+      "step": 10,
+      "hercSpan": 10
+    }
   },
   "aisAlerter": {
     "enabled": true,
     "ignoreOwnTarget": "106125",
     "pleasureCraft": {
-      "redCpa": 300,
-      "orangeCpa": 700,
-      "maxTcpa": 10
+      "redCpa": 250
     },
     "commercialShips": {
-      "redCpa": 800,
-      "orangeCpa": 1852,
-      "maxTcpa": 15
+      "redCpa": 800
     },
     "workboats": {
-      "redCpa": 500,
-      "maxTcpa": 12
+      "redCpa": 400
     },
     "vectorMinutes": 5,
-    "criticalProximity": 45
+    "criticalProximity": 45,
+    "baseTcpaMinutes": 10,
+    "thresholdPolicyVersion": 1
   }
 }

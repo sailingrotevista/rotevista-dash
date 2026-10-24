@@ -23,6 +23,13 @@ test('only new, ordered fixes count; no duplicate or projected observations', ()
     assert.equal(tracker.targets.get('boat').lastFix.t, 30000);
 });
 
+test('a tolerated future source timestamp is still a single received observation', () => {
+    const tracker = new TargetMotionTracker();
+    observe(tracker, { ...fix(0, 0), sourceTime: 30000 });
+    observe(tracker, { ...fix(15, 0), sourceTime: 30000 });
+    assert.equal(tracker.targets.get('boat').observations.length, 1);
+});
+
 test('moored jitter and a speed spike stay stationary; returning outlier clears suspicion', () => {
     const tracker = new TargetMotionTracker();
     observe(tracker, fix(0, 0), { moored: true });
@@ -126,17 +133,32 @@ test('engine and harbor keep a moored speed spike fixed but release a genuine de
         assert.equal(process(fix(0, 0)).isMoored, true);
         const jitter = process(fix(30, 5, 1.2));
         assert.equal(jitter.isMoving, false);
+        assert.equal(jitter.isProjected, false);
         assert.equal(jitter.isMoored, true);
         assert.deepEqual(jitter.trail, []);
         clock += 30000;
         engine.process();
         assert.equal(engine.getNearbyVessels()[0].lat, jitter.lat, 'no extrapolation of a speed spike');
         assert.equal(process(fix(90, 45, 1)).motionState, 'POSSIBLE_MOVEMENT');
+        clock += 30000;
+        engine.process();
+        assert.ok(Math.abs(engine.getNearbyVessels()[0].lat - point.lat) < 1e-7, 'unconfirmed movement is not projected');
         const departure = process(fix(120, 61, 1));
         assert.equal(departure.isMoving, true);
         assert.equal(departure.isMoored, false);
         assert.equal(departure.inCluster, false);
         assert.ok(departure.trail.length > 0);
+        clock += 14999;
+        engine.process();
+        assert.ok(Math.abs(engine.getNearbyVessels()[0].lat - departure.lat) < 1e-7, 'hold received position before 15s');
+        clock += 1;
+        engine.process();
+        const projected = engine.getNearbyVessels()[0];
+        const expectedLat = point.lat + (1852 * 15 / 3600) / 111139;
+        assert.ok(Math.abs(projected.lat - expectedLat) < 1e-7, 'project a confirmed 1kn departure from the received fix');
+        assert.equal(projected.lastPositionTime, departure.lastPositionTime);
+        assert.equal(projected.age, 15);
+        assert.equal(projected.isProjected, true);
         clock += 361000;
         // Remove the vessel from Signal K's tree; both caches must expire together.
         app.getPath = () => ({});

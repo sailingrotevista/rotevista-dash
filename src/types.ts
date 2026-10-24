@@ -104,6 +104,7 @@ export interface AisTrailPoint {
 
 export interface AisTarget {
   id: string;
+  isSimulated?: boolean;
   name: string;
   type: number | string;
   lat: number;
@@ -120,8 +121,41 @@ export interface AisTarget {
   motionState?: 'STATIONARY' | 'POSSIBLE_MOVEMENT' | 'MOVING';
   stationarySince?: number | null;
   lastPositionTime?: number;
+  lastCogTime?: number | null;
+  lastSogTime?: number | null;
+  motionDataSync?: {
+    status: 'IN_SYNC' | 'OUT_OF_SYNC' | 'UNKNOWN';
+    cogSkewSeconds: number | null;
+    sogSkewSeconds: number | null;
+    maxSkewSeconds: number | null;
+  };
+  isProjected?: boolean;
+  contactLost?: boolean;
+  contactLostAt?: number;
+  predictionStability?: {
+    state: 'INSUFFICIENT_DATA' | 'STABLE' | 'VARIABLE' | 'MANEUVERING' | 'NOT_MOVING';
+    sampleCount: number;
+    comparisonCount: number;
+    errorRateMps: number | null;
+    uncertaintyGrowthMps: number | null;
+    lastFixTime: number | null;
+  };
+  effectiveThresholds?: {
+    redCpa: number;
+    orangeCpa: number;
+    horizonTcpa: number;
+    referenceKnots: number;
+    distanceFactor: number;
+  };
+  warningBasis?: 'NOMINAL' | 'INSTABILITY' | null;
+  instabilityWarning?: {
+    possibleCpaMeters: number;
+    possibleTcpaSeconds: number;
+    entrySeconds: number;
+    exitSeconds: number;
+    durationSeconds: number;
+  } | null;
   risk: 'GREEN' | 'RED' | 'ORANGE' | 'GREY';
-  isDeferred?: boolean;
   trend?: 'IMPROVING' | 'STABLE' | 'WORSENING';
   riskMsg: string;
   cpa: number | null;

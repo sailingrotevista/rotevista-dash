@@ -1,4 +1,5 @@
 'use strict';
+const { TargetPredictionStability } = require('./targetPredictionStability');
 
 // Soglie modificabili: il tracker usa solo fix ricevuti, mai posizioni proiettate.
 const MOTION_TRACKER_CONFIG = {
@@ -42,8 +43,8 @@ class TargetMotionTracker {
             state.anchored = true;
             state.area.radius = Math.max(state.area.radius, this.config.anchoredRadiusMeters);
         }
-        if (state && fix.t <= state.lastFix.t) return this.get(id, now, historyMs);
-        const point = { lat: fix.lat, lon: fix.lon, t: fix.t };
+        if (state && (fix.sourceTime ?? fix.t) <= (state.lastFix.sourceTime ?? state.lastFix.t)) return this.get(id, now, historyMs);
+        const point = { lat: fix.lat, lon: fix.lon, t: fix.t, cog: fix.cog, sog: fix.sog };
         if (!state) {
             state = {
                 observations: [], trail: [], lastFix: fix,
@@ -51,15 +52,18 @@ class TargetMotionTracker {
                 area: { lat: fix.lat, lon: fix.lon, radius: anchored ? this.config.anchoredRadiusMeters : this.config.stationaryRadiusMeters, since: fix.t },
                 departure: null,
                 anchored,
+                prediction: new TargetPredictionStability(),
             };
             this.targets.set(id, state);
         }
         state.observations.push(point);
         state.observations = compactAisTrail(state.observations, now,
             this.config.observationMinutes * 60000, this.config.maxObservationPoints);
-        state.trail.push(point);
+        state.trail.push({ lat: point.lat, lon: point.lon, t: point.t });
         state.trail = compactAisTrail(state.trail, now, historyMs, this.config.maxTrailPoints);
         state.lastFix = { ...fix };
+        state.prediction.update(fix);
+        const wasMoving = state.motionState === 'MOVING';
 
         if (state.motionState === 'MOVING') {
             // Un arresto richiede più fix nuovi distribuiti nel tempo, non una SOG nulla.
@@ -107,6 +111,12 @@ class TargetMotionTracker {
                 }
             }
         }
+        if (!wasMoving && state.motionState === 'MOVING') {
+            // Departure starts a new trajectory; stationary jitter is not evidence
+            // of irregular navigation after leaving the berth/anchorage.
+            state.prediction = new TargetPredictionStability();
+            state.prediction.update(fix);
+        }
         return this.get(id, now, historyMs);
     }
 
@@ -131,6 +141,7 @@ class TargetMotionTracker {
             isMoving: state.motionState === 'MOVING',
             stationarySince: state.motionState === 'MOVING' ? null : state.area.since,
             lastFixTime: state.lastFix.t,
+            predictionStability: state.prediction.get(now, state.motionState === 'MOVING'),
             trail: state.trail,
         };
     }

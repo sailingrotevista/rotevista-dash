@@ -3,7 +3,10 @@ import { degToRad } from './math';
 import '../../collisionPipeline.js';
 
 const { CollisionPipeline } = (globalThis as any).RotevistaCollisionPipeline;
-const simCollisionPipeline = new CollisionPipeline();
+// Simulation deliberately keeps a shorter base window than the live plugin.
+const SIM_BASE_TCPA_MINUTES = 5;
+const DELAYED_WARNING_SECONDS = 120;
+const simCollisionPipeline = new CollisionPipeline({ baseTcpaMinutes: SIM_BASE_TCPA_MINUTES });
 
 export interface TargetTemplate {
   name: string;
@@ -145,6 +148,7 @@ function buildTargetFromInverseCpa(
     crossRule: '',
     sightingTxt: '',
     age: 0,
+    isProjected: false,
     callsign: tpl.callsign,
     length: tpl.length,
     beam: tpl.beam,
@@ -188,7 +192,18 @@ export function generateRandomColregScenario(
   // 3. Target Manovrante (non-commerciale): parte RED di prua (TCPA 3.5 min) ed esegue virata evasiva COLREG a t=32..47s
   const t3 = buildTargetFromInverseCpa(tpl3, myGps, myCog, mySog, myCog + 176, 11.5, 210, 85);
 
-  return { target: t1, targets: [t1, t2, t3], colregCase: 'CROSSING_GIVE_WAY' };
+  // 4. Initially outside the prediction window. With steady motion, its TCPA
+  // enters the five-minute window after about two minutes, triggering orange.
+  // A separate identity keeps this target available in every random scenario.
+  const delayedTemplate: TargetTemplate = {
+    name: 'S/Y HORIZON', mmsi: '247999004', type: 36,
+    length: 12, beam: 4, draft: 2, callsign: 'SIM004',
+    flag: '🇮🇹 ITA', destination: 'SIMULATION', aisClass: 'B',
+  };
+  const t4 = buildTargetFromInverseCpa(delayedTemplate, myGps, myCog, mySog,
+    myCog + 180, Math.max(mySog, 4), SIM_BASE_TCPA_MINUTES * 60 + DELAYED_WARNING_SECONDS, 350);
+
+  return { target: t1, targets: [t1, t2, t3, t4], colregCase: 'CROSSING_GIVE_WAY' };
 }
 
 export function recalculateArpaForTargets(
@@ -229,13 +244,13 @@ export function recalculateArpaForTargets(
         isMoored: Boolean(v.isMoored || isStoppedOrMoored),
         inCluster: Boolean(v.inCluster),
         anchorState: v.anchorState,
+        predictionStability: v.predictionStability,
       },
       now
     );
 
-    const cpa = evalRes ? evalRes.cpaNominalMeters : null;
+    const cpa = evalRes ? Math.round(evalRes.cpaNominalMeters) : null;
     const tcpa = evalRes && evalRes.tcpaMinutes >= 0 ? evalRes.tcpaMinutes : -1;
-    const isDeferred = evalRes ? Boolean(evalRes.isDeferred) : false;
     const trend = evalRes ? evalRes.trend : 'STABLE';
 
     let risk: 'GREEN' | 'ORANGE' | 'RED' | 'GREY' = 'GREEN';
@@ -257,9 +272,11 @@ export function recalculateArpaForTargets(
       cpa,
       tcpa,
       risk,
-      isDeferred,
       trend,
       riskMsg,
+      effectiveThresholds: evalRes?.effectiveThresholds,
+      warningBasis: evalRes?.warningBasis,
+      instabilityWarning: evalRes?.instabilityWarning,
       crossDir: evalRes ? evalRes.crossDir : '',
       crossOutcome: evalRes ? evalRes.crossOutcome : 'In Avvicinamento',
       crossRule: evalRes ? evalRes.crossRule : '',
@@ -270,7 +287,7 @@ export function recalculateArpaForTargets(
   });
 
   simCollisionPipeline.sortTargets(updatedTargets);
-  const highestThreat = updatedTargets.find(v => (v.risk === 'RED' || v.risk === 'ORANGE') && !v.isDeferred) || null;
+  const highestThreat = updatedTargets.find(v => (v.risk === 'RED' || v.risk === 'ORANGE')) || null;
 
   return { targets: updatedTargets, topThreat: highestThreat };
 }

@@ -25,6 +25,39 @@ html, body, #root {
 /* ==========================================================================
    2. LAYOUT PRINCIPALE (GRID AREAS)
    ========================================================================== */
+.dashboard-menu {
+    height: 100%;
+    box-sizing: border-box;
+    overflow-y: auto;
+    touch-action: pan-y;
+    background: #f0f5f9;
+    color: #162536;
+    padding: calc(24px + env(safe-area-inset-top, 0px))
+             calc(20px + env(safe-area-inset-right, 0px))
+             calc(24px + env(safe-area-inset-bottom, 0px))
+             calc(20px + env(safe-area-inset-left, 0px));
+}
+.dashboard-menu-panel { max-width: 480px; margin: 0 auto; }
+.dashboard-menu-eyebrow { color: #0879ae; font-weight: 800; letter-spacing: 0.16em; font-size: 12px; }
+.dashboard-menu h1 { font-size: 30px; margin: 0 0 10px; }
+.dashboard-menu header > p:last-child, .dashboard-menu-hint { color: #526477; line-height: 1.5; }
+.dashboard-menu-debug { display: flex; align-items: center; gap: 12px; padding: 16px 0; margin: 16px 0; cursor: pointer; }
+.dashboard-menu-debug input { width: 22px; height: 22px; flex-shrink: 0; accent-color: #0879ae; }
+.dashboard-menu-debug strong, .dashboard-menu-debug small { display: block; }
+.dashboard-menu-debug small { color: #526477; margin-top: 4px; line-height: 1.4; }
+.dashboard-menu-options { display: grid; gap: 12px; }
+.dashboard-menu-options button {
+    display: flex; flex-direction: column; gap: 6px;
+    width: 100%; padding: 20px; border: 1px solid #c3d3e0;
+    border-radius: 14px; background: #fff; color: #162536;
+    text-align: left; font: inherit; cursor: pointer;
+}
+.dashboard-menu-options strong { font-size: 19px; }
+.dashboard-menu-options span { color: #526477; line-height: 1.4; }
+.dashboard-menu-options button:hover { border-color: #0879ae; background: #f5fbff; }
+.dashboard-menu-options button:focus-visible, .dashboard-menu-debug input:focus-visible { outline: 3px solid #0879ae; outline-offset: 3px; }
+.dashboard-menu-hint { margin-top: 24px; font-size: 13px; }
+
 .main-container {
     display: grid;
     width: 100%; height: 100%;
@@ -818,9 +851,9 @@ body.night-mode #radar-ticks line {
 
 .ais-tactical-banner {
     position: absolute;
-    top: 6px;
-    left: 8px;
-    right: 8px;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    left: calc(env(safe-area-inset-left, 0px) + 8px);
+    right: calc(env(safe-area-inset-right, 0px) + 8px);
     z-index: 9999;
     border-radius: 10px;
     padding: 8px 12px;
@@ -927,6 +960,13 @@ body.night-mode #radar-ticks line {
     opacity: 0.9;
 }
 
+.banner-age-notice {
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.3;
+    margin-top: 3px;
+}
+
 .banner-colregs-row {
     font-size: 0.74rem;
     font-weight: 700;
@@ -971,12 +1011,27 @@ body.night-mode #radar-ticks line {
     border: 1px solid rgba(255, 255, 255, 0.4);
 }
 
+.ais-detail-snooze {
+    flex: none;
+    align-self: stretch;
+    width: calc(100% - 24px);
+    box-sizing: border-box;
+    margin: 8px 12px;
+    min-height: 44px;
+    background: #e2e8f0;
+    color: #0f172a;
+    border: 1px solid #94a3b8;
+}
+
+.night-theme .ais-detail-snooze {
+    background: #301818;
+    color: #ff7777;
+    border-color: #a33;
+}
+
 @media (max-width: 1024px) and (orientation: portrait) {
     .ais-tactical-banner {
-        top: 8px;
         bottom: auto;
-        left: 8px;
-        right: 8px;
         padding: 10px 12px;
         gap: 8px;
         flex-direction: column;
@@ -1030,7 +1085,7 @@ body.night-mode #radar-ticks line {
         justify-content: space-between;
     }
 
-    .banner-btn {
+    .banner-actions .banner-btn {
         flex: 1;
         width: 50%;
         min-width: 0;
@@ -1049,9 +1104,6 @@ body.night-mode #radar-ticks line {
 
 @media (orientation: landscape) and (max-height: 500px) {
     .ais-tactical-banner {
-        top: 6px;
-        left: 8px;
-        right: 8px;
         margin: 0 auto;
         padding: 8px 10px;
         gap: 10px;
@@ -1080,7 +1132,7 @@ body.night-mode #radar-ticks line {
         padding: 0;
     }
 
-    .banner-btn {
+    .banner-actions .banner-btn {
         width: 100%;
         min-width: 0;
         flex: none;
@@ -1636,23 +1688,12 @@ body.night-mode .ais-tool-btn.btn-active,
 }
 
 .app-root-wrapper:has(> .ais-tactical-banner) .ais-dropdown-card {
-    top: calc(env(safe-area-inset-top, 0px) + 86px);
-    max-height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 102px);
+    top: calc(env(safe-area-inset-top, 0px) + 20px + var(--ais-banner-height, 130px));
+    max-height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 36px - var(--ais-banner-height, 130px));
 }
 
 .app-root-wrapper:has(> .ais-tactical-banner) .ais-top-bar {
-    top: calc(env(safe-area-inset-top, 0px) + 86px);
-}
-
-@media (max-width: 1024px) and (orientation: portrait) {
-    .app-root-wrapper:has(> .ais-tactical-banner) .ais-dropdown-card {
-        top: calc(env(safe-area-inset-top, 0px) + 154px);
-        max-height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 170px);
-    }
-
-    .app-root-wrapper:has(> .ais-tactical-banner) .ais-top-bar {
-        top: calc(env(safe-area-inset-top, 0px) + 154px);
-    }
+    top: calc(env(safe-area-inset-top, 0px) + 20px + var(--ais-banner-height, 130px));
 }
 
 @keyframes cardDropdown {
@@ -2721,5 +2762,12 @@ body.night-mode .ais-support-email-btn,
 
     .ais-view-container .ais-dropdown-card {
         right: calc(max(12px, env(safe-area-inset-right, 12px)) + 56px);
+    }
+}
+
+/* A narrow portrait map needs some visible space below an inspection panel. */
+@container (max-width: 600px) and (max-aspect-ratio: 1/1) {
+    .ais-view-container .ais-dropdown-card {
+        max-height: 60cqh;
     }
 }

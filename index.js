@@ -1,6 +1,6 @@
 /**
     * ==========================================================================
-    * Rotevista Dash Configuration & History Plugin (v9.3.0-beta.2)
+    * Rotevista Dash Configuration & History Plugin (v9.3.0-beta.4)
     * ==========================================================================
     * Definisce l'interfaccia di configurazione in Signal K Admin e crea
     * gli endpoint pubblici per la Dashboard, mantenendo lo storico in RAM.
@@ -14,6 +14,7 @@ const { CollisionPipeline } = require('./collisionPipeline');
 const { HarborDetector } = require('./harborDetector');
 const { WindEngine } = require('./windEngine');
 const { AisEngine } = require('./aisEngine');
+const { prepareCollisionConfig, PLUGIN_BASE_TCPA_MINUTES } = require('./collisionConfig');
 
 // ==========================================================================
 // CONFIGURAZIONE PARAMETRICA CACHE TILE CARTOGRAFICHE (Cerbo GX / Venus OS)
@@ -59,30 +60,16 @@ module.exports = function (app) {
         * Viene chiamato all'avvio e OGNI VOLTA che si salva nella configurazione.
         */
     plugin.start = function (options) {
-        // 1. Aggiorna la configurazione in memoria con fallback per aisAlerter
-        const defaultAisConfig = {
-            enabled: true,
-            ignoreOwnTarget: "106125",
-            pleasureCraft: {
-                redCpa: 300,
-                orangeCpa: 700,
-                maxTcpa: 10
-            },
-            commercialShips: {
-                redCpa: 800,
-                orangeCpa: 1852,
-                maxTcpa: 15
-            },
-            workboats: {
-                redCpa: 350,
-                orangeCpa: 750,
-                maxTcpa: 12
-            },
-            vectorMinutes: 15,
-            criticalProximity: 45
-        };
-        currentConfig = options || {};
-        currentConfig.aisAlerter = Object.assign({}, defaultAisConfig, currentConfig.aisAlerter || {});
+        // Reset legacy thresholds once, then preserve subsequent user edits.
+        const prepared = prepareCollisionConfig(options || {});
+        currentConfig = prepared.config;
+        if (prepared.migrated && typeof app.savePluginOptions === 'function') {
+            app.savePluginOptions(currentConfig, error => {
+                if (error) app.error(`Could not persist AIS threshold migration: ${error.message || error}`);
+                else app.debug('AIS thresholds migrated: red 250/800/400 m; base advance warning 10 min');
+            });
+        }
+        aisEngine.refreshOwnGeometry(Date.now(), true);
         app.debug(`${plugin.name} started/updated with new options`);
         if (typeof app.handleMessage === 'function') {
             app.handleMessage(plugin.id, {
@@ -161,6 +148,11 @@ module.exports = function (app) {
         const localSubscription = {
             context: 'vessels.self',
             subscribe: [
+                { path: 'design.length', minPeriod: 1000 },
+                { path: 'design.length.overall', minPeriod: 1000 },
+                { path: 'design.beam', minPeriod: 1000 },
+                { path: 'sensors.gps.fromBow', minPeriod: 1000 },
+                { path: 'sensors.gps.fromCenter', minPeriod: 1000 },
                 { path: 'navigation.position', minPeriod: 1000 },
                 { path: 'navigation.speedThroughWater', minPeriod: 1000 },
                 { path: 'navigation.speedOverGround', minPeriod: 1000 },
@@ -188,7 +180,9 @@ module.exports = function (app) {
                     delta.updates.forEach(update => {
                         if (update.values) {
                             update.values.forEach(v => {
-                                windEngine.processIncomingDelta(v.path, v.value);
+                                if (!aisEngine.updateOwnGeometry(v.path, v.value)) {
+                                    windEngine.processIncomingDelta(v.path, v.value);
+                                }
                             });
                         }
                     });
@@ -622,78 +616,58 @@ module.exports = function (app) {
                         description: 'Physical proximity bubble (e.g. 45m). Triggers alert if any hull enters this radius. Silenced when anchored/moored.',
                         default: 45
                     },
+                    baseTcpaMinutes: {
+                        type: 'number',
+                        title: 'Base Advance Warning (Minutes)',
+                        description: 'Earlier warnings for targets moving faster than your vessel. Minimum own speed for scaling: 4 kn; maximum lookahead: 30 min. Red and orange share the effective time window. Lower risk must persist for one fifth of this base time before the alarm clears or decreases.',
+                        exclusiveMinimum: 0,
+                        maximum: 30,
+                        default: PLUGIN_BASE_TCPA_MINUTES
+                    },
+                    thresholdPolicyVersion: {
+                        type: 'integer',
+                        default: 0,
+                        description: 'Internal migration version; preserved when saving configuration.'
+                    },
                     pleasureCraft: {
                         type: 'object',
-                        title: 'Pleasure Craft (Sailboats & Yachts)',
-                        description: 'Thresholds for pleasure craft (<25m). Halved automatically on parallel courses.',
+                        title: 'Pleasure Craft',
+                        description: 'Reference speed: 7.5 kn. Alarm distance scales up above this speed; warning distance is twice the effective alarm distance.',
                         properties: {
                             redCpa: {
                                 type: 'number',
-                                title: 'Danger CPA (Meters)',
-                                description: 'Critical collision distance. Triggers RED emergency alarm.',
-                                default: 300
-                            },
-                            orangeCpa: {
-                                type: 'number',
-                                title: 'Warning CPA (Meters)',
-                                description: 'Advisory distance. Triggers ORANGE tactical banner and COLREGs crossing calculation.',
-                                default: 700
-                            },
-                            maxTcpa: {
-                                type: 'number',
-                                title: 'Time Horizon (Minutes)',
-                                description: 'Maximum Time-to-CPA window to consider target.',
-                                default: 10
+                                title: 'Base AIS Alarm Distance (Meters)',
+                                description: 'Minimum predicted hull clearance at the reference speed. Distance never shrinks below this base value.',
+                                exclusiveMinimum: 0,
+                                default: 250
                             }
                         }
                     },
                     commercialShips: {
                         type: 'object',
-                        title: 'Commercial Ships (Cargo, Tankers, Ferries)',
-                        description: 'Thresholds for large vessels. Danger CPA automatically widens with target SOG above 12kn.',
+                        title: 'Commercial Ships',
+                        description: 'Reference speed: 10 kn. Alarm distance scales up above this speed; warning distance is twice the effective alarm distance.',
                         properties: {
                             redCpa: {
                                 type: 'number',
-                                title: 'Base Danger CPA (Meters)',
-                                description: 'Base critical CPA at 12 knots (scales up to 1360m at 32kn).',
+                                title: 'Base AIS Alarm Distance (Meters)',
+                                description: 'Minimum predicted hull clearance at the reference speed. Distance never shrinks below this base value.',
+                                exclusiveMinimum: 0,
                                 default: 800
-                            },
-                            orangeCpa: {
-                                type: 'number',
-                                title: 'Base Warning CPA (Meters)',
-                                description: 'Base advisory distance at 12 knots (scales up to 3150m for fast ferries).',
-                                default: 1852
-                            },
-                            maxTcpa: {
-                                type: 'number',
-                                title: 'Lookahead Horizon (Minutes)',
-                                description: 'Time window for commercial traffic early maneuver warning.',
-                                default: 15
                             }
                         }
                     },
                     workboats: {
                         type: 'object',
-                        title: 'Fishing & Workboats (Trawlers, Tugs)',
-                        description: 'Thresholds for vessels with restricted maneuverability and towed nets/cables.',
+                        title: 'Fishing & Workboats',
+                        description: 'Reference speed: 10 kn. Alarm distance scales up above this speed; warning distance is twice the effective alarm distance.',
                         properties: {
                             redCpa: {
                                 type: 'number',
-                                title: 'Danger CPA (Meters)',
-                                description: 'Critical clearance for workboats and tugs.',
-                                default: 350
-                            },
-                            orangeCpa: {
-                                type: 'number',
-                                title: 'Warning CPA (Meters)',
-                                description: 'Advisory clearance for workboats and tugs.',
-                                default: 750
-                            },
-                            maxTcpa: {
-                                type: 'number',
-                                title: 'Lookahead Horizon (Minutes)',
-                                description: 'Time window for fishing boats and tugs.',
-                                default: 12
+                                title: 'Base AIS Alarm Distance (Meters)',
+                                description: 'Minimum predicted hull clearance at the reference speed. Distance never shrinks below this base value.',
+                                exclusiveMinimum: 0,
+                                default: 400
                             }
                         }
                     }
@@ -768,7 +742,8 @@ module.exports = function (app) {
                 field: 'ObjectField',
                 wrapClassName: 'panel-group'
             },
-            'ui:order': ['enabled', 'ignoreOwnTarget', 'vectorMinutes', 'criticalProximity', 'pleasureCraft', 'commercialShips', 'workboats'],
+            'ui:order': ['enabled', 'ignoreOwnTarget', 'vectorMinutes', 'criticalProximity', 'baseTcpaMinutes', 'thresholdPolicyVersion', 'pleasureCraft', 'commercialShips', 'workboats'],
+            thresholdPolicyVersion: { 'ui:widget': 'hidden' },
             pleasureCraft: {
                 'ui:field': 'collapsible',
                 collapse: {

@@ -10,6 +10,7 @@ import { MiniCompass } from './components/MiniCompass';
 import { AisView } from './components/AisView';
 import { AisTacticalBanner } from './components/AisTacticalBanner';
 import { BoxType, AisTarget } from './types';
+import { openDashboardMenu } from './utils/dashboardModes.mjs';
 
 export const App: React.FC = () => {
   useViewportHeight();
@@ -39,6 +40,7 @@ export const App: React.FC = () => {
     harborClusters,
     topThreat,
     snoozeThreat,
+    isMixedSimulation,
     unsnoozeThreats,
     selectedAisTargetId,
     setSelectedAisTargetId,
@@ -120,6 +122,7 @@ export const App: React.FC = () => {
   }, [aisTargets]);
 
   const [inspectToken, setInspectToken] = React.useState<number>(0);
+  const [isInspectingAisTarget, setIsInspectingAisTarget] = React.useState(false);
   const [hasOpenedAis, setHasOpenedAis] = React.useState<boolean>(appView === 'ais');
 
   useEffect(() => {
@@ -212,6 +215,7 @@ export const App: React.FC = () => {
         onInspect={handleInspectThreat}
         onSnooze={handleSnoozeThreat}
         isNightMode={isNightMode}
+        isInspecting={appView === 'ais' && isInspectingAisTarget}
       />
 
       <div style={{ display: appView === 'wind' ? 'block' : 'none', width: '100%', height: '100%' }}>
@@ -326,7 +330,10 @@ export const App: React.FC = () => {
       {/* ================= BUSSOLA CENTRALE ================= */}
       <div className="box-gauge">
         {/* STATO CONNESSIONE */}
-        <div id="status" className={connectionStatus.className}>
+        <div id="status" className={connectionStatus.className}
+          role="button" tabIndex={0} title="Open dashboard menu" aria-label="Open dashboard menu"
+          onClick={openDashboardMenu}
+          onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDashboardMenu(); } }}>
           {connectionStatus.text}
         </div>
 
@@ -514,7 +521,9 @@ export const App: React.FC = () => {
             ownShipCourse={ownShipCourse}
             isNightMode={isNightMode}
             onSwitchToWind={handleSwitchToWind}
-            onSnoozeThreat={snoozeThreat}
+            onSnoozeThreat={handleSnoozeThreat}
+            mixedSimulation={isMixedSimulation}
+            onInspectionChange={setIsInspectingAisTarget}
             onReopenTopThreat={unsnoozeThreats}
             selectedTargetId={selectedAisTargetId}
             onSelectTarget={setSelectedAisTargetId}
