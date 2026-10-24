@@ -105,6 +105,14 @@ export interface AisTrailPoint {
 export interface AisTarget {
   id: string;
   isSimulated?: boolean;
+  areaProximityOnly?: boolean;
+  areaKind?: 'PORT' | 'ANCHORAGE' | 'PROVISIONAL';
+  reportedNavigationState?: string;
+  proximityAcknowledged?: boolean;
+  alertKind?: 'PROXIMITY';
+  currentHullClearanceMeters?: number;
+  safeBubbleMeters?: number;
+  proximityArea?: { id: string; lat: number; lon: number };
   name: string;
   type: number | string;
   lat: number;
@@ -120,6 +128,20 @@ export interface AisTarget {
   isMoving: boolean;
   motionState?: 'STATIONARY' | 'POSSIBLE_MOVEMENT' | 'MOVING';
   stationarySince?: number | null;
+  restPattern?: {
+    kind: 'UNDETERMINED' | 'FIXED' | 'OSCILLATING';
+    confirmed: boolean;
+    since: number;
+    observedDurationSeconds: number;
+    observedSpanSeconds: number;
+    sampleCount: number;
+    center: { lat: number; lon: number } | null;
+    radiusMeters: number | null;
+    dispersionMeters: number | null;
+    returnCount: number;
+    excludedSamples: number;
+    lastFixTime: number;
+  } | null;
   lastPositionTime?: number;
   lastCogTime?: number | null;
   lastSogTime?: number | null;
@@ -146,6 +168,9 @@ export interface AisTarget {
     horizonTcpa: number;
     referenceKnots: number;
     distanceFactor: number;
+    ownAtAnchor?: boolean;
+    anchoredCpaFactor?: number;
+    anchoredTcpaFactor?: number;
   };
   warningBasis?: 'NOMINAL' | 'INSTABILITY' | null;
   instabilityWarning?: {
@@ -180,6 +205,7 @@ export interface AisTarget {
 
 export interface HarborCluster {
   id: string;
+  kind?: 'PORT' | 'ANCHORAGE' | 'PROVISIONAL';
   lat: number;
   lon: number;
   center?: [number, number];

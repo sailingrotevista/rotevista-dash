@@ -1,8 +1,9 @@
 import { AisTarget } from '../types';
 import { degToRad } from './math';
 import '../../collisionPipeline.js';
+import { MARINA_DI_RAGUSA_SIM_DATA } from './marinaDiRagusaSimData';
 
-const { CollisionPipeline } = (globalThis as any).RotevistaCollisionPipeline;
+const { CollisionPipeline, applyHarborProximityPolicy } = (globalThis as any).RotevistaCollisionPipeline;
 // Simulation deliberately keeps a shorter base window than the live plugin.
 const SIM_BASE_TCPA_MINUTES = 5;
 const DELAYED_WARNING_SECONDS = 120;
@@ -212,7 +213,9 @@ export function recalculateArpaForTargets(
   myCog: number,
   mySog: number,
   targets: AisTarget[],
-  _myPropulsion: 'AUTO' | 'SAIL' | 'MOTOR' = 'AUTO'
+  _myPropulsion: 'AUTO' | 'SAIL' | 'MOTOR' = 'AUTO',
+  safeBubbleMeters = 45,
+  ownAtAnchor = false
 ): { targets: AisTarget[]; topThreat: AisTarget | null } {
   const now = Date.now();
 
@@ -222,10 +225,11 @@ export function recalculateArpaForTargets(
     sog: mySog,
     cog: myCog,
     hdg: myHdg,
+    isAnchored: ownAtAnchor,
   };
 
   const updatedTargets = targets.map(v => {
-    const isStoppedOrMoored = !v.isMoving || v.sog < 0.3 || v.isMoored || v.inCluster;
+    const isStoppedOrMoored = !v.isMoving;
     const evalRes = simCollisionPipeline.evaluateTarget(
       ownShipInput,
       {
@@ -234,7 +238,8 @@ export function recalculateArpaForTargets(
         name: v.name,
         lat: v.lat,
         lon: v.lon,
-        sog: v.sog,
+        sog: isStoppedOrMoored ? 0 : v.sog,
+        isMoving: !isStoppedOrMoored,
         cog: v.cog,
         shipType: typeof v.type === 'number' ? v.type : parseInt(String(v.type), 10) || 0,
         lastUpdate: now - (v.age || 0) * 1000,
@@ -255,9 +260,7 @@ export function recalculateArpaForTargets(
 
     let risk: 'GREEN' | 'ORANGE' | 'RED' | 'GREY' = 'GREEN';
     let riskMsg = 'NESSUN RISCHIO';
-    if (isStoppedOrMoored) {
-      risk = 'GREY';
-    } else if (evalRes && evalRes.alertState === 'RED') {
+    if (evalRes && evalRes.alertState === 'RED') {
       risk = 'RED';
       riskMsg = evalRes.reason || 'RISCHIO COLLISIONE!';
     } else if (evalRes && evalRes.alertState === 'ORANGE') {
@@ -275,6 +278,7 @@ export function recalculateArpaForTargets(
       trend,
       riskMsg,
       effectiveThresholds: evalRes?.effectiveThresholds,
+      currentHullClearanceMeters: evalRes?.currentHullClearanceMeters,
       warningBasis: evalRes?.warningBasis,
       instabilityWarning: evalRes?.instabilityWarning,
       crossDir: evalRes ? evalRes.crossDir : '',
@@ -283,6 +287,14 @@ export function recalculateArpaForTargets(
       sightingTxt: evalRes ? evalRes.sightingTxt : '',
     };
 
+    if (updated.inCluster && !updated.isMoving) {
+      const area = MARINA_DI_RAGUSA_SIM_DATA.harborClusters.find(h => h.id === updated.clusterId);
+      updated.proximityArea = area ? { id: area.id, lat: area.lat, lon: area.lon } : undefined;
+      applyHarborProximityPolicy(updated, safeBubbleMeters);
+      simCollisionPipeline.targetStates.delete(updated.id);
+    } else {
+      applyHarborProximityPolicy(updated, safeBubbleMeters);
+    }
     return updated;
   });
 

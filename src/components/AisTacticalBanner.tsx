@@ -35,7 +35,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
     };
   }, [hasBanner]);
   const snoozeKey = !isInspecting && threat && (threat.risk === 'RED' || threat.risk === 'ORANGE')
-    ? `${threat.id}:${threat.risk}` : null;
+    ? `${threat.id}:${threat.risk}:${threat.alertKind || 'COLLISION'}` : null;
   const [readySnoozeKey, setReadySnoozeKey] = useState<string | null>(null);
   useEffect(() => {
     setReadySnoozeKey(null);
@@ -50,6 +50,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
   if (!threat || threat.risk === 'GREY') return null;
 
   const isCollisionDanger = threat.risk === 'RED';
+  const isProximity = threat.alertKind === 'PROXIMITY';
   const cpaText = threat.cpa !== null ? (threat.cpa < 1852 ? `${threat.cpa} m` : `${(threat.cpa / 1852).toFixed(2)} NM`) : '--';
   const tcpaText = threat.tcpa !== null && threat.tcpa >= 0 ? `${threat.tcpa.toFixed(1)} min` : '--';
   const horizonMinutes = threat.effectiveThresholds?.horizonTcpa;
@@ -70,7 +71,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
       <div className="banner-content">
         <div className="banner-header-row">
           <span className="banner-badge">
-            {isCollisionDanger ? '🚨 ARPA COLLISION ALARM' : threat.warningBasis === 'INSTABILITY' ? '⚠️ VARIABLE TRAJECTORY WARNING' : '⚠️ CROSSING WARNING'}
+            {isProximity ? '⚠️ SAFE BUBBLE PROXIMITY' : isCollisionDanger ? '🚨 ARPA COLLISION ALARM' : threat.warningBasis === 'INSTABILITY' ? '⚠️ VARIABLE TRAJECTORY WARNING' : '⚠️ CROSSING WARNING'}
           </span>
           <span className="banner-vessel-name">
             {threat.name || threat.id}
@@ -81,12 +82,12 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
 
         <div className="banner-metrics-row">
           <div className="banner-metric banner-metric-primary">
-            <span className="metric-lbl">CPA</span>
-            <span className="metric-val">{cpaText}</span>
+            <span className="metric-lbl">{isProximity ? 'CLEARANCE' : 'CPA'}</span>
+            <span className="metric-val">{isProximity ? `${Math.round(threat.currentHullClearanceMeters ?? 0)} m` : cpaText}</span>
           </div>
           <div className="banner-metric banner-metric-primary">
-            <span className="metric-lbl">TCPA</span>
-            <span className="metric-val">{tcpaText}</span>
+            <span className="metric-lbl">{isProximity ? 'SAFE BUBBLE' : 'TCPA'}</span>
+            <span className="metric-val">{isProximity ? `${threat.safeBubbleMeters} m` : tcpaText}</span>
           </div>
           <div className="banner-metric">
             <span className="metric-lbl" title="Velocità (SOG)" style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -142,9 +143,9 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
           disabled={!canSnooze}
           style={{ visibility: canSnooze ? 'visible' : 'hidden' }}
           onClick={() => { if (canSnooze) onSnooze(threat.id); }}
-          title="Snooze alarm for 10 minutes"
+          title={isProximity ? 'Acknowledge this proximity' : 'Snooze alarm for 10 minutes'}
         >
-          SNOOZE 10M
+          {isProximity ? 'ACKNOWLEDGE PROXIMITY' : 'SNOOZE 10M'}
         </button>
       </div>
     </div>

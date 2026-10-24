@@ -34,6 +34,8 @@ const COLLISION_THRESHOLD_DEFAULTS = {
     warningDistanceRatio: 2,
     baseTcpaMinutes: 5,
     minimumOwnSpeedKnots: 4,
+    ownAnchoredCpaFactor: 0.25,
+    ownAnchoredTcpaFactor: 0.25,
     lookaheadSpeedCoefficient: 0.5,
     maximumLookaheadMinutes: 30,
     instabilityPenetrationFraction: 0.1,
@@ -384,6 +386,7 @@ function computeCpaTcpa(ownShip, target, uncertainty, hulls) {
         antennaCpaMeters: antennaNominal.cpaMeters,
         antennaTcpaSeconds: antennaNominal.tcpaSec,
         hullMarginMeters: Math.max(0, Math.hypot(cpaX, cpaY) - nominal.cpaMeters),
+        currentHullClearanceMeters: clearanceToObstacle({ x: x0, y: y0 }, obstacle),
         hullPrediction: { position: { x: x0, y: y0 }, velocity: { x: targetVx - myVx, y: targetVy - myVy }, obstacle }
     };
 }
@@ -533,6 +536,34 @@ function compareTargets(a, b) {
     return idA < idB ? -1 : idA > idB ? 1 : 0;
 }
 
+function isAnchoredNavigationState(value) {
+    const state = value && typeof value === 'object' ? value.value : value;
+    const text = String(state ?? '').trim().toLowerCase().replace(/[_-]/g, ' ');
+    return text === 'anchored' || text === 'at anchor' || text === '1';
+}
+
+function applyHarborProximityPolicy(target, bubbleMeters = 45) {
+    const stationary = target.isMoving !== true && target.motionState !== 'MOVING';
+    if (!stationary || !target.inCluster) {
+        delete target.areaProximityOnly;
+        delete target.alertKind;
+        delete target.safeBubbleMeters;
+        delete target.proximityArea;
+        return target;
+    }
+    const bubble = Number.isFinite(bubbleMeters) && bubbleMeters > 0 ? bubbleMeters : 45;
+    const inside = Number.isFinite(target.currentHullClearanceMeters) && target.currentHullClearanceMeters <= bubble;
+    Object.assign(target, {
+        areaProximityOnly: true,
+        alertKind: inside ? 'PROXIMITY' : undefined,
+        risk: inside ? 'ORANGE' : 'GREY',
+        riskMsg: inside ? 'SAFE BUBBLE PROXIMITY' : '',
+        safeBubbleMeters: bubble,
+        cpa: null, tcpa: -1, crossDir: '', crossRule: '',
+    });
+    return target;
+}
+
 class CollisionPipeline {
     constructor(userConfig = {}) {
         this.config = Object.assign({
@@ -560,14 +591,19 @@ class CollisionPipeline {
         const targetKnots = Number.isFinite(target.sog) ? Math.max(0, target.sog) : 0;
         const ownKnots = Math.max(positive(cfg.minimumOwnSpeedKnots, 4), Number.isFinite(ownShip.sog) ? ownShip.sog : 0);
         const distanceFactor = Math.max(1, targetKnots / referenceKnots);
-        const redCpa = baseRed * distanceFactor;
+        const ownAtAnchor = ownShip.isAnchored === true;
+        const fraction = (value, fallback) => Number.isFinite(value) && value > 0 && value <= 1 ? value : fallback;
+        const anchoredCpaFactor = ownAtAnchor ? fraction(cfg.ownAnchoredCpaFactor, 0.25) : 1;
+        const anchoredTcpaFactor = ownAtAnchor ? fraction(cfg.ownAnchoredTcpaFactor, 0.25) : 1;
+        const redCpa = baseRed * distanceFactor * anchoredCpaFactor;
         const orangeCpa = redCpa * positive(cfg.warningDistanceRatio, 2);
         const baseMinutes = positive(cfg.baseTcpaMinutes, 5);
         const coefficient = Number.isFinite(cfg.lookaheadSpeedCoefficient) && cfg.lookaheadSpeedCoefficient >= 0 ? cfg.lookaheadSpeedCoefficient : 0.5;
         const horizonTcpa = Math.min(Math.max(baseMinutes, positive(cfg.maximumLookaheadMinutes, 30)),
-            baseMinutes * (1 + coefficient * Math.max(0, targetKnots / ownKnots - 1)));
+            baseMinutes * (1 + coefficient * Math.max(0, targetKnots / ownKnots - 1))) * anchoredTcpaFactor;
         return { redCpa, orangeCpa, critTcpa: horizonTcpa, horizonTcpa, baseRedCpa: baseRed,
-            referenceKnots, distanceFactor, baseTcpaMinutes: baseMinutes };
+            referenceKnots, distanceFactor, baseTcpaMinutes: baseMinutes,
+            ownAtAnchor, anchoredCpaFactor, anchoredTcpaFactor };
     }
 
     _computeTrend(history) {
@@ -602,40 +638,6 @@ class CollisionPipeline {
     evaluateTarget(ownShip, target, now = Date.now()) {
         let targetId = target.mmsi || target.id || target.name;
         if (!targetId) return null;
-
-        let isMoored = Boolean(target.isMoored || target.inCluster || target.anchorState === 'MOORED' || (target.sog !== undefined && target.sog < 0.3 && !target.isMoving));
-        if (isMoored) {
-            this.targetStates.delete(targetId);
-            let kinematics = computeCpaTcpa(ownShip, target, null);
-            let ownHdg = (ownShip.hdg !== undefined && ownShip.hdg !== null) ? ownShip.hdg : (ownShip.cog || 0);
-            let rel = normalizeDegrees(kinematics.bearingNowDeg - ownHdg);
-            return {
-                targetId,
-                mmsi: target.mmsi,
-                name: target.name || `MMSI ${target.mmsi || 'N/A'}`,
-                category: this._resolveVesselCategory(target),
-                alertState: 'NO_DANGER',
-                trend: 'STABLE',
-                deltaCpaPerMin: 0,
-                rangeMeters: kinematics.rangeMeters,
-                rangeNM: kinematics.rangeNM,
-                bearingNowDeg: kinematics.bearingNowDeg,
-                relBearingDeg: rel,
-                cpaNominalMeters: null,
-                cpaMinMeters: null,
-                cpaMaxMeters: null,
-                tcpaSeconds: -1,
-                tcpaMinutes: -1,
-                isDiverging: kinematics.isDiverging,
-                hullMarginMeters: 0,
-                uncertaintyConeDeg: 0,
-                reason: '',
-                crossDir: '',
-                crossOutcome: kinematics.isDiverging ? 'In Allontanamento' : 'In Avvicinamento',
-                crossRule: '',
-                sightingTxt: computeSighting(rel)
-            };
-        }
 
         let category = this._resolveVesselCategory(target);
         let ownHull = getHullBoundingRadius(ownShip, 'sailing');
@@ -759,6 +761,7 @@ class CollisionPipeline {
             rangeMeters: kinematics.rangeMeters,
             rangeNM: kinematics.rangeNM,
             bearingNowDeg: kinematics.bearingNowDeg,
+            currentHullClearanceMeters: kinematics.currentHullClearanceMeters,
             cpaNominalMeters: netCpaNominal,
             cpaMinMeters: netCpaMin,
             cpaMaxMeters: netCpaMax,
@@ -845,7 +848,9 @@ const _pipelineExports = {
     COLLISION_THRESHOLD_DEFAULTS,
     computeSighting,
     evaluateColreg,
-    compareTargets
+    compareTargets,
+    applyHarborProximityPolicy,
+    isAnchoredNavigationState
 };
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -85,6 +85,7 @@ const getVesselTypeLabel = (type: number | string, name?: string): string => {
 
 const getVesselStatusLabel = (t: AisTarget): string => {
   if (t.anchorState === 'ANCHOR_DRAGGING') return 'DRAGGING ANCHOR';
+  if (t.areaKind === 'PROVISIONAL' && !t.isMoving) return 'REST AREA';
   if (t.isMoored || t.anchorState === 'MOORED') return 'IN PORT';
   if (t.isAnchored || t.anchorState === 'ANCHORED') return 'AT ANCHOR';
   if (t.motionState === 'POSSIBLE_MOVEMENT') return 'POSSIBLE MOVEMENT';
@@ -967,11 +968,15 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
     harborClusters.forEach(cluster => {
       if (cluster.hull && cluster.hull.length >= 3) {
+        const isAnchorage = cluster.kind === 'ANCHORAGE';
+        const isProvisional = cluster.kind === 'PROVISIONAL';
+        const areaLabel = isAnchorage ? 'Anchorage' : isProvisional ? 'Rest area' : 'Port';
+        const areaColor = isAnchorage ? '#f59e0b' : isProvisional ? '#94a3b8' : '#38bdf8';
         const polygon = L.polygon(cluster.hull, {
-          color: '#38bdf8',
+          color: areaColor,
           weight: 1.2,
           dashArray: '5, 6',
-          fillColor: '#0284c7',
+          fillColor: areaColor,
           fillOpacity: isNightMode ? 0.12 : 0.08,
           interactive: false,
         });
@@ -981,7 +986,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         const badgeMarker = L.marker(centerPt, {
           icon: L.divIcon({
             className: 'harbor-cluster-badge-marker',
-            html: `<div style="background:rgba(15,23,42,0.88);backdrop-filter:blur(8px);border:1px solid rgba(56,189,248,0.45);border-radius:8px;padding:2px 7px;font-size:9.5px;font-weight:900;font-family:monospace;color:#38bdf8;box-shadow:0 4px 12px rgba(0,0,0,0.6);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;pointer-events:none;text-transform:uppercase;"><span>🏛️</span><span>Port (${cluster.count})</span></div>`,
+            html: `<div style="background:rgba(15,23,42,0.88);backdrop-filter:blur(8px);border:1px solid rgba(56,189,248,0.45);border-radius:8px;padding:2px 7px;font-size:9.5px;font-weight:900;font-family:monospace;color:${areaColor};box-shadow:0 4px 12px rgba(0,0,0,0.6);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;pointer-events:none;text-transform:uppercase;"><span>${isAnchorage ? '⚓' : isProvisional ? '◌' : '🏛️'}</span><span>${areaLabel} (${cluster.count})</span></div>`,
             iconSize: [96, 22],
             iconAnchor: [48, 11],
           }),
@@ -1383,7 +1388,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       // Etichetta flottante laterale (sincronizzata via upsertSmoothMarker)
       const ackedRisk = ackedLabels[t.id];
       const isAcked = Boolean(ackedRisk && !(ackedRisk === 'ORANGE' && isRed));
-      const shouldShowFloatingLabel = !isAcked && !(t.inCluster && !t.isMoving && !isSelected) && (isRed || isOrange || isExtendedLabel);
+      const shouldShowFloatingLabel = !isAcked && !(t.inCluster && !t.isMoving && !isSelected && t.alertKind !== 'PROXIMITY') && (isRed || isOrange || isExtendedLabel);
 
       if (shouldShowFloatingLabel) {
         const titleColor = isRed ? '#dc2626' : isOrange ? '#ea580c' : '#0f172a';
@@ -1395,10 +1400,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         const statusLine = (isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : getVesselStatusLabel(t)) +
           (t.contactLost ? ` • AIS CONTACT LOST · ${formatAge(t.age)}` : ageVisual.stale ? ` • AIS ${formatAge(t.age)}` : '');
         const tcpaTxt = t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` in ${Math.round(t.tcpa)} min` : '';
-        const cpaOrDistLine = isRed
+        const cpaOrDistLine = t.alertKind === 'PROXIMITY' ? `⚠️ SAFE BUBBLE · CLEARANCE ${formatDist(t.currentHullClearanceMeters ?? null)}` : isRed
           ? `🚨 ${t.riskMsg || 'COLLISION!'}${t.cpa !== null && t.cpa !== undefined ? ` • CPA: ${formatDist(t.cpa)}` : ''}${tcpaTxt}`
           : `${isOrange ? '⚠️ ' : ''}${t.cpa !== null && t.cpa !== undefined ? `CPA: ${formatDist(t.cpa)}` : `Dist: ${formatDist(t.dist)}`}${tcpaTxt}`;
-        const compactMetrics = `${t.cpa !== null && t.cpa !== undefined ? `CPA ${formatDist(t.cpa)}` : formatDist(t.dist)}${t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` • ${Math.round(t.tcpa)}m` : ''}`;
+        const compactMetrics = t.alertKind === 'PROXIMITY' ? `PROXIMITY ${formatDist(t.currentHullClearanceMeters ?? null)}` : `${t.cpa !== null && t.cpa !== undefined ? `CPA ${formatDist(t.cpa)}` : formatDist(t.dist)}${t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` • ${Math.round(t.tcpa)}m` : ''}`;
         let labelHtml = isExtendedLabel
           ? `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to inspect target"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${escapeAisLabelText(t.name || 'Unknown')}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${escapeAisLabelText(cpaOrDistLine)}</span></div></div>`
           : `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:4px;background:rgba(255,255,255,0.78);border:1.5px solid ${borderColor};border-radius:8px;padding:2px 6px;box-shadow:0 2px 6px rgba(0,0,0,0.14);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to select target"><span style="font-size:12px;line-height:1;">${isRed ? '🚨' : '⚠️'}</span><span style="font-size:11px;font-weight:900;color:${metricColor};letter-spacing:-0.3px;">${compactMetrics}</span></div>`;
@@ -1618,7 +1623,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
             {stats.orange > 0 && (
               <span className="counter-item counter-warning">
                 <span className="counter-val">{stats.orange}</span>
-                <span className="counter-lbl">Crossing</span>
+                <span className="counter-lbl">Warnings</span>
               </span>
             )}
 
@@ -1774,18 +1779,18 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                 </button>
               </div>
 
-              {(selectedTarget.risk === 'RED' || selectedTarget.risk === 'ORANGE') && (
+              {(selectedTarget.risk === 'RED' || selectedTarget.risk === 'ORANGE' || (selectedTarget.areaProximityOnly && !selectedTarget.proximityAcknowledged)) && (
                 <button
                   type="button"
                   className="banner-btn ais-detail-snooze"
-                  aria-label={`Snooze ${selectedTarget.name || selectedTarget.id} for 10 minutes`}
+                  aria-label={selectedTarget.areaProximityOnly ? `Acknowledge proximity to ${selectedTarget.name || selectedTarget.id}` : `Snooze ${selectedTarget.name || selectedTarget.id} for 10 minutes`}
                   onClick={() => {
                     onSnoozeThreat(selectedTarget.id);
                     setSelectedTarget(null);
                     setShowListDrawer(false);
                   }}
                 >
-                  SNOOZE 10M
+                  {selectedTarget.areaProximityOnly ? 'ACKNOWLEDGE PROXIMITY' : 'SNOOZE 10M'}
                 </button>
               )}
 
@@ -1794,6 +1799,14 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                   <span className="alert-title">Motion data out of sync</span>
                   <span className="alert-desc">
                     Position, course and speed timestamps differ by more than 20% of the prediction window.
+                  </span>
+                </div>
+              )}
+              {selectedTarget.areaProximityOnly && (
+                <div className="ais-detail-alert-box orange">
+                  <span className="alert-title">{selectedTarget.proximityAcknowledged ? 'PROXIMITY ACKNOWLEDGED' : 'MOORING AREA · SAFE BUBBLE'}</span>
+                  <span className="alert-desc">
+                    Current hull clearance: {formatDist(selectedTarget.currentHullClearanceMeters ?? null)} · Safe bubble: {selectedTarget.safeBubbleMeters} m
                   </span>
                 </div>
               )}
@@ -1845,6 +1858,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                         <span className="ais-cell-val" style={{ fontSize: '0.85rem' }}>
                           ALARM {formatDist(selectedTarget.effectiveThresholds.redCpa)} • WARNING {formatDist(selectedTarget.effectiveThresholds.orangeCpa)}
                           {' • '}{selectedTarget.effectiveThresholds.horizonTcpa.toFixed(1)} min
+                          {selectedTarget.effectiveThresholds.ownAtAnchor && ' • OWN SHIP AT ANCHOR'}
                         </span>
                       </div>
                     )}
@@ -1934,6 +1948,17 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                         📻 {selectedTarget.callsign || '--'} • {selectedTarget.flag || '--'}
                       </span>
                     </div>
+                    {selectedTarget.restPattern && (
+                      <div className="ais-detail-cell cell-wide">
+                        <span className="ais-cell-label">OBSERVED REST PATTERN</span>
+                        <span className="ais-cell-val">
+                          {selectedTarget.restPattern.kind === 'UNDETERMINED' ? 'NOT YET DETERMINED' : selectedTarget.restPattern.kind}
+                          {' · '}{selectedTarget.restPattern.sampleCount} fixes
+                          {' · '}{Math.floor(selectedTarget.restPattern.observedDurationSeconds / 60)} min observed
+                          {selectedTarget.restPattern.radiusMeters !== null && ` · radius ${Math.round(selectedTarget.restPattern.radiusMeters)} m`}
+                        </span>
+                      </div>
+                    )}
                     {selectedTarget.predictionStability && (
                       <div className="ais-detail-cell cell-wide">
                         <span className="ais-cell-label">TRAJECTORY STABILITY</span>

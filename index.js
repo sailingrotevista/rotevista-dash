@@ -154,6 +154,7 @@ module.exports = function (app) {
                 { path: 'sensors.gps.fromBow', minPeriod: 1000 },
                 { path: 'sensors.gps.fromCenter', minPeriod: 1000 },
                 { path: 'navigation.position', minPeriod: 1000 },
+                { path: 'navigation.state', minPeriod: 1000 },
                 { path: 'navigation.speedThroughWater', minPeriod: 1000 },
                 { path: 'navigation.speedOverGround', minPeriod: 1000 },
                 { path: 'environment.depth.belowTransducer', minPeriod: 1000 },
@@ -180,6 +181,7 @@ module.exports = function (app) {
                     delta.updates.forEach(update => {
                         if (update.values) {
                             update.values.forEach(v => {
+                                aisEngine.updateWindEvidence(v.path, v.value, update.timestamp);
                                 if (!aisEngine.updateOwnGeometry(v.path, v.value)) {
                                     windEngine.processIncomingDelta(v.path, v.value);
                                 }
@@ -612,8 +614,9 @@ module.exports = function (app) {
                     },
                     criticalProximity: {
                         type: 'number',
-                        title: 'Emergency Proximity Bubble (Meters)',
-                        description: 'Physical proximity bubble (e.g. 45m). Triggers alert if any hull enters this radius. Silenced when anchored/moored.',
+                        title: 'Safe Proximity Bubble (Meters)',
+                        description: 'Current hull clearance for stationary targets in recognized mooring areas. Visual proximity warning only; acknowledge it for the current local harbor context. Moving targets and stationary targets outside recognized areas retain normal CPA/TCPA alarms.',
+                        exclusiveMinimum: 0,
                         default: 45
                     },
                     baseTcpaMinutes: {

@@ -10,7 +10,7 @@
 
 const { TargetMotionTracker, compactAisTrail } = require('./targetMotionTracker');
 const { PLUGIN_BASE_TCPA_MINUTES } = require('./collisionConfig');
-const { COLLISION_THRESHOLD_DEFAULTS } = require('./collisionPipeline');
+const { COLLISION_THRESHOLD_DEFAULTS, applyHarborProximityPolicy, isAnchoredNavigationState } = require('./collisionPipeline');
 
 const OWN_GEOMETRY_RETRY_MS = 60000;
 const MOTION_DATA_MAX_SKEW_FRACTION = 0.2;
@@ -87,6 +87,7 @@ class AisEngine {
         this.topThreat = null;
         this.lastOwnGps = { lat: null, lon: null, t: 0 };
         this.ownGeometry = {};
+        this.windEvidence = {};
         this.lastOwnGeometryProbe = null;
         this.aisDiagnostics = {
             status: 'INITIALIZING',
@@ -121,6 +122,13 @@ class AisEngine {
 
     getPersistentCache() {
         return this.aisPersistentCache;
+    }
+
+    updateWindEvidence(path, value, timestamp) {
+        if (!['environment.wind.directionTrue', 'environment.wind.speedTrue'].includes(path)) return;
+        const t = Date.parse(timestamp);
+        if (!Number.isFinite(t)) return;
+        if (!this.windEvidence[path] || t >= this.windEvidence[path].t) this.windEvidence[path] = { value, t };
     }
 
     updateOwnGeometry(path, value) {
@@ -264,13 +272,16 @@ class AisEngine {
                 baseTcpaMinutes: cfg.baseTcpaMinutes ?? PLUGIN_BASE_TCPA_MINUTES,
             });
 
+            const ownNavigationState = raw['navigation.state'] !== undefined ? raw['navigation.state']
+                : typeof app.getSelfPath === 'function' ? app.getSelfPath('navigation.state') : null;
             const ownShipInput = {
                 ...this.getOwnGeometry(),
                 lat: myGps.lat,
                 lon: myGps.lon,
                 sog: mySpeedKn,
                 cog: myCog,
-                hdg: myHdg
+                hdg: myHdg,
+                isAnchored: isAnchoredNavigationState(ownNavigationState),
             };
 
             const MAX_DISTANCE_METERS = 37040; // 20 NM
@@ -415,8 +426,17 @@ class AisEngine {
                     const mooredHint = navStateRaw.includes('moored') || navStateRaw === '5' || Boolean(cachedTarget && cachedTarget.isMoored);
                     const anchoredHint = navStateRaw.includes('anchor') || navStateRaw === '1';
                     const motion = this.motionTracker.update(key, {
-                        lat: vLat, lon: vLon, t: realAisTime, sourceTime: parsedTime, sog, cog,
-                    }, { now, historyMs: maxTrailAgeMs, moored: mooredHint, anchored: anchoredHint });
+                        lat: vLat, lon: vLon, t: realAisTime, sourceTime: parsedTime, sog, cog, hdg, headingTime: motionTimestamp(hdgNode, hdgVal),
+                    }, { now, historyMs: maxTrailAgeMs, moored: mooredHint, anchored: anchoredHint,
+                        wind: {
+                            direction: Number.isFinite(this.windEvidence['environment.wind.directionTrue']?.value) ?
+                                (r2d(this.windEvidence['environment.wind.directionTrue'].value) + 360) % 360 : null,
+                            directionTime: this.windEvidence['environment.wind.directionTrue']?.t,
+                            speedKnots: Number.isFinite(this.windEvidence['environment.wind.speedTrue']?.value) ?
+                                this.windEvidence['environment.wind.speedTrue'].value * 1.94384 : null,
+                            speedTime: this.windEvidence['environment.wind.speedTrue']?.t,
+                            lat: myGps.lat, lon: myGps.lon,
+                        } });
 
                     let shipType = 0;
                     if (v.design && v.design.aisShipType) {
@@ -637,17 +657,20 @@ class AisEngine {
                     isAnchored: isAnchored,
                     isMoored: isMoored,
                     anchorState: anchorState,
+                    reportedNavigationState: v.navStateRaw || '',
                     swingRadius: null,
                     anchorCenter: null,
                     isMoving,
                     motionState: motion ? motion.motionState : undefined,
                     stationarySince: motion ? motion.stationarySince : null,
+                    restPattern: motion ? motion.restPattern : null,
                     lastPositionTime: v.lastSeen,
                     isProjected,
                     contactLost: Boolean(v.contactLost),
                     contactLostAt: v.contactLostAt,
                     predictionStability: motion ? motion.predictionStability : undefined,
                     effectiveThresholds: evalRes?.effectiveThresholds,
+                    currentHullClearanceMeters: evalRes?.currentHullClearanceMeters,
                     lastCogTime: v.lastCogTime,
                     lastSogTime: v.lastSogTime,
                     motionDataSync: evaluateMotionDataSync(v.positionSourceTime, v.lastCogTime, v.lastSogTime, evalRes?.effectiveThresholds?.horizonTcpa),
@@ -683,14 +706,10 @@ class AisEngine {
                 if (this.aisPersistentCache[v.id]) {
                     this.aisPersistentCache[v.id].isMoored = Boolean(v.isMoored);
                 }
-                if (v.isMoored || v.inCluster) {
-                    v.isMoving = false;
-                    v.risk = "GREY";
-                    v.riskMsg = "";
-                    v.cpa = null;
-                    v.tcpa = -1;
-                    v.crossDir = "";
-                    v.crossRule = "";
+                if (v.inCluster && !v.isMoving && v.motionState !== 'MOVING') {
+                    const area = harborClusters.find(h => h.id === v.clusterId);
+                    v.proximityArea = area ? { id: area.id, lat: area.lat, lon: area.lon } : undefined;
+                    applyHarborProximityPolicy(v, cfg.criticalProximity);
                     this.collisionPipeline.targetStates.delete(v.id);
                 }
             }

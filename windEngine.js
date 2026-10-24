@@ -81,6 +81,12 @@ class WindEngine {
      * Applica un filtro passa-basso continuo a ogni pacchetto e storicizza a 1Hz con dati stabilizzati.
      */
     processIncomingDelta(path, val) {
+        // Navigation status is categorical, including an explicit null reset;
+        // never pass it through the numerical smoothing used for instruments.
+        if (path === 'navigation.state') {
+            this.raw[path] = val;
+            return;
+        }
         if (val === null || val === undefined) return;
 
         const raw = this.raw;

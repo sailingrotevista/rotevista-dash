@@ -30,6 +30,8 @@ import { generateRandomColregScenario, recalculateArpaForTargets } from '../util
 import { isThreatSnoozed, reconcileSnooze } from '../utils/aisSnooze.mjs';
 import { MixedAisSimulation, mergeAisTargets } from '../utils/mixedAisSimulation.mjs';
 import { BannerThreatSelector } from '../utils/aisPriority.mjs';
+import { proximityAcknowledgementExpired } from '../utils/proximityAcknowledgement.mjs';
+import { isAnchoredNavigationState } from '../utils/navigationState.mjs';
 
 // Explicit opt-in keeps the simulator usable even with a reachable Signal K proxy.
 const FORCE_SIMULATION = new URLSearchParams(window.location.search).get('simulate') === '1';
@@ -155,6 +157,7 @@ export function useDashboard() {
   const [topThreat, setTopThreat] = useState<AisTarget | null>(null);
   const [selectedAisTargetId, setSelectedAisTargetId] = useState<string | null>(null);
   const [snoozedThreats, setSnoozedThreats] = useState<Record<string, { until: number; initialRisk: string; lostPositionTime?: number }>>({});
+  const [proximityAcknowledgements, setProximityAcknowledgements] = useState<Record<string, { id: string; lat: number; lon: number }>>({});
   const [ownShipPosition, setOwnShipPosition] = useState<{ lat: number; lon: number }>({ lat: 36.780956, lon: 14.545439 });
   const [ownShipCourse, setOwnShipCourse] = useState<{ hdg: number; cog: number; sog: number }>({ hdg: 45, cog: 45, sog: 0.0 });
 
@@ -180,6 +183,11 @@ export function useDashboard() {
 
   const snoozeThreat = useCallback((targetId: string) => {
     const target = latestAisRef.current.targets.find(t => t.id === targetId);
+    if (target?.areaProximityOnly && !target.isMoving) {
+      const area = target.proximityArea || { id: target.clusterId || target.id, lat: target.lat, lon: target.lon };
+      setProximityAcknowledgements(prev => ({ ...prev, [targetId]: area }));
+      return;
+    }
     setTopThreat(currentTop => {
       const initialRisk = target?.risk || (currentTop?.id === targetId ? currentTop.risk : 'ORANGE');
       setSnoozedThreats(prev => ({
@@ -193,6 +201,7 @@ export function useDashboard() {
 
   const unsnoozeThreats = useCallback(() => {
     setSnoozedThreats({});
+    setProximityAcknowledgements({});
   }, []);
 
   const bannerSelectorRef = useRef(new BannerThreatSelector());
@@ -200,7 +209,7 @@ export function useDashboard() {
   const activeThreat = useMemo(() => {
     const candidates: AisTarget[] = [];
     const seen = new Set<string>();
-    const isHarborTarget = (t: AisTarget) => Boolean(t.isMoored || t.inCluster || t.anchorState === 'MOORED');
+    const isHarborTarget = (t: AisTarget) => Boolean(t.areaProximityOnly && t.alertKind !== 'PROXIMITY');
     if (
       topThreat &&
       (topThreat.risk === 'RED' || topThreat.risk === 'ORANGE') &&
@@ -217,16 +226,37 @@ export function useDashboard() {
     });
     const now = Date.now();
     const valid = candidates.filter(t => {
+      if (t.alertKind === 'PROXIMITY' && proximityAcknowledgements[t.id]) return false;
       return !isThreatSnoozed(t, snoozedThreats[t.id], now);
     });
     return bannerSelectorRef.current.select(valid, now);
-  }, [topThreat, aisTargets, snoozedThreats, bannerSelectionTick]);
+  }, [topThreat, aisTargets, snoozedThreats, proximityAcknowledgements, bannerSelectionTick]);
   const priorityDeadline = bannerSelectorRef.current.pendingDeadline;
   useEffect(() => {
     if (priorityDeadline === null) return;
     const timer = setTimeout(() => setBannerSelectionTick(value => value + 1), Math.max(0, priorityDeadline - Date.now()));
     return () => clearTimeout(timer);
   }, [priorityDeadline]);
+
+  useEffect(() => {
+    setProximityAcknowledgements(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [id, area] of Object.entries(prev)) {
+        const target = latestAisRef.current.targets.find(t => t.id === id);
+        const ownPosition = storeRef.current.timestamps['navigation.position'] ? latestAisRef.current.pos : null;
+        if (proximityAcknowledgementExpired(area, target, ownPosition)) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [aisTargets]);
+  const displayedAisTargets = useMemo(() => aisTargets.map(t =>
+    t.areaProximityOnly && !t.isMoving && proximityAcknowledgements[t.id]
+      ? { ...t, risk: 'GREY' as const, riskMsg: '', proximityAcknowledged: true } : t
+  ), [aisTargets, proximityAcknowledgements]);
 
   useEffect(() => {
     setSnoozedThreats(prev => {
@@ -447,7 +477,7 @@ export function useDashboard() {
   const realAisTargetsRef = useRef<AisTarget[]>([]);
   const simulatedAisTargetsRef = useRef<AisTarget[]>([]);
   const processIncomingData = useCallback((path: string, val: any, timeMs?: number) => {
-    if ((val === null && path !== 'environment.ais_top_threat') || val === undefined || (typeof val === 'number' && isNaN(val))) return;
+    if ((val === null && path !== 'environment.ais_top_threat' && path !== 'navigation.state') || val === undefined || (typeof val === 'number' && isNaN(val))) return;
 
     if ((path === 'environment.wind.speedApparent' || path === 'environment.wind.speedTrue') && val > 51.44) return;
     if ((path === 'navigation.speedThroughWater' || path === 'navigation.speedOverGround') && val > 25.72) return;
@@ -635,6 +665,9 @@ export function useDashboard() {
           prev.contactLost === nextThreat.contactLost &&
           prev.contactLostAt === nextThreat.contactLostAt &&
           prev.motionDataSync?.status === nextThreat.motionDataSync?.status &&
+          prev.alertKind === nextThreat.alertKind &&
+          prev.areaProximityOnly === nextThreat.areaProximityOnly &&
+          prev.currentHullClearanceMeters === nextThreat.currentHullClearanceMeters &&
           prev.effectiveThresholds?.horizonTcpa === nextThreat.effectiveThresholds?.horizonTcpa
         ) {
           return prev;
@@ -978,7 +1011,8 @@ export function useDashboard() {
           simCog,
           sogKts,
           simTargets,
-          propulsionModeRef.current
+          propulsionModeRef.current,
+          configRef.current.aisAlerter?.criticalProximity ?? 45
         );
 
         simTargets = arpaRes.targets;
@@ -994,7 +1028,8 @@ export function useDashboard() {
         45,
         5.2,
         simTargets,
-        propulsionModeRef.current
+        propulsionModeRef.current,
+        configRef.current.aisAlerter?.criticalProximity ?? 45
       );
       processIncomingData('environment.ais_targets', initialArpa.targets);
       processIncomingData('environment.harbor_clusters', MARINA_DI_RAGUSA_SIM_DATA.harborClusters);
@@ -1040,6 +1075,7 @@ export function useDashboard() {
             context: 'vessels.self',
             subscribe: [
               { path: 'navigation.position', minPeriod: 5000 },
+              { path: 'navigation.state', minPeriod: 1000 },
               { path: 'navigation.magneticVariation', minPeriod: 60000 },
               { path: 'environment.depth.belowTransducer', minPeriod: 1000 },
               { path: 'navigation.speedThroughWater', minPeriod: 333 },
@@ -1289,7 +1325,8 @@ export function useDashboard() {
       const cog = radToDeg(store.raw['navigation.courseOverGroundTrue'] ?? store.raw['navigation.headingTrue'] ?? 0);
       const own = { position: { lat: position.latitude, lon: position.longitude }, cog,
         hdg: radToDeg(store.raw['navigation.headingTrue'] ?? degToRad(cog)),
-        sog: msToKts(store.raw['navigation.speedOverGround'] ?? 0) };
+        sog: msToKts(store.raw['navigation.speedOverGround'] ?? 0),
+        isAnchored: isAnchoredNavigationState(store.raw['navigation.state']) };
       const targets = simulation.tick(own, now, configRef.current.aisAlerter?.vectorMinutes || 15, propulsionModeRef.current);
       processIncomingData('simulation.ais_targets', targets);
     };
@@ -1906,7 +1943,7 @@ export function useDashboard() {
     toggleGraphMode,
     appView,
     setAppView,
-    aisTargets,
+    aisTargets: displayedAisTargets,
     harborClusters,
     topThreat: activeThreat,
     snoozeThreat,

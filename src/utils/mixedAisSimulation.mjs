@@ -38,7 +38,7 @@ export class MixedAisSimulation {
       if (!trail.length || now - trail.at(-1).t >= 30000) trail.push({ lat, lon, t: now });
       return { ...t, lat, lon, cog, trail: trail.slice(-60), age: 0, isProjected: false, contactLost: false };
     });
-    const result = this.evaluate(own.position, own.hdg, own.cog, own.sog, this.targets, propulsion);
+    const result = this.evaluate(own.position, own.hdg, own.cog, own.sog, this.targets, propulsion, 45, own.isAnchored === true);
     this.targets = result.targets;
     const output = this.targets;
     if (elapsed > 60 && this.targets.every(t => t.tcpa !== null && t.tcpa < 0 && t.risk !== 'RED' && t.risk !== 'ORANGE')) {
