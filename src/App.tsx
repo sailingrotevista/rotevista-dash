@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDashboard } from './hooks/useDashboard';
 import { useViewportHeight } from './hooks/useViewportHeight';
 import { ViewportDiagnostics } from './components/ViewportDiagnostics';
@@ -7,6 +7,8 @@ import { Sparkline } from './components/Sparkline';
 import { AnalogGauge } from './components/AnalogGauge';
 import { WeatherRadar } from './components/WeatherRadar';
 import { MiniCompass } from './components/MiniCompass';
+import { version as appVersion } from '../package.json';
+import { SupportModal } from './components/SupportModal';
 import { AisView } from './components/AisView';
 import { AisTacticalBanner } from './components/AisTacticalBanner';
 import { BoxType, AisTarget } from './types';
@@ -14,6 +16,19 @@ import { openDashboardMenu } from './utils/dashboardModes.mjs';
 
 export const App: React.FC = () => {
   useViewportHeight();
+  const [showSupportModal, setShowSupportModal] = useState(false);
+  const openSupport = useCallback(() => setShowSupportModal(true), []);
+  useEffect(() => {
+    const key = `rotevista.support.seen.${appVersion}`;
+    try {
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, '1');
+      setShowSupportModal(true);
+    } catch {
+      // If persistent storage is unavailable, keep manual access without
+      // reopening the popup on every page load.
+    }
+  }, []);
   const {
     config,
     displayModeSog,
@@ -511,9 +526,12 @@ export const App: React.FC = () => {
     </div>
       </div>
 
+      {showSupportModal && <SupportModal onClose={() => setShowSupportModal(false)} />}
+
       {hasOpenedAis && (
         <div style={{ display: appView === 'ais' ? 'block' : 'none', width: '100%', height: '100%' }}>
           <AisView
+            onOpenSupport={openSupport}
             isActive={appView === 'ais'}
             targets={aisTargets}
             harborClusters={harborClusters}

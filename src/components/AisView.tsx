@@ -46,6 +46,7 @@ interface AisViewProps {
   isNightMode: boolean;
   onSwitchToWind: () => void;
   onSnoozeThreat: (targetId: string) => void;
+  onOpenSupport: () => void;
   onInspectionChange?: (isInspecting: boolean) => void;
   mixedSimulation?: boolean;
   onReopenTopThreat?: () => void;
@@ -120,6 +121,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   isNightMode,
   onSwitchToWind,
   onSnoozeThreat,
+  onOpenSupport,
   onInspectionChange,
   mixedSimulation = false,
   onReopenTopThreat,
@@ -159,7 +161,6 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   followedTargetIdRef.current = followedTargetId;
   const [mapZoom, setMapZoom] = useState<number>(16);
   const [showListDrawer, setShowListDrawer] = useState<boolean>(false);
-  const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [selectedTarget, setSelectedTarget] = useState<AisTarget | null>(null);
   useEffect(() => {
     onInspectionChange?.(Boolean(isActive && showListDrawer && selectedTarget));
@@ -2126,7 +2127,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       <button
         type="button"
         className="ais-floating-support-btn"
-        onClick={() => setShowSupportModal(true)}
+        onClick={onOpenSupport}
         title="Support Project & Feedback"
         aria-label="Support Project & Feedback"
       >
@@ -2146,41 +2147,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         </svg>
       </button>
 
-      {/* SUPPORT & FEEDBACK MODAL POPUP */}
-      {showSupportModal && (
-        <div className="ais-modal-backdrop" onClick={() => setShowSupportModal(false)}>
-          <div className="ais-support-modal" onClick={e => e.stopPropagation()}>
-            <div className="ais-support-modal-header">
-              <span className="ais-support-modal-title">Feedback & Support</span>
-              <button
-                type="button"
-                className="ais-card-close-btn"
-                onClick={() => setShowSupportModal(false)}
-                title="Close"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="ais-support-modal-body">
-              <p>
-                <strong>Your feedback matters most!</strong> I would love to hear your thoughts, feature ideas, or bug reports to make this tactical AIS monitor even better for real-world navigation.
-              </p>
-              <p>
-                I&apos;m personally investing time and resources into building and refining this tool — featuring ARPA CPA/TCPA collision alarms, COLREGs crossing rules, anchor drag alerts, and weather radar overlay.
-              </p>
-              <p>
-                Infrastructure and testing costs have reached <strong>€40</strong> so far. Additional funding allows new features to be added much faster — but even a simple email with your feedback means a lot!
-              </p>
-              <a
-                href="mailto:refuso.chiari.1j@icloud.com?subject=Rotevista%20dash%3A%20Improvement"
-                className="ais-support-email-btn"
-              >
-                ✉️ Contact Developer
-              </a>
-            </div>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }, (prev, next) => !prev.isActive && !next.isActive);
