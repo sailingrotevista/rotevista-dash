@@ -3,6 +3,36 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AisTarget, HarborCluster, PropulsionMode } from '../types';
 
+// PARAMETRI VISIVI ETÀ AIS — tempi in secondi, opacità da 0 a 1.
+// L'età è quella dell'ultimo fix ricevuto: le proiezioni non la azzerano.
+const AIS_AGE_VISUAL_CONFIG = {
+  enabled: true,
+  movingSpeedKnots: 2,
+  moving: { fadeStartSeconds: 90, fadeEndSeconds: 180 },
+  slowOrMoored: { fadeStartSeconds: 240, fadeEndSeconds: 360 },
+  minimumOpacity: 0.5,
+  preserveSelected: true,
+  preserveAlerts: true,
+};
+
+function getTargetAgeVisual(t: AisTarget, isSelected = false) {
+  const config = AIS_AGE_VISUAL_CONFIG;
+  const slowOrMoored = t.sog <= config.movingSpeedKnots || t.isMoored ||
+    t.isAnchored || t.inCluster || t.anchorState === 'MOORED' || t.anchorState === 'ANCHORED';
+  const thresholds = slowOrMoored ? config.slowOrMoored : config.moving;
+  const age = Number.isFinite(t.age) ? Math.max(0, t.age) : 0;
+  const stale = config.enabled && age > thresholds.fadeStartSeconds;
+  const protectedTarget = (config.preserveSelected && isSelected) ||
+    (config.preserveAlerts && (t.risk === 'RED' || t.risk === 'ORANGE' || t.anchorState === 'ANCHOR_DRAGGING'));
+  const duration = Math.max(1, thresholds.fadeEndSeconds - thresholds.fadeStartSeconds);
+  const progress = Math.min(1, Math.max(0, (age - thresholds.fadeStartSeconds) / duration));
+  const minimum = Math.min(1, Math.max(0, config.minimumOpacity));
+  return {
+    stale,
+    opacity: !config.enabled || protectedTarget ? 1 : 1 - progress * (1 - minimum),
+  };
+}
+
 interface AisViewProps {
   isActive?: boolean;
   targets: AisTarget[];
@@ -51,6 +81,8 @@ const getVesselStatusLabel = (t: AisTarget): string => {
   if (t.anchorState === 'ANCHOR_DRAGGING') return 'DRAGGING ANCHOR';
   if (t.isMoored || t.anchorState === 'MOORED') return 'IN PORT';
   if (t.isAnchored || t.anchorState === 'ANCHORED') return 'AT ANCHOR';
+  if (t.motionState === 'POSSIBLE_MOVEMENT') return 'POSSIBLE MOVEMENT';
+  if (t.motionState === 'STATIONARY') return 'STOPPED';
   if (t.sog < 0.5) return 'STOPPED';
   return `${t.sog.toFixed(1)} kn`;
 };
@@ -1131,6 +1163,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       const isRed = t.risk === 'RED';
       const isOrange = t.risk === 'ORANGE';
       const isSelected = selectedTarget?.id === t.id;
+      const ageVisual = getTargetAgeVisual(t, isSelected);
 
       // Colorazione MarineTraffic in base alla tipologia AIS (con sovrascrittura in caso di allarme)
       let mtFill = '#94a3b8';
@@ -1201,7 +1234,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       if (isDragging && t.sog >= 0.3) {
         targetVecPx = ((t.sog * 1852) * (10 / 60)) / mPerPx;
         targetVecHtml = `<div class="vessel-course-vector" style="border-left:2px dashed #ff2d55;opacity:0.9;"></div>`;
-      } else if (!isAnchored && !isMoored && t.sog >= 0.3) {
+      } else if (t.isMoving && !isAnchored && !isMoored && t.sog >= 0.3) {
         targetVecPx = ((t.sog * 1852) * (vecMins / 60)) / mPerPx;
         const vecWidth = isSelected ? 2.2 : 1.5;
         let cpaExtHtml = '';
@@ -1280,7 +1313,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         [28, 28],
         [14, 14],
         isSelected ? 1000 : isRed ? 800 : isOrange ? 600 : 200,
-        isDimmed ? 0.35 : 1.0,
+        (isDimmed ? 0.35 : 1.0) * ageVisual.opacity,
         true,
         handleTargetInteract,
         { rot: isClusterStationary ? 0 : rotation, vecLen: targetVecPx, cpaLen: targetCpaPx, ghostDist: targetGhostPx }
@@ -1298,7 +1331,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         const isTargetMoving = t.isMoving !== undefined ? t.isMoving : (!t.isAnchored && !isMoored && t.sog >= 0.3);
         const placeLeft = isTargetMoving && t.cog >= 20 && t.cog <= 160;
         const offsetTransform = placeLeft ? 'translate(calc(-100% - 16px), -50%)' : 'translate(16px, -50%)';
-        const statusLine = isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : (t.inCluster || isMoored ? 'IN PORT' : "AT ANCHOR");
+        const statusLine = (isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : getVesselStatusLabel(t)) +
+          (ageVisual.stale ? ` • AIS ${formatAge(t.age)}` : '');
         const tcpaTxt = t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` in ${Math.round(t.tcpa)} min` : '';
         const cpaOrDistLine = isRed
           ? `🚨 ${t.riskMsg || 'COLLISION!'}${t.cpa !== null && t.cpa !== undefined ? ` • CPA: ${formatDist(t.cpa)}` : ''}${tcpaTxt}`
@@ -1316,7 +1350,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
           [0, 0],
           [0, 0],
           isSelected ? 1100 : (t.id === activeGhostTargetId ? 900 : 50),
-          isExtendedLabel ? (isDimmed ? 0.35 : 1.0) : (isDimmed ? 0.35 : 0.82),
+          (isExtendedLabel ? (isDimmed ? 0.35 : 1.0) : (isDimmed ? 0.35 : 0.82)) * ageVisual.opacity,
           true,
           handleTargetInteract
         );
@@ -1353,14 +1387,11 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         }
       }
 
-      // Breadcrumb Trail (1/3 vettore se non selezionato, 1x vettore se selezionato, min 2 punti per Class B)
+      // In ispezione mostra l'intero storico configurato; per gli altri target un terzo.
       if (t.isMoving && t.trail && t.trail.length > 0) {
-        const refTime = t.trail[t.trail.length - 1]?.t || Date.now();
-        const maxAgeMs = (vectorMinutes || 15) * (isSelected ? 1 : 1 / 3) * 60 * 1000;
-        let visibleTrail = t.trail.filter(pt => !pt.t || refTime - pt.t <= maxAgeMs);
-        if (visibleTrail.length < 2 && t.trail.length >= 2) {
-          visibleTrail = t.trail.slice(-2);
-        }
+        const refTime = Date.now();
+        const maxAgeMs = vecMins * (isSelected ? 1 : 1 / 3) * 60 * 1000;
+        const visibleTrail = t.trail.filter(pt => Number.isFinite(pt.t) && pt.t <= refTime && refTime - pt.t <= maxAgeMs);
         const trailPts = visibleTrail.map(pt => [pt.lat, pt.lon] as [number, number]);
         trailPts.push([t.lat, t.lon]);
         if (trailPts.length > 1) {
@@ -1368,7 +1399,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
             color: color,
             weight: isSelected ? 1.8 : 1.2,
             dashArray: '2, 4',
-            opacity: isDimmed ? 0.15 : isSelected ? 0.75 : 0.5,
+            opacity: (isDimmed ? 0.15 : isSelected ? 0.75 : 0.5) * ageVisual.opacity,
             interactive: false,
           });
           markersLayerRef.current?.addLayer(trailLine);
@@ -1778,7 +1809,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                     <div className="ais-detail-cell cell-wide">
                       <span className="ais-cell-label">AIS STATUS (CLASS)</span>
                       <span className="ais-cell-val">
-                        {getVesselStatusLabel(selectedTarget)} ({selectedTarget.aisClass || 'B'})
+                        {getVesselStatusLabel(selectedTarget)} ({selectedTarget.aisClass ? `AIS ${selectedTarget.aisClass}` : 'AIS CLASS UNKNOWN'})
                       </span>
                     </div>
                     <div className="ais-detail-cell cell-wide">
@@ -1856,6 +1887,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                       key={item.id}
                       id={`target-item-${item.id}`}
                       className={`ais-target-item ${item.risk === 'RED' ? 'risk-red' : item.risk === 'ORANGE' ? 'risk-orange' : ''}`}
+                      style={{ opacity: getTargetAgeVisual(item).opacity }}
                       onClick={() => {
                         if (listBodyRef.current) {
                           listScrollTopRef.current = listBodyRef.current.scrollTop;
@@ -1874,6 +1906,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                           <span className="target-item-name">{item.name || item.id}</span>
                           <span className="target-item-sub">
                             {getVesselTypeLabel(item.type, item.name)} • {getVesselStatusLabel(item)}
+                            {getTargetAgeVisual(item).stale && ` • AIS ${formatAge(item.age)}`}
                           </span>
                         </div>
                       </div>

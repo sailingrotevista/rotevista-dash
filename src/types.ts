@@ -117,6 +117,9 @@ export interface AisTarget {
   swingRadius?: number | null;
   anchorCenter?: { lat: number; lon: number; radius?: number } | null;
   isMoving: boolean;
+  motionState?: 'STATIONARY' | 'POSSIBLE_MOVEMENT' | 'MOVING';
+  stationarySince?: number | null;
+  lastPositionTime?: number;
   risk: 'GREEN' | 'RED' | 'ORANGE' | 'GREY';
   isDeferred?: boolean;
   trend?: 'IMPROVING' | 'STABLE' | 'WORSENING';
@@ -134,7 +137,7 @@ export interface AisTarget {
   draft?: number | null;
   destination?: string;
   eta?: string;
-  aisClass?: string;
+  aisClass?: 'A' | 'B' | null;
   flag?: string;
   inCluster?: boolean;
   clusterId?: string | null;

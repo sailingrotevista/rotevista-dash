@@ -8,6 +8,8 @@
  * file aisEngine.js
  */
 
+const { TargetMotionTracker, compactAisTrail } = require('./targetMotionTracker');
+
 const MID_MAP = {
     247: "🇮🇹 ITA", 237: "🇬🇷 GRC", 238: "🇭🇷 CRO", 239: "🇬🇷 GRC", 240: "🇬🇷 GRC", 241: "🇬🇷 GRC",
     278: "🇸🇮 SLO", 262: "🇲🇪 MNE", 201: "🇦🇱 ALB", 271: "🇹🇷 TUR", 209: "🇨🇾 CYP", 210: "🇨🇾 CYP",
@@ -59,6 +61,7 @@ class AisEngine {
         this.collisionPipeline = collisionPipeline;
 
         this.aisPersistentCache = {};
+        this.motionTracker = new TargetMotionTracker();
         this.lastNearbyVessels = [];
         this.lastHarborClusters = [];
         this.topThreat = null;
@@ -173,6 +176,9 @@ class AisEngine {
 
             // 2. Lettura configurazione attiva con supporto gruppi ad albero e retrocompatibilità
             const cfg = currentConfig.aisAlerter || {};
+            const configuredTrailMinutes = Number(cfg.vectorMinutes);
+            const maxTrailAgeMs = (Number.isFinite(configuredTrailMinutes) && configuredTrailMinutes > 0
+                ? configuredTrailMinutes : 15) * 60 * 1000;
             const ignoreOwnTarget = String(cfg.ignoreOwnTarget !== undefined ? cfg.ignoreOwnTarget : (cfg.ignoreOwnCallsign || "106125")).trim().toLowerCase();
             const pCraft = cfg.pleasureCraft || {};
             const yachtRedCpa = pCraft.redCpa !== undefined ? pCraft.redCpa : (cfg.yachtRedCpa || 300);
@@ -283,7 +289,7 @@ class AisEngine {
                 if (!pos || pos.latitude == null || pos.longitude == null) continue;
                 let vLat = parseFloat(pos.latitude);
                 let vLon = parseFloat(pos.longitude);
-                if (isNaN(vLat) || isNaN(vLon)) continue;
+                if (!Number.isFinite(vLat) || !Number.isFinite(vLon) || Math.abs(vLat) > 90 || Math.abs(vLon) > 180) continue;
 
                 let dist = distanceMeters(myGps.lat, myGps.lon, vLat, vLon);
                 if (dist <= MAX_DISTANCE_METERS) {
@@ -323,28 +329,26 @@ class AisEngine {
                         navStateRaw = String(val).toLowerCase();
                     }
 
-                    let realAisTime = now;
-                    if (v.navigation.position.timestamp) {
-                        let parsedTime = Date.parse(v.navigation.position.timestamp);
-                        if (!isNaN(parsedTime)) {
-                            realAisTime = Math.abs(now - parsedTime) < 300000 ? parsedTime : now;
-                        }
+                    const positionTimestamp = v.navigation.position.timestamp;
+                    const parsedTime = positionTimestamp
+                        ? Date.parse(positionTimestamp)
+                        : NaN;
+
+                    // Senza un timestamp attendibile, non aggiornare la cache.
+                    // Tolleriamo fino a 30 secondi di anticipo dell'orologio sorgente.
+                    if (!Number.isFinite(parsedTime) || parsedTime > now + 30000) {
+                        continue;
                     }
 
-                    let trail = this.aisPersistentCache[key] ? (this.aisPersistentCache[key].trail || []) : [];
-                    if (sog < 0.8) {
-                        trail = [];
-                    } else {
-                        let lastPt = trail[trail.length - 1];
-                        let moved = !lastPt || (distanceMeters(lastPt.lat, lastPt.lon, vLat, vLon) > 10.0 && (realAisTime - (lastPt.t || 0) >= 25000));
-                        if (moved) {
-                            trail.push({ lat: Number(vLat.toFixed(5)), lon: Number(vLon.toFixed(5)), t: realAisTime });
-                        }
-                        let maxTrailAgeMs = ((currentConfig.vectorMinutes || 15) * 60 * 1000);
-                        while (trail.length > 2 && ((now - (trail[0].t || now)) > maxTrailAgeMs || trail.length > 60)) {
-                            trail.shift();
-                        }
-                    }
+                    const realAisTime = Math.min(parsedTime, now);
+
+                    const cachedTarget = this.aisPersistentCache[key];
+                    if (cachedTarget && realAisTime < cachedTarget.lastSeen) continue;
+                    const mooredHint = navStateRaw.includes('moored') || navStateRaw === '5' || Boolean(cachedTarget && cachedTarget.isMoored);
+                    const anchoredHint = navStateRaw.includes('anchor') || navStateRaw === '1';
+                    const motion = this.motionTracker.update(key, {
+                        lat: vLat, lon: vLon, t: realAisTime, sog, cog,
+                    }, { now, historyMs: maxTrailAgeMs, moored: mooredHint, anchored: anchoredHint });
 
                     let shipType = 0;
                     if (v.design && v.design.aisShipType) {
@@ -390,7 +394,18 @@ class AisEngine {
                         eta = (typeof etaVal === 'string') ? etaVal : "";
                     }
 
-                    let aisClass = (shipType >= 70 || shipType === 60 || (length && length > 35) || (draft && draft > 3.0)) ? "A" : "B";
+                    // La classe del transponder è un dato AIS, non il tipo di scafo.
+                    const classNode = v.sensors && v.sensors.ais && v.sensors.ais.class;
+                    const classValue = classNode && typeof classNode === 'object'
+                        ? classNode.value
+                        : classNode;
+                    const receivedClass = typeof classValue === 'string'
+                        ? classValue.trim().toUpperCase()
+                        : '';
+                    const cachedClass = this.aisPersistentCache[key] && this.aisPersistentCache[key].aisClass;
+                    const aisClass = (receivedClass === 'A' || receivedClass === 'B')
+                        ? receivedClass
+                        : ((cachedClass === 'A' || cachedClass === 'B') ? cachedClass : null);
 
                     this.aisPersistentCache[key] = {
                         id: key,
@@ -409,8 +424,8 @@ class AisEngine {
                         eta: eta || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].eta : ""),
                         aisClass: aisClass,
                         hdg: hdg !== null ? Math.round((hdg + 360) % 360) : (this.aisPersistentCache[key] ? this.aisPersistentCache[key].hdg : null),
-                        trail: trail,
                         lastSeen: realAisTime,
+                        motionState: motion.motionState,
                         isMoored: this.aisPersistentCache[key] ? Boolean(this.aisPersistentCache[key].isMoored) : false
                     };
                 }
@@ -419,16 +434,19 @@ class AisEngine {
             // 5. Potatura scadenze cache (6 min se in moto, 15 min se fermi)
             for (let key in this.aisPersistentCache) {
                 let v = this.aisPersistentCache[key];
+                const motion = this.motionTracker.get(key, now, maxTrailAgeMs);
                 let age = now - v.lastSeen;
                 if (age < -30000) {
                     v.lastSeen = now;
                     age = 0;
                 }
-                let maxAgeAllowed = (v.sog >= 0.8) ? 360000 : 900000;
+                let maxAgeAllowed = (motion ? motion.isMoving : v.sog >= 0.8) ? 360000 : 900000;
                 if (age > maxAgeAllowed) {
                     delete this.aisPersistentCache[key];
                 }
             }
+
+            this.motionTracker.prune(new Set(Object.keys(this.aisPersistentCache)));
 
             // 6. Elaborazione ARPA, Kinematica & COLREGs
             let nearbyVessels = [];
@@ -446,24 +464,27 @@ class AisEngine {
                 let currentDist = distanceMeters(myGps.lat, myGps.lon, v.lat, v.lon);
                 if (currentDist > MAX_DISTANCE_METERS) continue;
 
+                const motion = this.motionTracker.get(key, now, maxTrailAgeMs);
+                const isMoving = motion ? motion.isMoving : v.sog >= 0.8;
+                let navState = v.navStateRaw || '';
+                const isExplicitMoored = navState.includes('moored') || navState === '5';
+                const isMoored = !isMoving && (isExplicitMoored || Boolean(v.isMoored));
+                const isAnchored = !isMoving && !isMoored && (navState.includes('anchor') || navState === '1');
+                const anchorState = isMoored ? 'MOORED' : isAnchored ? 'ANCHORED' : 'UNDERWAY';
+                v.isMoored = isMoored;
+                v.isAnchored = isAnchored;
                 let age = now - v.lastSeen;
                 let outLat = v.lat;
                 let outLon = v.lon;
 
-                // Dead-reckoning se stale > 45s e SOG >= 1.5 kn
-                if (age > 45000 && v.sog >= 1.5) {
+                // Dead-reckoning dal primo intervallo di 15s e SOG >= 1.5 kn
+                if (isMoving && age >= 15000 && v.sog >= 1.5) {
                     let t_hours = age / 3600000;
                     let distProj = (v.sog * 1852) * t_hours;
                     outLat = v.lat + (distProj * Math.cos(d2r(v.cog))) / 111139;
                     outLon = v.lon + (distProj * Math.sin(d2r(v.cog))) / (111139 * Math.cos(d2r(v.lat)));
                 }
 
-                let navState = v.navStateRaw || "";
-                let isExplicitMoored = navState.includes("moored") || navState === "5";
-                let isMoored = isExplicitMoored || (Boolean(v.isMoored) && v.sog < 0.8);
-                let anchorState = isMoored ? 'MOORED' : 'UNDERWAY';
-                v.isAnchored = false;
-                v.isMoored = isMoored;
                 let tCode = parseInt(v.type) || 0;
 
                 // Valutazione tramite CollisionPipeline
@@ -473,8 +494,10 @@ class AisEngine {
                     name: v.name,
                     lat: outLat,
                     lon: outLon,
-                    sog: v.sog,
+                    sog: isMoving ? v.sog : 0,
                     cog: v.cog,
+                    isMoving,
+                    motionState: motion ? motion.motionState : undefined,
                     shipType: tCode,
                     lastUpdate: v.lastSeen,
                     isClassB: v.aisClass !== "A",
@@ -504,12 +527,15 @@ class AisEngine {
                     cog: v.cog,
                     sog: v.sog,
                     dist: Math.round(currentDist),
-                    isAnchored: false,
+                    isAnchored: isAnchored,
                     isMoored: isMoored,
                     anchorState: anchorState,
                     swingRadius: null,
                     anchorCenter: null,
-                    isMoving: v.sog >= 0.8 && !isMoored,
+                    isMoving,
+                    motionState: motion ? motion.motionState : undefined,
+                    stationarySince: motion ? motion.stationarySince : null,
+                    lastPositionTime: v.lastSeen,
                     risk: risk,
                     isDeferred: isDeferred,
                     trend: trend,
@@ -527,10 +553,10 @@ class AisEngine {
                     draft: v.draft || null,
                     destination: v.destination || "",
                     eta: v.eta || "",
-                    aisClass: v.aisClass || "B",
+                    aisClass: v.aisClass || null,
                     flag: getVesselFlag(v.id),
                     inCluster: false,
-                    trail: v.trail || []
+                    trail: isMoving && motion ? motion.trail : []
                 });
             }
 
@@ -598,5 +624,6 @@ module.exports = {
     getVesselFlag,
     d2r,
     r2d,
-    distanceMeters
+    distanceMeters,
+    compactAisTrail
 };

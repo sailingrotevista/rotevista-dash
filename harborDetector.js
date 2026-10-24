@@ -40,7 +40,6 @@ class HarborDetector {
     constructor() {
         this.knownHarbors = {};    // Banchine e porti auto-appresi
         this.vesselStatTimes = {}; // Registro durata stazionamento scafi
-        this.vesselHdgHist = {};   // Storico prua bersagli per rilevamento ormeggio
     }
 
     /**
@@ -50,7 +49,6 @@ class HarborDetector {
     processHarbors(nearbyVessels, myGps, raw, trueWindDir, now) {
         const knownHarbors = this.knownHarbors;
         const vesselStatTimes = this.vesselStatTimes;
-        const vesselHdgHist = this.vesselHdgHist;
 
         // 7. Auto-Apprendimento Cumulativo Porti (Geometria Permanente + Padding 18m)
         // 7.1 Geographic Pruning: elimina porti quando la nostra barca supera 25 NM (46300m)
@@ -61,57 +59,27 @@ class HarborDetector {
             }
         }
 
-        // 7.2 Tracciamento durata stazionamento scafi e rilevamento ormeggio da Prua e Vento
-        let curWindSpeed = 0;
-        if (raw['environment.wind.speedTrue'] !== undefined) {
-            curWindSpeed = raw['environment.wind.speedTrue'] * 1.94384;
-        } else if (raw['environment.wind.speedApparent'] !== undefined) {
-            curWindSpeed = raw['environment.wind.speedApparent'] * 1.94384;
+        // 7.2 Lo storico del movimento è gestito dal tracker sui soli fix nuovi.
+        // Qui manteniamo soltanto il contesto di sosta usato dai posti barca.
+        const isStationaryTarget = v => v.motionState
+            ? v.motionState !== 'MOVING'
+            : (v.sog < 0.8 || v.isAnchored || v.isMoored);
+        const activeIds = new Set(nearbyVessels.map(v => v.id));
+        for (const id of Object.keys(vesselStatTimes)) {
+            if (!activeIds.has(id)) delete vesselStatTimes[id];
         }
-
-        for (let idx = 0; idx < nearbyVessels.length; idx++) {
-            let v = nearbyVessels[idx];
-            if (v.sog < 0.5) {
-                if (!vesselStatTimes[v.id]) vesselStatTimes[v.id] = now;
-                if (!vesselHdgHist[v.id]) vesselHdgHist[v.id] = [];
-                let hList = vesselHdgHist[v.id];
-                hList.push({ t: now, cog: v.cog });
-
-                while (hList.length > 0 && (now - hList[0].t) > 900000) {
-                    hList.shift();
-                }
-
-                if (hList.length >= 6 && (now - hList[0].t) >= 240000 && curWindSpeed >= 4.0) {
-                    let sorted = [];
-                    for (let hIdx = 0; hIdx < hList.length; hIdx++) sorted.push(hList[hIdx].cog);
-                    sorted.sort((a, b) => a - b);
-
-                    let maxGap = 360 - (sorted[sorted.length - 1] - sorted[0]);
-                    for (let g = 0; g < sorted.length - 1; g++) {
-                        let gap = sorted[g + 1] - sorted[g];
-                        if (gap > maxGap) maxGap = gap;
-                    }
-                    let deltaCog = 360 - maxGap;
-
-                    let windDev = 0;
-                    if (trueWindDir !== undefined && !isNaN(trueWindDir) && v.cog != null) {
-                        let diff = Math.abs(v.cog - trueWindDir) % 360;
-                        windDev = diff > 180 ? 360 - diff : diff;
-                    }
-
-                    if (deltaCog <= 8.0 && windDev >= 35.0) {
-                        v.isMoored = true;
-                        v.anchorState = 'MOORED';
-                    }
+        for (const v of nearbyVessels) {
+            if (isStationaryTarget(v)) {
+                if (vesselStatTimes[v.id] === undefined) {
+                    vesselStatTimes[v.id] = v.stationarySince ?? v.lastPositionTime ?? now;
                 }
             } else {
                 delete vesselStatTimes[v.id];
-                delete vesselHdgHist[v.id];
             }
         }
 
         // 7.3 Rilevamento candidati pontile (45m standard, 90m per grandi scafi >= 20m)
-        let staticCandidates = nearbyVessels.filter(v => (v.sog < 0.8 || v.isAnchored || v.isMoored) && v.dist <= 3704);
+        let staticCandidates = nearbyVessels.filter(v => isStationaryTarget(v) && v.dist <= 3704);
         let visited = new Set();
         let instantClusters = [];
 
@@ -335,7 +303,7 @@ class HarborDetector {
 
             for (let idx = 0; idx < nearbyVessels.length; idx++) {
                 let v = nearbyVessels[idx];
-                let isStationary = (v.sog < 0.8 || v.isAnchored || v.isMoored);
+                let isStationary = isStationaryTarget(v);
                 if (!isStationary) continue;
 
                 let isInsidePort = false;
@@ -352,7 +320,7 @@ class HarborDetector {
                 if (isInsidePort) {
                     v.inCluster = true;
                     v.clusterId = hId;
-                    if (v.anchorState !== 'ANCHOR_DRAGGING' && v.sog < 0.8) {
+                    if (v.anchorState !== 'ANCHOR_DRAGGING' && isStationaryTarget(v)) {
                         v.isMoored = true;
                         v.isAnchored = false;
                         v.anchorState = 'MOORED';

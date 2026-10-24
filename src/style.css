@@ -8,10 +8,18 @@ html, body, #root {
     margin: 0; padding: 0;
     height: 100vh; width: 100vw;
     height: 100dvh; width: 100dvw;
+    height: var(--app-height, 100dvh);
     overflow: hidden;
     -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: none;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+}
+
+#root {
+    position: fixed;
+    top: var(--app-top, 0px);
+    left: var(--app-left, 0px);
+    width: var(--app-width, 100%);
 }
 
 /* ==========================================================================
@@ -20,7 +28,12 @@ html, body, #root {
 .main-container {
     display: grid;
     width: 100%; height: 100%;
-    padding: 5px; box-sizing: border-box; gap: 8px;
+    /* Keep instruments clear of the iPhone status bar, notch and Home indicator. */
+    padding: calc(5px + env(safe-area-inset-top, 0px))
+             calc(5px + env(safe-area-inset-right, 0px))
+             calc(5px + var(--wind-bottom-inset, env(safe-area-inset-bottom, 0px)))
+             calc(5px + env(safe-area-inset-left, 0px));
+    box-sizing: border-box; gap: 8px;
     grid-template-areas:
         "stw   gauge depth"
         "sog   gauge tws"
@@ -32,12 +45,24 @@ html, body, #root {
     transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Let the instruments fill the bottom edge when running as an installed app. */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+    .main-container {
+        padding-bottom: 5px;
+    }
+}
+
+:fullscreen .main-container,
+.main-container:fullscreen {
+    padding-bottom: 5px;
+}
+
 .box-stw   { grid-area: stw; }
 .box-sog   { grid-area: sog; }
 .box-hdg   { grid-area: hdg; }
 .box-cog   { grid-area: cog; }
 .box-tack  { grid-area: tack; }
-.box-gauge { grid-area: gauge; display: flex; align-items: center; justify-content: center; position: relative; contain: layout paint; }
+.box-gauge { grid-area: gauge; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; contain: layout paint; }
 .box-depth { grid-area: depth; }
 .box-tws   { grid-area: tws; }
 .box-twa   { grid-area: twa; }
@@ -424,7 +449,7 @@ body.night-mode .alarm-danger {
     .main-container {
         grid-template-areas: "gauge gauge" "stw depth" "sog tws" "hdg twa" "cog awa" "tack twd" !important;
         grid-template-columns: 1fr 1fr !important;
-        grid-template-rows: 40vh 1.75fr 1.75fr 0.75fr 0.75fr 1.25fr !important;
+        grid-template-rows: minmax(0, 4.1667fr) minmax(0, 1.75fr) minmax(0, 1.75fr) minmax(0, 0.75fr) minmax(0, 0.75fr) minmax(0, 1.25fr) !important;
     }
 
     .data-box { height: auto !important; }
@@ -774,8 +799,8 @@ body.night-mode #radar-ticks line {
    ========================================================================== */
 .app-root-wrapper {
     position: relative;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
     overflow: hidden;
     background-color: #ffffff;
     display: flex;
@@ -784,6 +809,11 @@ body.night-mode #radar-ticks line {
 
 .app-root-wrapper.night-theme {
     background-color: #000000;
+}
+
+.app-root-wrapper > div:not(.ais-tactical-banner) {
+    min-height: 0;
+    flex: 1 1 0;
 }
 
 .ais-tactical-banner {
@@ -1198,8 +1228,9 @@ body.night-mode .compass-inner-btn:active,
    ========================================================================== */
 .ais-view-container {
     position: relative;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
+    container-type: size;
     overflow: hidden;
     background: #0f172a;
 }
@@ -1590,7 +1621,7 @@ body.night-mode .ais-tool-btn.btn-active,
     right: calc(max(12px, env(safe-area-inset-right, 12px)) + 56px);
     width: 360px;
     max-width: calc(100vw - 84px);
-    max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px);
+    max-height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px);
     background: #ffffff;
     border: 1.5px solid #cbd5e1;
     border-radius: 20px;
@@ -1606,7 +1637,7 @@ body.night-mode .ais-tool-btn.btn-active,
 
 .app-root-wrapper:has(> .ais-tactical-banner) .ais-dropdown-card {
     top: calc(env(safe-area-inset-top, 0px) + 86px);
-    max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 102px);
+    max-height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 102px);
 }
 
 .app-root-wrapper:has(> .ais-tactical-banner) .ais-top-bar {
@@ -1616,7 +1647,7 @@ body.night-mode .ais-tool-btn.btn-active,
 @media (max-width: 1024px) and (orientation: portrait) {
     .app-root-wrapper:has(> .ais-tactical-banner) .ais-dropdown-card {
         top: calc(env(safe-area-inset-top, 0px) + 154px);
-        max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 170px);
+        max-height: calc(100% - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 170px);
     }
 
     .app-root-wrapper:has(> .ais-tactical-banner) .ais-top-bar {
@@ -2227,7 +2258,7 @@ body.night-mode .btn-vesselfinder:hover,
 /* Floating Action Button: Switch to Wind Dashboard (Bottom Right, Round style) */
 .ais-floating-wind-btn {
     position: absolute;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    bottom: max(8px, env(safe-area-inset-bottom, 0px));
     right: max(14px, env(safe-area-inset-right, 14px));
     z-index: 2100;
     width: clamp(48px, 12vw, 56px);
@@ -2468,7 +2499,7 @@ body.night-mode .propulsion-speech-arrow,
 /* FLOATING SUPPORT BUTTON (BOTTOM LEFT) */
 .ais-floating-support-btn {
     position: absolute;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    bottom: max(8px, env(safe-area-inset-bottom, 0px));
     left: max(14px, env(safe-area-inset-left, 14px));
     z-index: 2000;
     width: clamp(48px, 12vw, 56px);
@@ -2655,5 +2686,40 @@ body.night-mode .ais-support-email-btn,
 
     .ais-view-container .ais-dropdown-card {
         right: calc(max(12px, env(safe-area-inset-right, 12px)) + 76px);
+    }
+}
+
+/* Short landscape displays need separate slots for all six right-hand controls.
+   Query the actual AIS area so Safari's browser bars are accounted for as well. */
+@container (max-height: 500px) and (min-aspect-ratio: 1/1) {
+    .ais-top-bar,
+    .ais-map-controls-dock,
+    .ais-floating-wind-btn,
+    .ais-floating-support-btn {
+        --compact-control-size: clamp(40px, 11cqh, 44px);
+    }
+
+    .ais-view-container .ais-tool-btn,
+    .ais-view-container .ais-map-btn,
+    .ais-view-container .ais-floating-wind-btn,
+    .ais-view-container .ais-floating-support-btn {
+        width: var(--compact-control-size);
+        height: var(--compact-control-size);
+        min-width: var(--compact-control-size);
+        min-height: var(--compact-control-size);
+        box-sizing: border-box;
+        flex-shrink: 0;
+    }
+
+    .ais-map-controls-dock {
+        top: calc(env(safe-area-inset-top, 0px) + 32px + 2 * var(--compact-control-size));
+        bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + var(--compact-control-size) + 8px);
+        transform: none;
+        justify-content: space-evenly;
+        gap: 4px;
+    }
+
+    .ais-view-container .ais-dropdown-card {
+        right: calc(max(12px, env(safe-area-inset-right, 12px)) + 56px);
     }
 }

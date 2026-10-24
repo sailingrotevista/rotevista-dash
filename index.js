@@ -613,7 +613,7 @@ module.exports = function (app) {
                     vectorMinutes: {
                         type: 'number',
                         title: 'Course Vector Length (Minutes)',
-                        description: 'Projection time in minutes for own ship and AIS targets course vectors on the tactical map.',
+                        description: 'Forward course projection and retained AIS trail duration in minutes. The map displays the most recent third of the trail, or the full retained history for the selected target. History is compressed to a maximum of 60 points per target.',
                         default: 15
                     },
                     criticalProximity: {

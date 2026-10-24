@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo } from 'react';
 import { useDashboard } from './hooks/useDashboard';
+import { useViewportHeight } from './hooks/useViewportHeight';
+import { ViewportDiagnostics } from './components/ViewportDiagnostics';
 import { DataBox } from './components/DataBox';
 import { Sparkline } from './components/Sparkline';
 import { AnalogGauge } from './components/AnalogGauge';
@@ -10,6 +12,7 @@ import { AisTacticalBanner } from './components/AisTacticalBanner';
 import { BoxType, AisTarget } from './types';
 
 export const App: React.FC = () => {
+  useViewportHeight();
   const {
     config,
     displayModeSog,
@@ -202,6 +205,7 @@ export const App: React.FC = () => {
 
   return (
     <div className={`app-root-wrapper ${isNightMode ? 'night-theme' : ''}`}>
+      <ViewportDiagnostics />
       {/* Banner Allarme Tattico ARPA (Visibile sia in Vento che in AIS) */}
       <AisTacticalBanner
         threat={topThreat}

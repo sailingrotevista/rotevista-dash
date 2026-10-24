@@ -183,7 +183,7 @@ function computeCpaTcpa(ownShip, target, uncertainty) {
     let myVx = mySpeedMs * Math.sin(d2r(myCog));
     let myVy = mySpeedMs * Math.cos(d2r(myCog));
 
-    let targetSog = (target.sog || 0) >= 0.8 ? (target.sog || 0) : 0;
+    let targetSog = target.isMoving === true || (target.sog || 0) >= 0.8 ? (target.sog || 0) : 0;
     let targetCog = target.cog || 0;
     let targetSpeedMs = targetSog * KNOTS_TO_MS;
     let targetVx = targetSpeedMs * Math.sin(d2r(targetCog));
@@ -513,7 +513,7 @@ class CollisionPipeline {
         let reason = '';
 
         let ownIsMoving = (ownShip.sog || 0) >= 0.8;
-        let targetIsMoving = (target.sog || 0) >= 0.8;
+        let targetIsMoving = target.isMoving === true || (target.sog || 0) >= 0.8;
         let eitherMoving = ownIsMoving || targetIsMoving;
 
         let tcpa = kinematics.tcpaMinutes;
