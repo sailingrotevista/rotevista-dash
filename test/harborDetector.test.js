@@ -128,3 +128,56 @@ test('only independent confident mooring extends a port to 180m', () => {
         assert.equal(extra.inCluster, evidence !== 'inferred', evidence);
     }
 });
+
+test('ports merge by a 200m polygon gap rather than distance between fixes', () => {
+    for (const gap of [230, 250]) {
+        const areas = process(new HarborDetector(), [vessel('a', 0, 0), vessel('b', 20, 0),
+            vessel('c', 0, gap), vessel('d', 20, gap)]);
+        assert.equal(areas.length, gap === 230 ? 1 : 2);
+    }
+});
+
+test('confirmed oscillation retracts learned port support and clears inherited mooring', () => {
+    const detector = new HarborDetector();
+    process(detector, [vessel('a', 0, 0), vessel('b', 20, 0), vessel('tip', 0, 110)]);
+    const before = Object.values(detector.knownHarbors)[0];
+    assert.equal(before.memberIds.has('tip'), true);
+    const tip = vessel('tip', 0, 110, 'OSCILLATING', { isMoored: true, anchorState: 'MOORED' });
+    const areas = process(detector, [vessel('a', 0, 0), vessel('b', 20, 0), tip], 300000);
+    assert.equal(tip.inCluster, false);
+    assert.equal(tip.isMoored, false);
+    assert.equal(tip.isAnchored, true);
+    assert.equal(tip.anchorState, 'ANCHORED');
+    const port = Object.values(detector.knownHarbors).find(a => a.kind === 'PORT');
+    assert.equal(port.memberIds.has('tip'), false);
+    assert.equal(pointInPolygon(tip.lat, tip.lon, areas[0].hull), false);
+});
+
+test('removing an anchored contributor preserves shared berths and excludes anchors inside hull', () => {
+    const detector = new HarborDetector();
+    const fixed = [vessel('a', 0, 0), vessel('b', 0, 80), vessel('c', 80, 0), vessel('d', 80, 80)];
+    process(detector, [...fixed, vessel('shared', 1, 1), vessel('inside', 40, 40)]);
+    const shared = vessel('shared', 1, 1, 'OSCILLATING');
+    const inside = vessel('inside', 40, 40, 'OSCILLATING');
+    process(detector, [...fixed, shared, inside], 300000);
+    const port = Object.values(detector.knownHarbors).find(a => a.kind === 'PORT');
+    assert.ok(port.berths.some(b => b.sources.has('a')));
+    assert.ok(port.berths.every(b => !b.sources.has('shared') && !b.sources.has('inside')));
+    assert.notEqual(inside.areaKind, 'PORT');
+    assert.equal(inside.isMoored, false);
+});
+
+test('nearby port and anchorage never merge solely because their polygons overlap', () => {
+    const boats = [vessel('a',0,0),vessel('b',20,0),vessel('x',0,30,'OSCILLATING'),vessel('y',20,30,'OSCILLATING')];
+    const areas = process(new HarborDetector(),boats);
+    assert.deepEqual(areas.map(a=>a.kind).sort(),['ANCHORAGE','PORT']);
+    assert.equal(boats[2].areaKind,'ANCHORAGE');
+});
+
+test('polygon distance detects containment, crossing edges and segment gaps', () => {
+    const { polygonDistanceMeters } = require('../harborDetector');
+    const rect = (x,y,w,h) => [[y,x],[y,x+w],[y+h,x+w],[y+h,x]];
+    assert.equal(polygonDistanceMeters(rect(0,0,.003,.001),rect(.001,-.001,.001,.003)),0);
+    assert.equal(polygonDistanceMeters(rect(0,0,.003,.003),rect(.001,.001,.001,.001)),0);
+    assert.ok(Math.abs(polygonDistanceMeters(rect(0,0,.001,.001),rect(.002,0,.001,.001))-111.139)<.01);
+});

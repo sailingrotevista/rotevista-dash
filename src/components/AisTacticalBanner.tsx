@@ -143,7 +143,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
           disabled={!canSnooze}
           style={{ visibility: canSnooze ? 'visible' : 'hidden' }}
           onClick={() => { if (canSnooze) onSnooze(threat.id); }}
-          title={isProximity ? 'Acknowledge this proximity' : 'Snooze alarm for 10 minutes'}
+          title={isProximity ? 'Acknowledge all boats currently inside the safe bubble' : 'Snooze alarm for 10 minutes'}
         >
           {isProximity ? 'ACKNOWLEDGE PROXIMITY' : 'SNOOZE 10M'}
         </button>

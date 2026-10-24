@@ -9,3 +9,21 @@ export function proximityAcknowledgementExpired(entry, target, ownPosition) {
   const dx = (entry.lon - ownPosition.lon) * 111139 * Math.cos((entry.lat + ownPosition.lat) * Math.PI / 360);
   return Math.hypot(dx, dy) > PROXIMITY_CONTEXT_DISTANCE_METERS;
 }
+
+export function isBubblePresence(target) {
+  return target?.alertKind === 'PROXIMITY' && target.areaProximityOnly &&
+    !target.isMoving && target.motionState !== 'MOVING';
+}
+
+// Snapshot the currently known invasions, never a radius or a future contact.
+export function acknowledgeCurrentBubble(targets) {
+  return Object.fromEntries(targets.filter(isBubblePresence).map(target => [target.id,
+    target.proximityArea || { id: target.clusterId || target.id, lat: target.lat, lon: target.lon }]));
+}
+
+export function nearestBubblePresence(targets) {
+  const clearance = target => Number.isFinite(target.currentHullClearanceMeters)
+    ? target.currentHullClearanceMeters : Number.isFinite(target.dist) ? target.dist : Infinity;
+  return targets.filter(isBubblePresence).sort((a, b) => clearance(a) - clearance(b) ||
+    (a.dist ?? Infinity) - (b.dist ?? Infinity) || String(a.id).localeCompare(String(b.id)))[0] || null;
+}

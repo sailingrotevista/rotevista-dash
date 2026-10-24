@@ -26,6 +26,7 @@ export class BannerThreatSelector {
     };
     if (!best || !active || severity(best) > severity(active)) return choose(best);
     if (best.id === active.id) return choose(active);
+    if (best.alertKind === 'PROXIMITY' && active.alertKind === 'PROXIMITY') return choose(best);
     if (this.pendingId !== best.id) {
       this.pendingId = best.id;
       this.pendingDeadline = now + this.holdMs;

@@ -45,6 +45,7 @@ const HARBOR_DETECTOR_CONFIG = {
     largeLinkMeters: 90,
     pontoonTouchMeters: 20,
     portExpansionMeters: 120,
+    portMergeBoundaryMeters: 200,
     // Strong independent mooring evidence; never increased recursively by membership.
     confidentPortLinkMeters: 120,
     confidentPortExpansionMeters: 180,
@@ -66,6 +67,29 @@ function pointInPolygon(lat, lon, polygon) {
         if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
     }
     return inside;
+}
+
+// Local metric projection: shortest distance between convex area boundaries.
+function polygonDistanceMeters(a, b) {
+    if (!a.length || !b.length) return Infinity;
+    if (pointInPolygon(...a[0], b) || pointInPolygon(...b[0], a)) return 0;
+    const lat = a[0][0], lon = a[0][1], cos = Math.cos(lat * Math.PI / 180);
+    const project = p => [(p[1] - lon) * 111139 * cos, (p[0] - lat) * 111139];
+    const aa = a.map(project), bb = b.map(project);
+    const cross = (a,b,c) => (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+    const pointSegment = (p,a,b) => {
+        const dx=b[0]-a[0], dy=b[1]-a[1], den=dx*dx+dy*dy;
+        const t=den ? Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/den)) : 0;
+        return Math.hypot(p[0]-a[0]-t*dx,p[1]-a[1]-t*dy);
+    };
+    let best=Infinity;
+    for (let i=0;i<aa.length;i++) for(let j=0;j<bb.length;j++) {
+        const p=aa[i],q=aa[(i+1)%aa.length],r=bb[j],t=bb[(j+1)%bb.length];
+        const distance=Math.min(pointSegment(p,r,t),pointSegment(q,r,t),pointSegment(r,p,q),pointSegment(t,p,q));
+        if (distance < 1e-7 || (cross(p,q,r)*cross(p,q,t)<0 && cross(r,t,p)*cross(r,t,q)<0)) return 0;
+        best=Math.min(best,distance);
+    }
+    return best;
 }
 
 class HarborDetector {
@@ -153,10 +177,24 @@ class HarborDetector {
     addPoint(area, vessel) {
         const cfg = this.config, p = this.location(vessel);
         const radius = Math.min(cfg.maximumObservedSwingMeters, Math.max(0, vessel.restPattern?.radiusMeters || 0));
+        if (!area.memberIds.has(vessel.id) && area.memberIds.size >= cfg.maximumLearnedPoints) return;
         const existing = area.berths.find(b => distanceMeters(b.lat, b.lon, p.lat, p.lon) < cfg.berthDeduplicationMeters);
-        if (existing) existing.radius = Math.max(existing.radius || 0, radius);
-        else if (area.berths.length < cfg.maximumLearnedPoints) area.berths.push({ lat: p.lat, lon: p.lon, radius });
-        if (area.memberIds.size < cfg.maximumLearnedPoints) area.memberIds.add(vessel.id);
+        if (existing) {
+            existing.sources.set(vessel.id, radius);
+            existing.radius = Math.max(...existing.sources.values());
+        } else if (area.berths.length < cfg.maximumLearnedPoints) {
+            area.berths.push({ lat: p.lat, lon: p.lon, radius, sources: new Map([[vessel.id, radius]]) });
+        } else return;
+        area.memberIds.add(vessel.id);
+    }
+
+    removeContribution(area, id) {
+        for (const berth of area.berths) {
+            berth.sources.delete(id);
+            berth.radius = berth.sources.size ? Math.max(...berth.sources.values()) : 0;
+        }
+        area.berths = area.berths.filter(b => b.sources.size);
+        area.memberIds.delete(id);
     }
 
     hull(area) {
@@ -183,9 +221,18 @@ class HarborDetector {
             v.inCluster = false;
             v.clusterId = null;
             delete v.areaKind;
+            const evidence = this.evidence(v);
+            if (evidence.anchored || evidence.oscillating) {
+                v.isMoored = false;
+                v.isAnchored = !v.isMoving;
+                if (!v.isMoving && v.anchorState !== 'ANCHOR_DRAGGING') v.anchorState = 'ANCHORED';
+                // Retract only this vessel's learned support; shared berths survive.
+                for (const area of Object.values(areas)) if (area.kind === 'PORT') this.removeContribution(area, v.id);
+            }
             if (this.isStationary(v)) this.vesselStatTimes[v.id] ??= v.stationarySince ?? v.lastPositionTime ?? now;
             else delete this.vesselStatTimes[v.id];
         }
+        for (const [id, area] of Object.entries(areas)) if (!area.berths.length || area.memberIds.size < 2) delete areas[id];
         const candidates = nearbyVessels.filter(v => this.isStationary(v) && v.dist <= cfg.learningRangeMeters &&
             Number.isFinite(v.lat) && Number.isFinite(v.lon));
         // A roadstead of large anchored ships must not become a quiet yacht
@@ -199,7 +246,7 @@ class HarborDetector {
             const anchorA = ea.anchored || ea.oscillating, anchorB = eb.anchored || eb.oscillating;
             const small = Math.max(a.length || 12, b.length || 12) <= cfg.anchorageMaxVesselLengthMeters;
             if (small && anchorA && anchorB) return cfg.anchorageLinkMeters;
-            if (anchorA !== anchorB) return cfg.ordinaryLinkMeters;
+            if (anchorA !== anchorB) return -1;
             if (ea.confidentMoored && eb.confidentMoored && !anchorA && !anchorB) return cfg.confidentPortLinkMeters;
             if (ea.windMoored && eb.windMoored && !anchorA && !anchorB) return cfg.portExpansionMeters;
             if (ea.fixed && eb.fixed) return cfg.fixedLinkMeters;
@@ -210,7 +257,10 @@ class HarborDetector {
         // without demanding a moored status or a completed swing cycle.
         const loose = learningCandidates.filter(v => !assigned.has(v.id) && (v.length || 12) <= cfg.anchorageMaxVesselLengthMeters &&
             (this.evidence(v).confirmed || this.evidence(v).anchored));
-        const groups = [...compactGroups, ...this.groups(loose, () => cfg.anchorageLinkMeters)
+        const groups = [...compactGroups, ...this.groups(loose, (a, b) => {
+            const ea = this.evidence(a), eb = this.evidence(b);
+            return Boolean(ea.anchored || ea.oscillating) === Boolean(eb.anchored || eb.oscillating) ? cfg.anchorageLinkMeters : -1;
+        })
             .map(members => ({ members, kind: this.classify(members, false) })).filter(g => g.kind && g.members.length >= 2)];
         for (const group of groups) {
             const locations = group.members.map(v => this.location(v));
@@ -242,18 +292,36 @@ class HarborDetector {
             eligible.sort((a, b) => Math.min(...a.berths.map(q => distanceMeters(p.lat, p.lon, q.lat, q.lon))) - Math.min(...b.berths.map(q => distanceMeters(p.lat, p.lon, q.lat, q.lon))));
             if (eligible[0]) this.addPoint(eligible[0], v);
         }
-        // Merge touching areas only when their observed type agrees. Separate
-        // ports/anchorages and wide channels must not be joined by a global hull.
-        const keys = Object.keys(areas);
-        for (let i = 0; i < keys.length; i++) for (let j = i + 1; j < keys.length; j++) {
-            const a = areas[keys[i]], b = areas[keys[j]];
-            if (!a || !b || a.kind !== b.kind) continue;
-            const limit = a.kind === 'ANCHORAGE' ? cfg.anchorageLinkMeters : cfg.portExpansionMeters;
-            if (!a.berths.some(p => b.berths.some(q => distanceMeters(p.lat, p.lon, q.lat, q.lon) <= limit))) continue;
-            for (const p of b.berths) if (a.berths.length < cfg.maximumLearnedPoints && !a.berths.some(q => distanceMeters(p.lat, p.lon, q.lat, q.lon) < cfg.berthDeduplicationMeters)) a.berths.push(p);
-            for (const id of b.memberIds) a.memberIds.add(id);
-            delete areas[b.id];
-        }
+        // Merge confirmed ports by polygon gap, including internal channels.
+        // Repeat to convergence so results do not depend on area insertion order.
+        let merged;
+        do {
+            merged = false;
+            const keys = Object.keys(areas);
+            outer: for (let i = 0; i < keys.length; i++) for (let j = i + 1; j < keys.length; j++) {
+                const a = areas[keys[i]], b = areas[keys[j]];
+                if (a.kind !== b.kind) continue;
+                const touching = a.kind === 'PORT'
+                    ? polygonDistanceMeters(this.hull(a), this.hull(b)) <= cfg.portMergeBoundaryMeters
+                    : a.berths.some(p => b.berths.some(q => distanceMeters(p.lat, p.lon, q.lat, q.lon) <=
+                        (a.kind === 'ANCHORAGE' ? cfg.anchorageLinkMeters : cfg.portExpansionMeters)));
+                if (!touching) continue;
+                // Preserve every contribution when merging deduplicated berths.
+                if (a.berths.length + b.berths.length > cfg.maximumLearnedPoints ||
+                    new Set([...a.memberIds, ...b.memberIds]).size > cfg.maximumLearnedPoints) continue;
+                for (const p of b.berths) {
+                    const existing = a.berths.find(q => distanceMeters(p.lat,p.lon,q.lat,q.lon) < cfg.berthDeduplicationMeters);
+                    if (existing) {
+                        for (const [id, radius] of p.sources) existing.sources.set(id, Math.max(existing.sources.get(id) || 0, radius));
+                        existing.radius = Math.max(...existing.sources.values());
+                    } else a.berths.push(p);
+                }
+                for (const id of b.memberIds) a.memberIds.add(id);
+                delete areas[b.id];
+                merged = true;
+                break outer;
+            }
+        } while (merged);
         const geometries = Object.values(areas).map(area => {
             area.lat = area.berths.reduce((s, p) => s + p.lat, 0) / area.berths.length;
             area.lon = area.berths.reduce((s, p) => s + p.lon, 0) / area.berths.length;
@@ -284,4 +352,4 @@ class HarborDetector {
     }
 }
 
-module.exports = { HarborDetector, HARBOR_DETECTOR_CONFIG, computeConvexHull, pointInPolygon };
+module.exports = { HarborDetector, HARBOR_DETECTOR_CONFIG, computeConvexHull, pointInPolygon, polygonDistanceMeters };

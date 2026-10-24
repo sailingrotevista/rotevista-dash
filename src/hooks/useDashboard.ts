@@ -30,7 +30,7 @@ import { generateRandomColregScenario, recalculateArpaForTargets } from '../util
 import { isThreatSnoozed, reconcileSnooze } from '../utils/aisSnooze.mjs';
 import { MixedAisSimulation, mergeAisTargets } from '../utils/mixedAisSimulation.mjs';
 import { BannerThreatSelector } from '../utils/aisPriority.mjs';
-import { proximityAcknowledgementExpired } from '../utils/proximityAcknowledgement.mjs';
+import { proximityAcknowledgementExpired, acknowledgeCurrentBubble, nearestBubblePresence } from '../utils/proximityAcknowledgement.mjs';
 import { isAnchoredNavigationState } from '../utils/navigationState.mjs';
 
 // Explicit opt-in keeps the simulator usable even with a reachable Signal K proxy.
@@ -183,9 +183,9 @@ export function useDashboard() {
 
   const snoozeThreat = useCallback((targetId: string) => {
     const target = latestAisRef.current.targets.find(t => t.id === targetId);
-    if (target?.areaProximityOnly && !target.isMoving) {
-      const area = target.proximityArea || { id: target.clusterId || target.id, lat: target.lat, lon: target.lon };
-      setProximityAcknowledgements(prev => ({ ...prev, [targetId]: area }));
+    if (target?.alertKind === 'PROXIMITY' && target.areaProximityOnly && !target.isMoving) {
+      const current = acknowledgeCurrentBubble(latestAisRef.current.targets);
+      setProximityAcknowledgements(prev => ({ ...prev, ...current }));
       return;
     }
     setTopThreat(currentTop => {
@@ -229,7 +229,9 @@ export function useDashboard() {
       if (t.alertKind === 'PROXIMITY' && proximityAcknowledgements[t.id]) return false;
       return !isThreatSnoozed(t, snoozedThreats[t.id], now);
     });
-    return bannerSelectorRef.current.select(valid, now);
+    const nearest = nearestBubblePresence(valid);
+    const bannerCandidates = valid.filter(t => t.alertKind !== 'PROXIMITY' || t.id === nearest?.id);
+    return bannerSelectorRef.current.select(bannerCandidates, now);
   }, [topThreat, aisTargets, snoozedThreats, proximityAcknowledgements, bannerSelectionTick]);
   const priorityDeadline = bannerSelectorRef.current.pendingDeadline;
   useEffect(() => {

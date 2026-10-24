@@ -2020,7 +2020,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                     <div className="target-text-col">
                       <span className="target-item-name">{ownShipName}</span>
                       <span className="target-item-sub">
-                        {ownShipCourse.sog < 0.5 ? 'IN PORT' : 'UNDERWAY'} • HDG: {Math.round(ownShipCourse.hdg)}°
+                        {ownShipCourse.sog < 0.5 ? 'STOPPED' : 'UNDERWAY'} • HDG: {Math.round(ownShipCourse.hdg)}°
                       </span>
                     </div>
                   </div>
