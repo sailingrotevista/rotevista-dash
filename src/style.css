@@ -2805,3 +2805,16 @@ body.night-mode .ais-support-email-btn,
   flex: 0 0 auto;
   margin: auto;
 }
+
+.own-gps-stale-label {
+  position: absolute;
+  left: 50%;
+  top: 32px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #475569;
+  color: white;
+  font: bold 11px sans-serif;
+}

@@ -52,3 +52,14 @@ test('compact AIS information filters placeholders and formats ETA in UTC',async
  assert.equal(getAisInfo({reportedAis:{},destination:'OLD',reportedNavigationState:'moored'}).visible,false);
  assert.equal(getAisInfo({destination:'TRBDM@@@'}).destination,'TRBDM');
 });
+
+test('AIS age changes from minutes to hours at 3600 seconds',async()=>{
+ const {formatAge}=await import('../src/utils/aisDetailData.mjs');
+ assert.equal(formatAge(0),'NOW');
+ assert.equal(formatAge(30),'30S AGO');
+ assert.equal(formatAge(60),'1M AGO');
+ assert.equal(formatAge(3599),'59M AGO');
+ assert.equal(formatAge(3600),'1H AGO');
+ assert.equal(formatAge(7200),'2H AGO');
+ assert.equal(formatAge(24*3600),'24H AGO');
+});

@@ -223,7 +223,7 @@ export const AnalogGauge: React.FC<AnalogGaugeProps> = React.memo(({
       {/* Leeway Bar Indicator */}
       <g transform="translate(50, 395)">
         <text x="150" y="-12" id="leeway-val" fill="#aaa" fontSize="11" textAnchor="middle" fontWeight="bold">
-          {leewayDeg === null ? "LEEWAY: —" : `LEEWAY: ${clampedLeeway.toFixed(1)}°`}
+          {leewayDeg === null ? "LEEWAY: ---°" : `LEEWAY: ${clampedLeeway.toFixed(1)}°`}
         </text>
         <rect x="0" y="0" width="300" height="12" fill="#222" rx="3" />
         <rect x="0" y="0" width="300" height="12" fill="url(#leeway-grad)" clipPath="url(#leeway-clip)" rx="3" />

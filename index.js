@@ -59,7 +59,7 @@ module.exports = function (app) {
     const { DashboardSession, registerDashboardRoutes } = require('./dashboardSession');
     const readDashboardLive = () => ({raw:windEngine.getRaw(),rawTimes:windEngine.getRawTimes(),targets:aisEngine.getNearbyVessels(),
         harborClusters:aisEngine.getHarborClusters(),config:currentConfig});
-    const dashboardSession = new DashboardSession({readLive:readDashboardLive});
+    const dashboardSession = new DashboardSession({readLive:readDashboardLive,liveAlerts:aisEngine.sharedAlerts});
 
     /**
         * plugin.start: Inizializza il plugin.
@@ -215,7 +215,13 @@ module.exports = function (app) {
         }
         const intervalMs = ((currentConfig.aisAlerter && currentConfig.aisAlerter.checkIntervalSec) || 15) * 1000;
         if (sharedAlertInterval) clearInterval(sharedAlertInterval);
-        sharedAlertInterval = setInterval(() => dashboardSession.tick(), 1000);
+        sharedAlertInterval = setInterval(() => {
+            const now = Date.now();
+            windEngine.sampleHistory(now);
+            dashboardSession.tick(now);
+            // Publish the same Live state to legacy clients without evaluating it again.
+            aisEngine.publishSharedAlerts(now, false);
+        }, 1000);
         aisInterval = setInterval(() => aisEngine.process(), intervalMs);
         setTimeout(() => aisEngine.process(), 1000); // Primo calcolo a caldo entro 1s
         // Inizializza la cache cartografica locale LRU su disco per Cerbo GX

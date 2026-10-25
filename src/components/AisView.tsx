@@ -1,7 +1,8 @@
+import { formatAge } from '../utils/aisDetailData.mjs';
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AisTarget, HarborCluster, PropulsionMode } from '../types';
+import { AisTarget, HarborCluster, PropulsionMode, OwnShipPosition, OwnShipCourse } from '../types';
 import { getAvailableMapArea, getMapCenterOffset } from '../utils/mapViewport.mjs';
 import { chooseAisLabelPlacement, escapeAisLabelText } from '../utils/aisLabelPlacement.mjs';
 import { AisStatusInfo } from './AisStatusInfo';
@@ -43,8 +44,8 @@ interface AisViewProps {
   isActive?: boolean;
   targets: AisTarget[];
   harborClusters: HarborCluster[];
-  ownShipPosition: { lat: number; lon: number };
-  ownShipCourse: { hdg: number; cog: number; sog: number };
+  ownShipPosition: OwnShipPosition;
+  ownShipCourse: OwnShipCourse;
   isNightMode: boolean;
   onSwitchToWind: () => void;
   onSnoozeThreat: (targetId: string) => Promise<boolean>;
@@ -106,14 +107,6 @@ const formatDist = (meters: number | null | undefined): string => {
   return `${(meters / 1852).toFixed(1)} NM`;
 };
 
-const formatAge = (seconds: number): string => {
-  if (seconds < 10) return 'NOW';
-  if (seconds < 60) return `${seconds}S AGO`;
-  const mins = Math.floor(seconds / 60);
-  if (mins < 60) return `${mins}M AGO`;
-  const hours = Math.floor(mins / 3600);
-  return `${hours}H AGO`;
-};
 
 type FollowMode = 'own' | 'target' | 'intersection' | 'none';
 
@@ -274,7 +267,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         followedTargetIdRef.current = snap.followedTargetId;
         setShowListDrawer(false);
         let restoreCenter = snap.center;
-        if (snap.followMode === 'own') {
+        if (snap.followMode === 'own' && ownShipPositionRef.current.valid) {
           const pos = ownShipPositionRef.current;
           restoreCenter = L.latLng(pos.lat, pos.lon);
           lastFollowPosRef.current = { lat: pos.lat, lon: pos.lon, mode: 'own' };
@@ -412,7 +405,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
           setFollowedTargetId(snap.followedTargetId);
           followedTargetIdRef.current = snap.followedTargetId;
           let restoreCenter = snap.center;
-          if (snap.followMode === 'own') {
+          if (snap.followMode === 'own' && ownShipPositionRef.current.valid) {
             const pos = ownShipPositionRef.current;
             restoreCenter = L.latLng(pos.lat, pos.lon);
             lastFollowPosRef.current = { lat: pos.lat, lon: pos.lon, mode: 'own' };
@@ -521,7 +514,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       const now = Date.now();
       const elapsedMs = lastLeaveTimeRef.current ? now - lastLeaveTimeRef.current : 0;
 
-      if (elapsedMs >= 5 * 60 * 1000) {
+      if (elapsedMs >= 5 * 60 * 1000 && ownShipPosition.valid) {
         // Trascorsi 5 minuti o più: Reset centro barca e zoom contestuale
         setSelectedTarget(null);
         onSelectTarget(null);
@@ -529,7 +522,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         setFollowMode('own');
 
         const isInHarbor = harborClusters.some(c => c.dist < 500);
-        const isStoppedOrAnchored = ownShipCourse.sog < 1.0 || isInHarbor;
+        const isStoppedOrAnchored = (ownShipCourse.sog !== null && ownShipCourse.sog < 1.0) || isInHarbor;
         const standardZoom = isStoppedOrAnchored ? 16 : 13;
         const center = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], standardZoom);
         mapRef.current.setView(center, standardZoom, { animate: false });
@@ -551,7 +544,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       setFollowedTargetId(snap.followedTargetId);
       followedTargetIdRef.current = snap.followedTargetId;
       let restoreCenter = snap.center;
-      if (snap.followMode === 'own') {
+      if (snap.followMode === 'own' && ownShipPositionRef.current.valid) {
         const pos: [number, number] = [ownShipPositionRef.current.lat, ownShipPositionRef.current.lon];
         restoreCenter = drawerVisible ? getOffsetCenter(pos, snap.zoom) : L.latLng(pos[0], pos[1]);
         lastFollowPosRef.current = { lat: pos[0], lon: pos[1], mode: 'own' };
@@ -613,6 +606,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   const zoomToCollisionTriangle = useCallback(
     (target: AisTarget, isTemporaryInspect = false) => {
       if (!mapRef.current) return;
+      if (!ownShipPosition.valid || ownShipCourse.cog === null || ownShipCourse.sog === null) {
+        handleCenterOnTarget(target);
+        return;
+      }
 
       if (followModeRef.current !== 'intersection') {
         userFollowZoomRef.current = Math.round(mapRef.current.getZoom());
@@ -685,7 +682,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       });
       releaseMapTransitions();
     },
-    [ownShipPosition, ownShipCourse, getVisibleMapArea, suspendMapTransitions, releaseMapTransitions]
+    [ownShipPosition, ownShipCourse, getVisibleMapArea, suspendMapTransitions, releaseMapTransitions, handleCenterOnTarget]
   );
 
   // Ripristina inquadratura mappa e posizione scroll lista al ritorno dal dettaglio
@@ -711,7 +708,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
   // Center on Own Ship & Contextual Standard Zoom
   const handleCenterOnOwnShip = useCallback(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || !ownShipPosition.valid) return;
 
     suspendMapTransitions();
     cameraSnapshotRef.current = null;
@@ -725,7 +722,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
     const map = mapRef.current;
     const isInHarbor = harborClusters.some(c => c.dist < 500);
-    const isStoppedOrAnchored = ownShipCourse.sog < 1.0 || isInHarbor;
+    const isStoppedOrAnchored = (ownShipCourse.sog !== null && ownShipCourse.sog < 1.0) || isInHarbor;
     const standardZoom = isStoppedOrAnchored ? 16 : 13;
     const alternateZoom = standardZoom === 16 ? 13 : 16;
 
@@ -768,6 +765,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     }
 
     const map = mapRef.current;
+    if (!ownShipPosition.valid && (followMode === 'own' || followMode === 'intersection')) return;
 
     if (followMode === 'intersection') {
       const isThreatActive =
@@ -838,7 +836,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       lastFollowPosRef.current = { lat: pos[0], lon: pos[1], mode: modeKey, targetId: currentTargetId };
       map.panTo(targetCenter, { animate: true, duration: 2.0, easeLinearity: 0.25 });
     }
-  }, [isActive, ownShipPosition.lat, ownShipPosition.lon, followedTarget?.lat, followedTarget?.lon, followedTarget?.risk, followedTarget?.tcpa, followMode, followedTarget?.id, getOffsetCenter]);
+  }, [isActive, ownShipPosition.valid, ownShipPosition.lat, ownShipPosition.lon, followedTarget?.lat, followedTarget?.lon, followedTarget?.risk, followedTarget?.tcpa, followMode, followedTarget?.id, getOffsetCenter]);
 
   const collisionLayoutRef = useRef(zoomToCollisionTriangle);
   collisionLayoutRef.current = zoomToCollisionTriangle;
@@ -852,6 +850,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       frame = requestAnimationFrame(() => {
         const map = mapRef.current;
         if (!map || followModeRef.current === 'none') return;
+        if (!ownShipPositionRef.current.valid && ['own','intersection'].includes(followModeRef.current)) return;
         const target = targetsRef.current.find(t => t.id === followedTargetIdRef.current);
         if (followModeRef.current === 'intersection' && target) {
           collisionLayoutRef.current(target, Boolean(cameraSnapshotRef.current));
@@ -1111,10 +1110,11 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       (40075016.686 * Math.abs(Math.cos((ownShipPosition.lat * Math.PI) / 180))) /
       Math.pow(2, (mapRef.current.getZoom() || mapZoom) + 8);
     const vecMins = vectorMinutes > 0 ? vectorMinutes : 5;
-    const ownHeading = ownShipCourse.hdg || ownShipCourse.cog || 0;
-    const ownVecPx = ownShipCourse.sog >= 0.5 ? ((ownShipCourse.sog * 1852) * (vecMins / 60)) / mPerPx : 0;
+    const ownHeading = ownShipPosition.valid ? (ownShipCourse.hdg ?? ownShipCourse.cog ?? 0) : 0;
+    const ownMotionValid = ownShipPosition.valid && ownShipCourse.cog !== null && ownShipCourse.sog !== null;
+    const ownVecPx = ownMotionValid && ownShipCourse.sog >= 0.5 ? ((ownShipCourse.sog * 1852) * (vecMins / 60)) / mPerPx : 0;
     const ownGhostPx =
-      activeGhostTarget && activeGhostTarget.sog >= 0.5 && activeGhostTarget.tcpa && activeGhostTarget.tcpa > 0 && ownShipCourse.sog >= 0.5
+      ownMotionValid && activeGhostTarget && activeGhostTarget.sog >= 0.5 && activeGhostTarget.tcpa && activeGhostTarget.tcpa > 0 && ownShipCourse.sog >= 0.5
         ? ((ownShipCourse.sog * 1852) * (activeGhostTarget.tcpa / 60)) / mPerPx
         : 0;
     const ownVecHtml = ownVecPx > 0
@@ -1128,12 +1128,15 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         ${ownVecHtml}
         ${ownGhostHtml}
         <svg viewBox="0 0 30 30" width="30" height="30">
-          <path d="M 15,2 L 25,25 L 15,19 L 5,25 Z" fill="#00c3ff" stroke="#0369a1" stroke-width="1.8" stroke-linejoin="round" />
+          ${ownShipPosition.valid && ownShipCourse.hdg !== null
+            ? '<path d="M 15,2 L 25,25 L 15,19 L 5,25 Z" fill="#00c3ff" stroke="#0369a1" stroke-width="1.8" stroke-linejoin="round" />'
+            : `<circle cx="15" cy="15" r="7" fill="${ownShipPosition.valid ? '#00c3ff' : '#94a3b8'}" stroke="#475569" stroke-width="2" />`}
         </svg>
+        ${ownShipPosition.valid ? '' : '<span class="own-gps-stale-label">GPS stale</span>'}
       </div>
     `;
 
-    ownShipMarkerRef.current = upsertSmoothMarker(
+    ownShipMarkerRef.current = ownShipPosition.hasFix ? upsertSmoothMarker(
       'own',
       [ownShipPosition.lat, ownShipPosition.lon],
       'own-ship-marker',
@@ -1145,7 +1148,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       true,
       handleCenterOnOwnShip,
       { rot: ownHeading, vecLen: ownVecPx, ghostDist: ownGhostPx }
-    ) || null;
+    ) : null;
 
     // 1b. Dynamic Coaxial Range Rings & Labels (traslano con translate3d insieme alla barca/target)
     const ringCenter: [number, number] = selectedTarget
@@ -1204,7 +1207,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
     const ringsHtml = `<svg class="range-rings-svg" width="${svgDim}" height="${svgDim}" viewBox="0 0 ${svgDim} ${svgDim}">${circlesSvgHtml}</svg>${labelsHtml}`;
 
-    upsertSmoothMarker(
+    if (selectedTarget || ownShipPosition.valid) upsertSmoothMarker(
       ringTargetKey,
       ringCenter,
       'range-rings-marker',
@@ -1546,7 +1549,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     } else if (selectedTarget) {
       const newCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon], newZoom);
       mapRef.current.setView(newCenter, newZoom, { animate: true });
-    } else if (followMode === 'own') {
+    } else if (followMode === 'own' && ownShipPosition.valid) {
       const newCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], newZoom);
       mapRef.current.setView(newCenter, newZoom, { animate: true });
     } else {
@@ -1569,7 +1572,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     } else if (selectedTarget) {
       const newCenter = getOffsetCenter([selectedTarget.lat, selectedTarget.lon], newZoom);
       mapRef.current.setView(newCenter, newZoom, { animate: true });
-    } else if (followMode === 'own') {
+    } else if (followMode === 'own' && ownShipPosition.valid) {
       const newCenter = getOffsetCenter([ownShipPosition.lat, ownShipPosition.lon], newZoom);
       mapRef.current.setView(newCenter, newZoom, { animate: true });
     } else {
@@ -2011,12 +2014,12 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                     <div className="target-text-col">
                       <span className="target-item-name">{ownShipName}</span>
                       <span className="target-item-sub">
-                        {ownShipCourse.sog < 0.5 ? 'STOPPED' : 'UNDERWAY'} • HDG: {Math.round(ownShipCourse.hdg)}°
+                        {!ownShipPosition.valid ? (ownShipPosition.hasFix ? 'GPS STALE' : 'GPS UNAVAILABLE') : ownShipCourse.sog === null ? 'SPEED UNAVAILABLE' : ownShipCourse.sog < 0.5 ? 'STOPPED' : 'UNDERWAY'} • HDG: {ownShipCourse.hdg === null ? '---°' : `${Math.round(ownShipCourse.hdg)}°`}
                       </span>
                     </div>
                   </div>
                   <div className="target-right-group">
-                    <div className="target-sog-val">{ownShipCourse.sog.toFixed(1)} kn</div>
+                    <div className="target-sog-val">{ownShipCourse.sog === null ? '--.-' : ownShipCourse.sog.toFixed(1)} kn</div>
                     <div className="target-sog-lbl">SOG</div>
                   </div>
                 </div>

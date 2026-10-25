@@ -124,3 +124,10 @@ Le prove automatiche non sostituiscono la verifica su dispositivi reali con sosp
 - In Live e Mixed recuperare grafici (inclusi array vuoti e interruzioni), medie angolari, storico lungo TWD, radar e previsione. Simulation non importa lo storico reale.
 - Richieste senza cache, timeout 4 secondi; una sola richiesta storico in corso e almeno 10 secondi fra tentativi. Su errore il recupero rimane pendente.
 - Applicare la risposta solo alla stessa generazione; risposte di sessioni precedenti non devono sovrascrivere quella attuale.
+
+## Unica istanza degli avvisi Live
+
+- Nel plugin installato `DashboardSession.liveAlerts` usa la stessa istanza di `AisEngine.sharedAlerts`, passata esplicitamente alla creazione della sessione. Non mantenere due stati Live indipendenti.
+- Dashboard, comandi, endpoint AIS/storico e delta `environment.ais_shared_alerts` condividono identità di sessione, revisioni, banner, snooze e acknowledge Live. Il timer pubblica il medesimo stato senza una seconda valutazione dedicata al delta.
+- Simulation e Mixed usano una propria istanza; tornare in Live recupera quella originale. Gli endpoint precedenti continuano a rappresentare Live anche durante la simulazione.
+- Il dev crea e gestisce la propria istanza Live; non acquisisce né modifica l'istanza del Cerbo.

@@ -13,14 +13,8 @@ export function freshAwa(value, timestamp, now, maxAgeMs) {
     Number.isFinite(timestamp) && now - timestamp >= 0 && now - timestamp < maxAgeMs ? value : null;
 }
 
-// Received TWS stays separate from the derived value, so fallback cannot
-// overwrite a still-timestamped native measurement.
-export function resolveTws(raw, timestamps, now, policy) {
-  const native=freshAws(raw['environment.wind.speedTrue'], timestamps['environment.wind.speedTrue'], now, policy.twsNativeMaxAgeMs);
-  if (native !== null) return native;
-  const vector = apparentWindVector(raw, timestamps, now, policy);
-  return vector === null ? null : Math.hypot(vector.x, vector.y);
-}
+// The same validated TWS resolver is used by the server for historical weights.
+export { resolveTws } from './twdHistory.mjs';
 
 function apparentWindVector(raw, timestamps, now, policy) {
   const aws=freshAws(raw['environment.wind.speedApparent'], timestamps['environment.wind.speedApparent'], now, policy.awsMaxAgeMs);

@@ -13,12 +13,13 @@ function advance(v, seconds) {
         lon:v.lon+distance*Math.sin(rad(v.cog))/(111139*Math.cos(rad(v.lat)))};
 }
 class DashboardSession {
-    constructor({ readLive, environment='signalk', now=Date.now() }) {
+    constructor({ readLive, environment='signalk', now=Date.now(), liveAlerts }) {
         this.readLive=readLive;
         this.environment=environment;
         this.propulsionMode='AUTO';
         this.mode='live'; this.generation=randomUUID(); this.changedAt=now; this.revision=0;
-        this.liveAlerts=new AisSharedAlerts({now}); this.simAlerts=new AisSharedAlerts({now});
+        // The installed plugin injects the AIS engine instance; dev owns an isolated one.
+        this.liveAlerts=liveAlerts || new AisSharedAlerts({now}); this.simAlerts=new AisSharedAlerts({now});
         this.lastTick=now; this.startedAt=now; this.dynamic=[]; this.simOwn={...marina.myGps,sog:5.2,cog:45,hdg:45};
         this.tools=createTools(pipeline,marina);
         this.bubbleEntries=new BubbleEntryTracker();

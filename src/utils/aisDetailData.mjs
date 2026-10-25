@@ -43,3 +43,12 @@ export function getAisInfo(target) {
   const aisClass=cls==='A'||cls==='B' ? cls : null;
   return {destination,eta,status,aisClass,visible:Boolean(destination||eta||status)};
 }
+
+export function formatAge(seconds) {
+  if (seconds < 10) return 'NOW';
+  if (seconds < 60) return `${seconds}S AGO`;
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins}M AGO`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}H AGO`;
+}

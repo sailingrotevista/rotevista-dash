@@ -1,3 +1,6 @@
+import { handleMeasurementReset, shouldApplySessionMeasurement } from '../utils/measurementReset.mjs';
+import { aggregateTwd, historyRetentionMs } from '../utils/twdHistory.mjs';
+import { resolveOwnShipNavigation, validOwnPosition } from '../utils/ownShipNavigation.mjs';
 import { gybeSoundAllowed } from '../utils/gybeSound.mjs';
 import windDataPolicy from '../../windDataPolicy.json';
 import { freshAws, freshAwa, resolveTws, resolveTwa, resolveTwd, resolveWindBoatSpeed, resolveHeading, resolveVmg, freshBoatSpeed, freshDepth, resolveLeeway, maneuverValidity } from '../utils/windValidity.mjs';
@@ -17,6 +20,8 @@ import {
   AisTarget,
   HarborCluster,
   PropulsionMode,
+  OwnShipPosition,
+  OwnShipCourse,
 } from '../types';
 import {
   radToDeg,
@@ -77,7 +82,7 @@ const DEFAULT_CONFIG: AppConfig = {
 };
 
 function safePush(buffer: AngleBufferItem[], val: number, time: number, isTwd = false, historyMinutes = 30) {
-  if (val === null || val === undefined || isNaN(val)) return;
+  if (!Number.isFinite(val) || !Number.isFinite(time)) return;
 
   buffer.push({
     val,
@@ -245,18 +250,18 @@ export function useDashboard() {
 
   const [snoozedThreats, setSnoozedThreats] = useState<Record<string, { until: number; initialRisk: string; lostPositionTime?: number }>>({});
   const [proximityAcknowledgements, setProximityAcknowledgements] = useState<Record<string, { id: string; lat: number; lon: number }>>({});
-  const [ownShipPosition, setOwnShipPosition] = useState<{ lat: number; lon: number }>({ lat: 36.780956, lon: 14.545439 });
-  const [ownShipCourse, setOwnShipCourse] = useState<{ hdg: number; cog: number; sog: number }>({ hdg: 45, cog: 45, sog: 0.0 });
+  const [ownShipPosition, setOwnShipPosition] = useState<OwnShipPosition>({ lat: 36.780956, lon: 14.545439, valid:false, hasFix:false });
+  const [ownShipCourse, setOwnShipCourse] = useState<OwnShipCourse>({ hdg:null, cog:null, sog:null });
 
   const latestAisRef = useRef<{
     targets: AisTarget[];
     clusters: HarborCluster[];
-    pos: { lat: number; lon: number };
+    pos: OwnShipPosition;
     highestRisk: 'RED' | 'ORANGE' | null;
   }>({
     targets: [],
     clusters: [],
-    pos: { lat: 36.780956, lon: 14.545439 },
+    pos: { lat: 36.780956, lon: 14.545439, valid:false, hasFix:false },
     highestRisk: null,
   });
 
@@ -390,9 +395,9 @@ export function useDashboard() {
     stw: '--.-',
     sog: '--.-',
     sogColor: '',
-    hdg: '000°',
+    hdg: '---°',
     hdgUnstable: false,
-    cog: '000°',
+    cog: '---°',
     cogUnstable: false,
     depth: '--.-',
     depthAlarmClass: '',
@@ -477,13 +482,13 @@ export function useDashboard() {
     },
     gustFilter: {} as Partial<Record<'aws' | 'tws', { val: number; time: number }>>,
     graphTempBuf: {
-      stw: [] as Array<{ val: number; time: number }>,
-      sog: [] as Array<{ val: number; time: number }>,
-      vmg: [] as Array<{ val: number; time: number }>,
-      depth: [] as Array<{ val: number; time: number }>,
-      tws: [] as Array<{ val: number; time: number }>,
-      aws: [] as Array<{ val: number; time: number }>,
-      twd: [] as Array<{ val: number; time: number }>,
+      stw: [] as Array<{ val: number; time: number; tws?: number | null }>,
+      sog: [] as Array<{ val: number; time: number; tws?: number | null }>,
+      vmg: [] as Array<{ val: number; time: number; tws?: number | null }>,
+      depth: [] as Array<{ val: number; time: number; tws?: number | null }>,
+      tws: [] as Array<{ val: number; time: number; tws?: number | null }>,
+      aws: [] as Array<{ val: number; time: number; tws?: number | null }>,
+      twd: [] as Array<{ val: number; time: number; tws?: number | null }>,
     },
     lastUpdates: { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0, twd: 0 },
     lastMessageReceivedTime: Date.now(),
@@ -524,15 +529,24 @@ export function useDashboard() {
     }
 
     const lastInput = historyInputTimesRef.current[type];
-    const gapBefore = Number.isFinite(lastInput) && now - lastInput >= 15000;
+    const gapBefore = Number.isFinite(lastInput) && now - lastInput >= windDataPolicy.historyGapMs;
     historyInputTimesRef.current[type] = now;
     if (gapBefore) store.graphTempBuf[type] = [];
     const tempBuf = store.graphTempBuf[type];
-    tempBuf.push({ val: value, time: now });
+    const tws = type === 'twd' ? resolveTws(store.raw, store.timestamps, now, windDataPolicy) : null;
+    tempBuf.push({ val: value, time: now, tws });
 
     const bucketReady = gapBefore || (now - store.lastUpdates[type] > bucketIntervalMs) || store.histories[type].length === 0;
     if (!bucketReady) return;
 
+    if (type === 'twd') {
+      const direction = aggregateTwd(tempBuf, windDataPolicy);
+      if (direction) store.histories.twd.push({...direction,time:now,...(gapBefore ? {gapBefore:true} : {})});
+      while (store.histories.twd.length && now-store.histories.twd[0].time > historyRetentionMs('twd',historyMinutes,windDataPolicy)) store.histories.twd.shift();
+      store.graphTempBuf.twd = [];
+      store.lastUpdates.twd = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
+      return;
+    }
     let finalValue = value;
     if (tempBuf.length > 0) {
       if (type === 'tws' || type === 'aws') {
@@ -554,7 +568,7 @@ export function useDashboard() {
       } else if (type === 'depth') {
         let minVal = Infinity;
         for (let i = 0; i < tempBuf.length; i++) {
-          if (isFinite(tempBuf[i].val) && tempBuf[i].val < minVal) {
+          if (Number.isFinite(tempBuf[i].val) && tempBuf[i].val < minVal) {
             minVal = tempBuf[i].val;
           }
         }
@@ -563,7 +577,7 @@ export function useDashboard() {
         let sum = 0;
         let count = 0;
         for (let i = 0; i < tempBuf.length; i++) {
-          if (isFinite(tempBuf[i].val)) {
+          if (Number.isFinite(tempBuf[i].val)) {
             sum += tempBuf[i].val;
             count++;
           }
@@ -577,8 +591,7 @@ export function useDashboard() {
 
     store.histories[type].push({ val: finalValue, time: now, ...(gapBefore ? { gapBefore: true } : {}) });
 
-    const maxViewportMinutes = historyMinutes * 2;
-    const maxHistoryMs = maxViewportMinutes * 60000 + 60000;
+    const maxHistoryMs = historyRetentionMs(type,historyMinutes,windDataPolicy);
     while (store.histories[type].length > 0 && now - store.histories[type][0].time > maxHistoryMs) {
       store.histories[type].shift();
     }
@@ -595,80 +608,41 @@ export function useDashboard() {
       if (path.startsWith('environment.ais_') || path === 'environment.harbor_clusters') return;
       if (sharedSessionModeRef.current === 'simulation' && (path.startsWith('navigation.') || path.startsWith('environment.wind.') || path.startsWith('environment.depth.'))) return;
     }
+    if (handleMeasurementReset(storeRef.current, path, val, timeMs, Date.now())) return;
     if (path === 'environment.depth.belowTransducer') {
       if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
-      if (val === null) {
-        delete storeRef.current.raw[path];
-        storeRef.current.timestamps[path] = Number.isFinite(timeMs) ? Math.min(Date.now(), timeMs!) : Date.now();
-        return;
-      }
       if (typeof val !== 'number' || !Number.isFinite(val) || val < -2 || val > 500) return;
     }
     if (path === 'navigation.speedThroughWater' || path === 'navigation.speedOverGround') {
-      if (val === null) {
-        delete storeRef.current.raw[path];
-        delete storeRef.current.timestamps[path];
-        return;
-      }
       if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 25.72) return;
       if (Number.isFinite(timeMs) && timeMs! <= (storeRef.current.timestamps[path] ?? -Infinity)) return;
     }
+    if (path === 'navigation.position') {
+      const previousTime = storeRef.current.timestamps[path];
+      if (Number.isFinite(timeMs) && Number.isFinite(previousTime) && timeMs! <= previousTime) return;
+      if (!validOwnPosition(val)) return;
+    }
     if (['navigation.headingTrue', 'navigation.headingMagnetic', 'navigation.courseOverGroundTrue'].includes(path)) {
-      if (val === null) {
-        delete storeRef.current.raw[path];
-        delete storeRef.current.timestamps[path];
-        return;
-      }
       if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
       if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
     }
     if (path === 'environment.wind.speedTrue') {
-      if (val === null) {
-        delete storeRef.current.raw[path];
-        delete storeRef.current.timestamps[path];
-        return;
-      }
       if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 51.44) return;
       if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
     }
     if (path === 'environment.wind.directionTrue') {
-      if (val === null) {
-        delete storeRef.current.raw[path];
-        delete storeRef.current.timestamps[path];
-        // Preserve averages: a valid reconstructed TWD may still be available.
-        return;
-      }
       if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
       if (Number.isFinite(timeMs) && timeMs! <= (storeRef.current.timestamps[path] ?? -Infinity)) return;
     }
     if (path === 'environment.wind.angleTrueWater') {
-      if (val === null) {
-        delete storeRef.current.raw[path];
-        delete storeRef.current.timestamps[path];
-        storeRef.current.smoothBuf.twa = [];
-        storeRef.current.longBuf.twa = [];
-        return;
-      }
       if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
       if (Number.isFinite(timeMs) && timeMs! <= (storeRef.current.timestamps[path] ?? -Infinity)) return;
     }
     if (path === 'environment.wind.angleApparent') {
-      if (val === null) {
-        delete storeRef.current.raw[path];
-        delete storeRef.current.timestamps[path];
-        storeRef.current.smoothBuf.awa = [];
-        storeRef.current.longBuf.awa = [];
-        return;
-      }
       if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
       if (Number.isFinite(timeMs) && timeMs! <= (storeRef.current.timestamps[path] ?? -Infinity)) return;
     }
     if (path === 'environment.wind.speedApparent') {
-      if (val === null) {
-        delete storeRef.current.raw[path];
-        delete storeRef.current.timestamps[path];
-        return;
-      }
       if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 51.44) return;
       if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
     }
@@ -684,7 +658,7 @@ export function useDashboard() {
 
     const syntheticUpdate = path === 'simulation.ais_targets';
     if (!syntheticUpdate) {
-      store.timestamps[path] = applyingSessionRef.current || path === 'environment.wind.speedApparent' || path === 'environment.wind.angleApparent' || path === 'environment.wind.speedTrue' || path === 'environment.wind.angleTrueWater' || path === 'environment.wind.directionTrue' || path === 'navigation.headingTrue' || path === 'navigation.speedThroughWater' || path === 'navigation.speedOverGround' || path === 'navigation.headingMagnetic' || path === 'navigation.courseOverGroundTrue' || path === 'environment.depth.belowTransducer' ? Math.min(localNow, now) : localNow;
+      store.timestamps[path] = applyingSessionRef.current || path === 'environment.wind.speedApparent' || path === 'environment.wind.angleApparent' || path === 'environment.wind.speedTrue' || path === 'environment.wind.angleTrueWater' || path === 'environment.wind.directionTrue' || path === 'navigation.headingTrue' || path === 'navigation.speedThroughWater' || path === 'navigation.speedOverGround' || path === 'navigation.headingMagnetic' || path === 'navigation.courseOverGroundTrue' || path === 'environment.depth.belowTransducer' || path === 'navigation.position' ? Math.min(localNow, now) : localNow;
       store.raw[path] = val;
       store.lastMessageReceivedTime = localNow;
     }
@@ -747,29 +721,9 @@ export function useDashboard() {
         if (twd !== null) {
           safePush(store.smoothBuf.twd, twd, now, true, historyMinutes);
           safePush(store.longBuf.twd, twd, now, true, historyMinutes);
-          const lastTwdPt = store.histories.twd[store.histories.twd.length - 1];
-          if (!lastTwdPt || now - lastTwdPt.time >= 10000) store.histories.twd.push({ val: twd, time: now });
-          while (store.histories.twd.length && now - store.histories.twd[0].time > 120 * 60000) store.histories.twd.shift();
+
         }
         store.lastTWCompute = now;
-      }
-    }
-
-    // Navigation Position & AIS updates
-    if (path === 'navigation.position') {
-      if (val && typeof val === 'object' && val.latitude !== undefined && val.longitude !== undefined) {
-        const lat = parseFloat(val.latitude);
-        const lon = parseFloat(val.longitude);
-        if (!isNaN(lat) && !isNaN(lon)) {
-          const prevPos = latestAisRef.current.pos;
-          if (Math.abs(prevPos.lat - lat) > 0.000005 || Math.abs(prevPos.lon - lon) > 0.000005) {
-            const nextPos = { lat, lon };
-            latestAisRef.current.pos = nextPos;
-            if (appViewRef.current === 'ais') {
-              setOwnShipPosition(nextPos);
-            }
-          }
-        }
       }
     }
 
@@ -848,7 +802,7 @@ export function useDashboard() {
         aisAlerter: { ...prev.aisAlerter, ...(val.aisAlerter || {}) },
       }));
     }
-  }, []);
+  }, [manageHistory]);
 
   const fetchConfig = useCallback(() => {
     fetch(FORCE_SIMULATION ? '/settings.json' : '/rotevista-config', { cache: 'no-store' })
@@ -1064,8 +1018,7 @@ export function useDashboard() {
             const sourceTime = frame.rawTimes?.[path];
             const signature = JSON.stringify(value);
             const previousValue = sessionRawTimesRef.current[path];
-            const depthReset = path === 'environment.depth.belowTransducer' && value === null && signature !== previousValue?.value;
-            if (previousValue && (Number.isFinite(sourceTime) ? sourceTime < previousValue.time || (sourceTime === previousValue.time && !depthReset) : signature === previousValue.value)) continue;
+            if (!shouldApplySessionMeasurement(previousValue, value, sourceTime)) continue;
             sessionRawTimesRef.current[path] = {time: Number.isFinite(sourceTime) ? sourceTime : frame.serverNow, value: signature};
             const observedAt = Number.isFinite(sourceTime) ? Date.now() - Math.max(0, frame.serverNow - sourceTime) : Date.now();
             processIncomingData(path, value, observedAt);
@@ -1395,7 +1348,9 @@ export function useDashboard() {
                   (['hdg', 'cog', 'twa', 'awa', 'twd'] as const).forEach(key => {
                     const arr = data.rollingAngles[key];
                     if (Array.isArray(arr) && arr.length > 0) {
-                      const mapped: AngleBufferItem[] = arr.map((item: any) => ({
+                      const mapped: AngleBufferItem[] = arr
+                        .filter((item: any) => item && Number.isFinite(item.val) && Number.isFinite(item.time))
+                        .map((item: any) => ({
                         val: item.val,
                         time: item.time,
                         sin: Math.sin(item.val),
@@ -1411,7 +1366,7 @@ export function useDashboard() {
                 if (Array.isArray(data.twd) && data.twd.length > 0) {
                   const recentTimes = new Set((store.longBuf.twd || []).map(p => p.time));
                   const histItems: AngleBufferItem[] = data.twd
-                    .filter((p: any) => !recentTimes.has(p.time))
+                    .filter((p: any) => p && Number.isFinite(p.val) && Number.isFinite(p.time) && !recentTimes.has(p.time))
                     .map((p: any) => ({
                       val: p.val,
                       time: p.time,
@@ -1608,6 +1563,7 @@ export function useDashboard() {
       const currentHeading = resolveHeading(store.raw, store.timestamps, now, windDataPolicy);
       const currentTwd = resolveTwd(store.raw, store.timestamps, now, windDataPolicy);
       const currentTwa = resolveTwa(store.raw, store.timestamps, now, windDataPolicy);
+      if (currentTwd !== null) manageHistory('twd', currentTwd);
 
       // STW & SOG / VMG histories
       if (validStw !== null) {
@@ -1919,13 +1875,13 @@ export function useDashboard() {
         return { str: main, unstable };
       };
 
-      const hdgFormatted = currentHeading === null ? { str: '—', unstable: false } : formatCompassDeg(hObj, currentHeading);
+      const hdgFormatted = currentHeading === null ? { str: '---°', unstable: false } : formatCompassDeg(hObj, currentHeading);
       const currentCog = freshAwa(store.raw['navigation.courseOverGroundTrue'], store.timestamps['navigation.courseOverGroundTrue'], now, windDataPolicy.headingMaxAgeMs);
       const cogFormatted = currentCog === null ? { str: '---°', unstable: false } : formatCompassDeg(cObj, currentCog);
       const validAwa = freshAwa(store.raw['environment.wind.angleApparent'], store.timestamps['environment.wind.angleApparent'], now, windDataPolicy.awaMaxAgeMs);
-      const awaFormatted = validAwa === null ? { str: '—', unstable: false } : formatRelativeDeg(awObj, validAwa);
-      const twaFormatted = currentTwa === null ? { str: '—', unstable: false } : formatRelativeDeg(twObj, currentTwa);
-      const twdFormatted = currentTwd === null ? { str: '—', unstable: false } : formatCompassDeg(twdObj, currentTwd);
+      const awaFormatted = validAwa === null ? { str: '---°', unstable: false } : formatRelativeDeg(awObj, validAwa);
+      const twaFormatted = currentTwa === null ? { str: '---°', unstable: false } : formatRelativeDeg(twObj, currentTwa);
+      const twdFormatted = currentTwd === null ? { str: '---°', unstable: false } : formatCompassDeg(twdObj, currentTwd);
 
       // SOG Color (cyan if VMG, drift color if SOG)
       let sogColor = '';
@@ -2141,22 +2097,17 @@ export function useDashboard() {
           : { text: nextStatusText, className: nextStatusClass }
       );
 
-      if (appViewRef.current === 'ais') {
-        const curHdgDeg = store.raw['navigation.headingTrue'] !== undefined
-          ? radToDeg(store.raw['navigation.headingTrue'])
-          : (store.raw['navigation.courseOverGroundTrue'] !== undefined ? radToDeg(store.raw['navigation.courseOverGroundTrue']) : 0);
-        const curCogDeg = store.raw['navigation.courseOverGroundTrue'] !== undefined
-          ? radToDeg(store.raw['navigation.courseOverGroundTrue'])
-          : curHdgDeg;
-        const nextHdg = Math.round((curHdgDeg + 360) % 360);
-        const nextCog = Math.round((curCogDeg + 360) % 360);
-        const nextSog = Math.round(sogKts * 10) / 10;
-        setOwnShipCourse(prev =>
-          prev.hdg === nextHdg && prev.cog === nextCog && prev.sog === nextSog
-            ? prev
-            : { hdg: nextHdg, cog: nextCog, sog: nextSog }
-        );
-      }
+      const navigation = resolveOwnShipNavigation(store.raw, store.timestamps, now, windDataPolicy);
+      const previousPosition = latestAisRef.current.pos;
+      const nextPosition: OwnShipPosition = navigation.position
+        ? {...navigation.position,valid:true,hasFix:true}
+        : {...previousPosition,valid:false};
+      latestAisRef.current.pos = nextPosition;
+      setOwnShipPosition(prev => prev.lat === nextPosition.lat && prev.lon === nextPosition.lon &&
+        prev.valid === nextPosition.valid && prev.hasFix === nextPosition.hasFix ? prev : nextPosition);
+      setOwnShipCourse(prev => prev.hdg === navigation.course.hdg && prev.cog === navigation.course.cog && prev.sog === navigation.course.sog
+        ? prev : navigation.course);
+
     };
 
     tick();

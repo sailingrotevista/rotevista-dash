@@ -32,7 +32,7 @@ export function restoreDashboardHistory(store, history) {
   for (const key of ['hdg','cog','twa','awa','twd']) {
     const source = history.rollingAngles?.[key];
     if (Array.isArray(source)) {
-      const points = source.filter(p => Number.isFinite(p.val) && Number.isFinite(p.time))
+      const points = source.filter(p => p && Number.isFinite(p.val) && Number.isFinite(p.time))
         .map(p => ({val:p.val,time:p.time,sin:Math.sin(p.val),cos:Math.cos(p.val)}));
       store.longBuf[key] = points;
       store.smoothBuf[key] = [...points];
@@ -40,7 +40,7 @@ export function restoreDashboardHistory(store, history) {
   }
   if (Array.isArray(history.twd)) {
     const byTime = new Map((store.longBuf.twd || []).map(p => [p.time, p]));
-    for (const p of history.twd) if (Number.isFinite(p.val) && Number.isFinite(p.time) && !byTime.has(p.time))
+    for (const p of history.twd) if (p && Number.isFinite(p.val) && Number.isFinite(p.time) && !byTime.has(p.time))
       byTime.set(p.time, {val:p.val,time:p.time,sin:Math.sin(p.val),cos:Math.cos(p.val)});
     store.longBuf.twd = [...byTime.values()].sort((a,b) => a.time-b.time);
   }

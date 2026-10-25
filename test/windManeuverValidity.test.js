@@ -9,7 +9,7 @@ test('maneuver predictions require movement and fresh wind/heading; COG expires 
  assert.deepEqual(v(raw,times,now,policy,1.5),{heading:true,cog:true});
  assert.deepEqual(v({...raw,[S]:0},times,now,policy,1.5),{heading:false,cog:false});
  assert.deepEqual(v(raw,{...times,[S]:5000},now,policy,1.5),{heading:false,cog:false});
- assert.deepEqual(v(raw,{...times,[A]:15000},now,policy,1.5),{heading:false,cog:false});
+ assert.deepEqual(v(raw,{...times,[A]:5000},now,policy,1.5),{heading:false,cog:false});
  assert.deepEqual(v(raw,{...times,[C]:5000},now,policy,1.5),{heading:true,cog:false});
  const noCompass={...raw};delete noCompass[H];
  assert.deepEqual(v(noCompass,times,now,policy,1.5),{heading:true,cog:true});

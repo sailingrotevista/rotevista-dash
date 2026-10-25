@@ -14,10 +14,10 @@ test('TWS fallback uses AWS without boat speed and expires with either input',as
  const {resolveTws}=await import('../src/utils/windValidity.mjs');
  const raw={[AWS]:4,[AWA]:0.5};const times={[AWS]:1000,[AWA]:1000};
  assert.ok(Math.abs(resolveTws(raw,times,1000,policy)-4)<1e-10);
- assert.equal(resolveTws(raw,times,16000,policy),null);
- assert.equal(resolveTws(raw,{...times,[AWS]:16000},16000,policy),null);
- assert.equal(resolveTws(raw,{...times,[AWA]:16000},16000,policy),null);
- assert.ok(Math.abs(resolveTws(raw,{[AWS]:16000,[AWA]:16000},16000,policy)-4)<1e-10);
+ assert.equal(resolveTws(raw,times,6000,policy),null);
+ assert.equal(resolveTws(raw,{...times,[AWS]:6000},6000,policy),null);
+ assert.equal(resolveTws(raw,{...times,[AWA]:6000},6000,policy),null);
+ assert.ok(Math.abs(resolveTws(raw,{[AWS]:6000,[AWA]:6000},6000,policy)-4)<1e-10);
 });
 test('native-fallback-native transition preserves received value and consistent m/s units',async()=>{
  const {resolveTws}=await import('../src/utils/windValidity.mjs');
@@ -37,9 +37,9 @@ test('server preserves native timestamp and rejects stale native history',()=>{
   assert.equal(writes.length,0);
   assert.equal(engine.getRawTimes()[TWS],now-6000);
   engine.processIncomingDelta(AWA,0,now);
-  engine.processIncomingDelta(AWS,4,now);
+  engine.processIncomingDelta(AWS,4,now);engine.sampleHistory();
   assert.ok(writes.some(p=>p.type==='tws'&&Math.abs(p.value-4*1.94384)<1e-10));
-  now+=1000;engine.processIncomingDelta(TWS,0,now);
+  now+=1000;engine.processIncomingDelta(TWS,0,now);engine.sampleHistory();
   assert.ok(writes.some(p=>p.type==='tws'&&p.value===0));
   assert.equal(engine.getRawTimes()[TWS],now);
  } finally {Date.now=original;}

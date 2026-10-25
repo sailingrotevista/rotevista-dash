@@ -1,13 +1,20 @@
 {
-  "awsMaxAgeMs": 15000,
-  "awaMaxAgeMs": 15000,
+  "awsMaxAgeMs": 5000,
+  "awaMaxAgeMs": 5000,
   "twsNativeMaxAgeMs": 5000,
   "twaNativeMaxAgeMs": 5000,
   "trueWindDirectionMinSpeedMps": 0.05,
   "twdNativeMaxAgeMs": 5000,
-  "headingMaxAgeMs": 15000,
-  "boatSpeedMaxAgeMs": 15000,
+  "headingMaxAgeMs": 5000,
+  "boatSpeedMaxAgeMs": 5000,
   "gustSmoothingMs": 2500,
-  "gustResetGapMs": 15000,
-  "depthMaxAgeMs": 15000
+  "gustResetGapMs": 5000,
+  "depthMaxAgeMs": 5000,
+  "historyGapMs": 5000,
+  "positionMaxAgeMs": 5000,
+  "twdPressureFilterRatio": 0.4,
+  "twdCalmThresholdKnots": 1.5,
+  "twdHistoryMinMinutes": 120,
+  "twsHistoryMinMinutes": 30,
+  "historyRetentionMarginMs": 60000
 }

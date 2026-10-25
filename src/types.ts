@@ -252,3 +252,16 @@ export interface HarborCluster {
   flags?: Record<string, number>;
 }
 
+
+export interface OwnShipPosition {
+  lat: number;
+  lon: number;
+  valid: boolean;
+  hasFix: boolean;
+}
+
+export interface OwnShipCourse {
+  hdg: number | null;
+  cog: number | null;
+  sog: number | null;
+}

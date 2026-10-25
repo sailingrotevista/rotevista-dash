@@ -115,8 +115,10 @@ class AisEngine {
         return this.topThreat;
     }
 
-    publishSharedAlerts(now = Date.now()) {
-        const state = this.sharedAlerts.update(this.lastNearbyVessels, this.lastOwnGps.lat !== null ? this.lastOwnGps : null, now);
+    publishSharedAlerts(now = Date.now(), evaluate = true) {
+        const state = evaluate
+            ? this.sharedAlerts.update(this.lastNearbyVessels, this.lastOwnGps.lat !== null ? this.lastOwnGps : null, now)
+            : this.sharedAlerts.snapshot(now);
         if (this.lastPublishedAlertRevision !== state.revision && typeof this.app.handleMessage === 'function') {
             this.lastPublishedAlertRevision = state.revision;
             this.app.handleMessage('rotevista-dash', {
