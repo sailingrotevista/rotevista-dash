@@ -214,3 +214,9 @@ Verifiche: [finestra temporale grafici](../test/graphViewport.test.js).
 - Nessun punto zero o campione di riempimento viene generato durante il silenzio.
 
 Verifiche: [interruzioni dello storico](../test/windHistoryGaps.test.js).
+
+## Recupero dopo sospensione del browser
+
+- Wind continua ad acquisire mentre si visualizza AIS. Dopo una sospensione o una disconnessione, il recupero dello storico completo segue i timestamp della sessione condivisa e gli eventi di ripresa della pagina.
+- Il ripristino include canali vuoti, interruzioni dei grafici, medie, storico TWD, radar e previsione. Svuotare i buffer di aggregazione incompleti e i filtri dei canali ripristinati per non mescolare dati precedenti alla pausa.
+- Vedere [recupero della sessione](shared-session-spec.md#recupero-completo-wind-dopo-una-pausa) e [test](../test/dashboardRecovery.test.js).

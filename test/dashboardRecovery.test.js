@@ -32,3 +32,36 @@ test('a resumed client recovers mode changes without replaying its former scenar
  assert.notEqual(resumed.generation,sleeping.generation);assert.equal(resumed.mode,'live');
  assert.equal(resumed.targets.some(t=>t.isSimulated),false);assert.equal(resumed.sharedAlerts.banner,null);
 });
+
+test('timestamp gap triggers history recovery even without focus events; normal polling does not',async()=>{
+ const {historyNeedsRecovery:r}=await import('../src/utils/dashboardRecovery.mjs');
+ const before={generation:'a',serverNow:10000};
+ assert.equal(r(null,before),true);
+ assert.equal(r(before,{generation:'a',serverNow:11000}),false);
+ assert.equal(r(before,{generation:'a',serverNow:15000}),false);
+ assert.equal(r(before,{generation:'a',serverNow:910000}),true);
+ assert.equal(r(before,{generation:'b',serverNow:11000}),true);
+});
+
+test('resume restores complete history including empty channels and gap metadata',async()=>{
+ const {recoverDashboardHistory:r}=await import('../src/utils/dashboardRecovery.mjs');
+ const {restoreDashboardHistory}=await import('../src/utils/dashboardMeasurements.mjs');
+ const frame={generation:'a',mode:'live'};
+ const store={histories:{stw:[{val:9,time:1}],sog:[],vmg:[],tws:[],aws:[],depth:[],twd:[]},longBuf:{twd:[]},smoothBuf:{},graphTempBuf:{stw:[{val:99,time:2}]},gustFilter:{stw:{val:99}},lastUpdates:{stw:2}};
+ const history={stw:[],depth:[{val:4,time:2000,gapBefore:true}],rollingAngles:{hdg:[]},twd:[]};
+ assert.equal(await r(frame,async()=>history,()=>frame,h=>restoreDashboardHistory(store,h)),true);
+ assert.deepEqual(store.histories.stw,[]);assert.equal(store.histories.depth[0].gapBefore,true);
+ assert.deepEqual(store.graphTempBuf.stw,[]);assert.deepEqual(store.longBuf.hdg,[]);
+});
+
+test('history arriving after a mode change cannot overwrite a newer session, even after returning to Live',async()=>{
+ const {recoverDashboardHistory:r}=await import('../src/utils/dashboardRecovery.mjs');
+ let finish;const pending=new Promise(resolve=>finish=resolve);let applied=0;
+ let current={generation:'a',mode:'live'};
+ const work=r({...current},()=>pending,()=>current,()=>applied++);
+ current={generation:'c',mode:'live'};finish({stw:[]});
+ assert.equal(await work,false);assert.equal(applied,0);
+ let loaded=false;
+ assert.equal(await r({generation:'b',mode:'simulation'},async()=>{loaded=true;return {};},()=>current,()=>applied++),false);
+ assert.equal(loaded,false);
+});

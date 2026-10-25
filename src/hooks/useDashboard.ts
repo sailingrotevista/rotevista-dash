@@ -36,7 +36,7 @@ import { BannerThreatSelector } from '../utils/aisPriority.mjs';
 import { proximityAcknowledgementExpired, acknowledgeCurrentBubble, nearestBubblePresence } from '../utils/proximityAcknowledgement.mjs';
 import { requestSharedAlertAction } from '../utils/sharedAlertRequest.mjs';
 import { resetDashboardMeasurements, restoreDashboardHistory } from '../utils/dashboardMeasurements.mjs';
-import { subscribeDashboardRecovery } from '../utils/dashboardRecovery.mjs';
+import { subscribeDashboardRecovery, historyNeedsRecovery, recoverDashboardHistory } from '../utils/dashboardRecovery.mjs';
 import { isAnchoredNavigationState } from '../utils/navigationState.mjs';
 
 interface SharedAlertSnapshot {
@@ -200,7 +200,7 @@ export function useDashboard() {
   const applyingSessionRef = useRef(false);
   const sessionConnectedRef = useRef(false);
   const sessionRawTimesRef = useRef<Record<string, {time: number; value: string}>>({});
-  const sessionFrameRef = useRef<{ generation: string; revision: number } | null>(null);
+  const sessionFrameRef = useRef<{ generation: string; revision: number; serverNow?: number } | null>(null);
   const [sharedAlerts, setSharedAlerts] = useState<SharedAlertSnapshot | null>(null);
   const sharedAlertsRef = useRef<SharedAlertSnapshot | null>(null);
   const sharedReadyDeadlineRef = useRef(0);
@@ -1018,6 +1018,9 @@ export function useDashboard() {
     let disposed = false;
     let busy = false;
     let resumePending = false;
+    let historyNeeded = true;
+    let historyBusy = false;
+    let historyAttemptAt = -Infinity;
     let controller: AbortController | null = null;
     const poll = async () => {
       if (disposed || busy) return;
@@ -1030,7 +1033,9 @@ export function useDashboard() {
         const frame = await response.json();
         if (disposed || resumePending || !frame?.generation || !['live','simulation','mixed'].includes(frame.mode)) return;
         const previous = sessionFrameRef.current;
-        if (previous?.generation === frame.generation && previous.revision >= frame.revision) return;
+        if (previous?.generation === frame.generation && previous.revision > frame.revision) return;
+        if (historyNeedsRecovery(previous, frame)) historyNeeded = true;
+        if (previous?.generation === frame.generation && previous.revision === frame.revision && !historyNeeded) return;
         const changed = (previous && previous.generation !== frame.generation) || (!previous && frame.mode === 'simulation');
         if (changed) {
           sharedAlertsRef.current = null;
@@ -1043,7 +1048,7 @@ export function useDashboard() {
           sessionRawTimesRef.current = {};
           setWindRadarSlots([]); setFutureForecast(null);
         }
-        sessionFrameRef.current = { generation: frame.generation, revision: frame.revision };
+        sessionFrameRef.current = { generation: frame.generation, revision: frame.revision, serverNow: frame.serverNow };
         if (['AUTO','SAIL','MOTOR'].includes(frame.propulsionMode)) {
           propulsionModeRef.current = frame.propulsionMode;
           setPropulsionModeState(frame.propulsionMode);
@@ -1069,19 +1074,23 @@ export function useDashboard() {
           processIncomingData('environment.harbor_clusters', frame.harborClusters || [], frame.serverNow);
           if (frame.sharedAlerts) receiveSharedAlerts(frame.sharedAlerts, true);
         } finally { applyingSessionRef.current = false; }
-        if (changed && frame.mode !== 'simulation') {
-          const generation = frame.generation;
-          void fetch('/rotevista-history', { cache: 'no-store' })
-            .then(result => result.ok ? result.json() : null)
-            .then(history => {
-              // A response requested before another mode change must not mix
-              // real histories into a later simulation, even after a round trip.
-              if (!history || disposed || sessionFrameRef.current?.generation !== generation ||
-                  sharedSessionModeRef.current === 'simulation') return;
-              setHistoriesState(restoreDashboardHistory(storeRef.current, history) as any);
-              if (Array.isArray(history.windRadarSlots)) setWindRadarSlots(history.windRadarSlots);
-              setFutureForecast(history.futureForecast || null);
-            }).catch(() => {});
+        if (frame.mode === 'simulation') historyNeeded = false;
+        if (historyNeeded && !historyBusy && Date.now() - historyAttemptAt >= 10000 && frame.mode !== 'simulation') {
+          historyBusy = true;
+          historyNeeded = false;
+          historyAttemptAt = Date.now();
+          void recoverDashboardHistory(frame, async () => {
+            const result = await fetch('/rotevista-history', { cache:'no-store', signal:AbortSignal.timeout(4000) });
+            if (!result.ok) throw new Error('History unavailable');
+            return result.json();
+          }, () => disposed ? null : {...sessionFrameRef.current, mode:sharedSessionModeRef.current}, (history: any) => {
+            setHistoriesState(restoreDashboardHistory(storeRef.current, history) as any);
+            historyInputTimesRef.current = {};
+            setWindRadarSlots(Array.isArray(history.windRadarSlots) ? history.windRadarSlots : []);
+            setFutureForecast(history.futureForecast || null);
+          }).then(applied => { if (!applied && !disposed) historyNeeded = true; })
+            .catch(() => { if (!disposed) historyNeeded = true; })
+            .finally(() => { historyBusy = false; });
         }
       } catch {
         if (!disposed && !resumePending) sessionConnectedRef.current = false;
@@ -1091,6 +1100,7 @@ export function useDashboard() {
       }
     };
     const unsubscribeRecovery = subscribeDashboardRecovery(document, window, () => {
+      historyNeeded = true;
       if (busy) { resumePending = true; controller?.abort(); }
       else void poll();
     });
@@ -1345,10 +1355,11 @@ export function useDashboard() {
 
         const fetchHistory = () => {
           // Recupera lo storico e i buffer rolling mantenuti in RAM dal server Signal K
-          fetch('/rotevista-history')
+          const requestedGeneration = sessionFrameRef.current?.generation;
+          fetch('/rotevista-history', {cache:'no-store'})
             .then(res => (res.ok ? res.json() : null))
             .then(data => {
-              if (sharedSessionModeRef.current === 'simulation') return;
+              if (isDisposed || sessionFrameRef.current?.generation !== requestedGeneration || sharedSessionModeRef.current === 'simulation') return;
               if (data && !storeRef.current.isSimulating && sharedSessionModeRef.current !== 'simulation') {
                 const store = storeRef.current;
                 let hasHistory = false;
@@ -1490,29 +1501,21 @@ export function useDashboard() {
       if (document.visibilityState === 'visible' && !isDisposed && !FORCE_SIMULATION) {
         fetchConfig();
         if (storeRef.current.hasEverConnectedToSignalK) {
-          fetch('/rotevista-history')
-            .then(res => (res.ok ? res.json() : null))
-            .then(data => {
-              if (data && !storeRef.current.isSimulating && sharedSessionModeRef.current !== 'simulation') {
-                const store = storeRef.current;
-                if (data.rollingAngles) {
-                  (['hdg', 'cog', 'twa', 'awa', 'twd'] as const).forEach(key => {
-                    const arr = data.rollingAngles[key];
-                    if (Array.isArray(arr) && arr.length > 0) {
-                      const mapped: AngleBufferItem[] = arr.map((item: any) => ({
-                        val: item.val,
-                        time: item.time,
-                        sin: Math.sin(item.val),
-                        cos: Math.cos(item.val),
-                      }));
-                      store.longBuf[key] = mapped;
-                      store.smoothBuf[key] = [...mapped];
-                    }
-                  });
-                }
-              }
-            })
-            .catch(() => {});
+          // Shared-session polling restores complete history after resume.
+          // Older servers without shared sessions retain the same full recovery.
+          if (!sharedSessionManagedRef.current) {
+            const generation = sessionFrameRef.current?.generation;
+            fetch('/rotevista-history', {cache:'no-store',signal:AbortSignal.timeout(4000)})
+              .then(res => res.ok ? res.json() : null)
+              .then(history => {
+                if (!history || isDisposed || sharedSessionManagedRef.current ||
+                    sessionFrameRef.current?.generation !== generation || sharedSessionModeRef.current === 'simulation') return;
+                setHistoriesState(restoreDashboardHistory(storeRef.current, history) as any);
+                historyInputTimesRef.current = {};
+                setWindRadarSlots(Array.isArray(history.windRadarSlots) ? history.windRadarSlots : []);
+                setFutureForecast(history.futureForecast || null);
+              }).catch(() => {});
+          }
 
           if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
             connectWs();

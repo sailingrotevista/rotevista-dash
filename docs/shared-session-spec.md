@@ -115,3 +115,12 @@ Le prove automatiche non sostituiscono la verifica su dispositivi reali con sosp
 - Tutti i dispositivi ricevono la scelta al successivo polling; nessun aggiornamento ottimistico o ripiego locale in caso di errore. I vecchi valori localStorage non sono utilizzati.
 - Stato esclusivamente in RAM, AUTO al riavvio. Cambiare live/simulation/mixed non cambia la selezione. Il dev possiede una sessione indipendente e non scrive sul Cerbo.
 - Per ora il nuovo stato controlla il suono di strambata; non cambia gli allarmi AIS o profondità del server.
+
+## Recupero completo Wind dopo una pausa
+
+- Il passaggio fra AIS e Wind mantiene acquisizione e aggregazione attive.
+- Il polling confronta `serverNow` dei frame elaborati: con più di 5 secondi senza aggiornamenti, richiede lo storico completo. Lo richiede anche al primo collegamento, al cambio generazione e su visibilità/focus/ritorno rete.
+- L'età del singolo sensore non forza download ripetuti: un sensore spento resta non disponibile.
+- In Live e Mixed recuperare grafici (inclusi array vuoti e interruzioni), medie angolari, storico lungo TWD, radar e previsione. Simulation non importa lo storico reale.
+- Richieste senza cache, timeout 4 secondi; una sola richiesta storico in corso e almeno 10 secondi fra tentativi. Su errore il recupero rimane pendente.
+- Applicare la risposta solo alla stessa generazione; risposte di sessioni precedenti non devono sovrascrivere quella attuale.
