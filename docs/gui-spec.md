@@ -130,3 +130,7 @@ Verifiche: [navigazione della propria barca](../test/ownShipNavigation.test.js).
 ## Età AIS in ore
 
 - Per età da un'ora in su, convertire minuti in ore dividendo per 60: 3600 secondi → `1H AGO`, 7200 → `2H AGO`. Condividere il formato fra scheda target, etichette e lista.
+
+## Copia MMSI
+
+- Il pulsante MMSI copia solo il numero, anche su HTTP locale senza Clipboard API: usare una selezione temporanea come ripiego. Mostrare la conferma solo dopo una copia riuscita e ripristinare il focus.

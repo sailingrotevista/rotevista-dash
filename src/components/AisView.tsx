@@ -1,3 +1,4 @@
+import { copyText } from '../utils/clipboard.mjs';
 import { formatAge } from '../utils/aisDetailData.mjs';
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import L from 'leaflet';
@@ -1851,10 +1852,9 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                 <button
                   type="button"
                   className="mmsi-pill"
-                  onClick={() => {
+                  onClick={async () => {
                     const mmsi = selectedTarget.id.split(':').pop() || '';
-                    if (navigator.clipboard) {
-                      navigator.clipboard.writeText(mmsi);
+                    if (await copyText(mmsi)) {
                       setCopiedMmsi(true);
                       setTimeout(() => setCopiedMmsi(false), 2000);
                     }
