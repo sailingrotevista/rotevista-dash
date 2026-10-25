@@ -1,7 +1,9 @@
 // Shared scenario implementation. Each environment owns an independent evaluator.
 (function(root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory;
-  else root.RotevistaScenario = factory;
+  // Vite can wrap this file as CommonJS even inside the browser bundle.
+  // Expose the factory in both cases, as collisionPipeline.js does.
+  if (root) root.RotevistaScenario = factory;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function createScenarioTools(pipeline, MARINA_DI_RAGUSA_SIM_DATA) {
 const degToRad = degrees => degrees * Math.PI / 180;
 
