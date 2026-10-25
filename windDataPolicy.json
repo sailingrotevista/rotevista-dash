@@ -1,0 +1,13 @@
+{
+  "awsMaxAgeMs": 15000,
+  "awaMaxAgeMs": 15000,
+  "twsNativeMaxAgeMs": 5000,
+  "twaNativeMaxAgeMs": 5000,
+  "trueWindDirectionMinSpeedMps": 0.05,
+  "twdNativeMaxAgeMs": 5000,
+  "headingMaxAgeMs": 15000,
+  "boatSpeedMaxAgeMs": 15000,
+  "gustSmoothingMs": 2500,
+  "gustResetGapMs": 15000,
+  "depthMaxAgeMs": 15000
+}

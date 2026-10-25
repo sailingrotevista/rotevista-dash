@@ -102,6 +102,30 @@ export interface AisTrailPoint {
   t?: number;
 }
 
+export interface AisReceivedValue<T> {
+  value: T;
+  timestamp: number | null;
+  source: string | null;
+}
+export interface AisReceivedData {
+  name: AisReceivedValue<string> | null;
+  position: AisReceivedValue<{lat: number; lon: number}> | null;
+  sog: AisReceivedValue<number> | null;
+  cog: AisReceivedValue<number> | null;
+  heading: AisReceivedValue<number> | null;
+  navigationState: AisReceivedValue<string> | null;
+  aisClass: AisReceivedValue<string> | null;
+  shipType: AisReceivedValue<{id: number | null; name: string | null}> | null;
+  length: AisReceivedValue<number> | null;
+  beam: AisReceivedValue<number> | null;
+  draft: AisReceivedValue<{metres: number; basis: string}> | null;
+  fromBow: AisReceivedValue<number> | null;
+  fromCenter: AisReceivedValue<number> | null;
+  callsign: AisReceivedValue<string> | null;
+  destination: AisReceivedValue<string> | null;
+  eta: AisReceivedValue<string> | null;
+}
+
 export interface AisTarget {
   id: string;
   isSimulated?: boolean;
@@ -110,6 +134,7 @@ export interface AisTarget {
   withinSafeBubble?: boolean;
   areaKind?: 'PORT' | 'ANCHORAGE' | 'PROVISIONAL';
   reportedNavigationState?: string;
+  reportedAis?: AisReceivedData;
   proximityAcknowledged?: boolean;
   alertKind?: 'PROXIMITY';
   currentHullClearanceMeters?: number;
@@ -141,6 +166,15 @@ export interface AisTarget {
     radiusMeters: number | null;
     dispersionMeters: number | null;
     returnCount: number;
+    windMooring?: {
+      available: boolean;
+      supported: boolean;
+      strong: boolean;
+      sampleCount: number;
+      observedSpanSeconds?: number;
+      headingSpreadDegrees?: number;
+      windShiftDegrees?: number;
+    };
     excludedSamples: number;
     lastFixTime: number;
   } | null;

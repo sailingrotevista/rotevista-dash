@@ -1,3 +1,6 @@
+import { gybeSoundAllowed } from '../utils/gybeSound.mjs';
+import windDataPolicy from '../../windDataPolicy.json';
+import { freshAws, freshAwa, resolveTws, resolveTwa, resolveTwd, resolveWindBoatSpeed, resolveHeading, resolveVmg, freshBoatSpeed, freshDepth, resolveLeeway, maneuverValidity } from '../utils/windValidity.mjs';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   AppConfig,
@@ -127,21 +130,40 @@ export function useDashboard() {
   isNightModeRef.current = isNightMode;
 
   const [propulsionMode, setPropulsionModeState] = useState<PropulsionMode>(
-    () => savedState?.propulsionMode || 'AUTO'
+    () => 'AUTO'
   );
   const propulsionModeRef = useRef<PropulsionMode>(propulsionMode);
   useEffect(() => {
     propulsionModeRef.current = propulsionMode;
   }, [propulsionMode]);
 
-  const setPropulsionMode = useCallback((mode: PropulsionMode) => {
-    setPropulsionModeState(mode);
+  const propulsionPendingRef = useRef(false);
+  const setPropulsionMode = useCallback(async (mode: PropulsionMode) => {
+    if (propulsionPendingRef.current) return false;
+    propulsionPendingRef.current = true;
     try {
-      const saved = localStorage.getItem('rotevista_dash_state');
-      const state = saved ? JSON.parse(saved) : {};
-      state.propulsionMode = mode;
-      localStorage.setItem('rotevista_dash_state', JSON.stringify(state));
-    } catch (e) {}
+      const access = await fetch('/rotevista-alert-session', {cache:'no-store', signal:AbortSignal.timeout(4000)});
+      if (!access.ok) throw new Error('Propulsion controls unavailable.');
+      const session = await access.json();
+      const response = await fetch('/rotevista-propulsion-mode', {
+        method:'POST', headers:{'Content-Type':'application/json','X-Rotevista-Alert-Key':session.token},
+        body:JSON.stringify({mode,sessionId:session.sessionId}), signal:AbortSignal.timeout(4000),
+      });
+      if (!response.ok) throw new Error('Could not change propulsion mode. Please try again.');
+      // Apply only an authoritative frame; reject older in-flight polling responses.
+      const frame = await response.json();
+      const previous = sessionFrameRef.current;
+      if (!previous || (previous.generation === frame.generation && previous.revision < frame.revision)) {
+        propulsionModeRef.current = frame.propulsionMode;
+        setPropulsionModeState(frame.propulsionMode);
+        // Let the next poll apply the complete frame (including the same revision).
+        if (previous) sessionFrameRef.current = {...previous, revision:frame.revision-1};
+      }
+      return true;
+    } catch (error) {
+      setAlertActionError(error instanceof Error ? error.message : 'Could not change propulsion mode.');
+      return false;
+    } finally { propulsionPendingRef.current = false; }
   }, []);
   const [isFocusActive, setIsFocusActive] = useState<boolean>(false);
   const [focusedBox, setFocusedBox] = useState<BoxType | null>(null);
@@ -365,8 +387,8 @@ export function useDashboard() {
 
   // Display values for UI
   const [displayValues, setDisplayValues] = useState({
-    stw: '0.0',
-    sog: '0.0',
+    stw: '--.-',
+    sog: '--.-',
     sogColor: '',
     hdg: '000°',
     hdgUnstable: false,
@@ -374,9 +396,9 @@ export function useDashboard() {
     cogUnstable: false,
     depth: '--.-',
     depthAlarmClass: '',
-    tws: '0.0',
+    tws: '--.-',
     twsColor: '',
-    awsSvg: '0.0',
+    awsSvg: '--.-',
     twaAvg: '---°',
     twaUnstable: false,
     awaAvg: '---°',
@@ -388,7 +410,7 @@ export function useDashboard() {
     tackCog: '---°',
     tackCogUnstable: false,
     tackLabel: 'TACK',
-    leewayDeg: 0,
+    leewayDeg: null as number | null,
     trackRotDeg: 0,
     awaPointerDeg: 0,
     twaPointerDeg: 0,
@@ -453,6 +475,7 @@ export function useDashboard() {
       aws: [] as HistoryPoint[],
       twd: [] as HistoryPoint[],
     },
+    gustFilter: {} as Partial<Record<'aws' | 'tws', { val: number; time: number }>>,
     graphTempBuf: {
       stw: [] as Array<{ val: number; time: number }>,
       sog: [] as Array<{ val: number; time: number }>,
@@ -507,15 +530,20 @@ export function useDashboard() {
     let finalValue = value;
     if (tempBuf.length > 0) {
       if (type === 'tws' || type === 'aws') {
-        const tauMs = 2500;
-        let ema = tempBuf[0].val;
-        let maxSustained = ema;
-        for (let i = 1; i < tempBuf.length; i++) {
-          const dt = Math.max(1, tempBuf[i].time - tempBuf[i - 1].time);
-          const alpha = 1 - Math.exp(-dt / tauMs);
-          ema = tempBuf[i].val * alpha + ema * (1 - alpha);
-          if (isFinite(ema) && ema > maxSustained) maxSustained = ema;
+        let state = store.gustFilter[type];
+        let maxSustained = -Infinity;
+        for (const point of tempBuf) {
+          const dt = state ? point.time - state.time : 0;
+          if (!state || dt < 0 || dt >= windDataPolicy.gustResetGapMs) {
+            state = { val: point.val, time: point.time };
+            maxSustained = point.val;
+          } else {
+            const alpha = 1 - Math.exp(-dt / windDataPolicy.gustSmoothingMs);
+            state = { val: state.val + alpha * (point.val - state.val), time: point.time };
+          }
+          maxSustained = Math.max(maxSustained, state.val);
         }
+        store.gustFilter[type] = state;
         finalValue = maxSustained;
       } else if (type === 'depth') {
         let minVal = Infinity;
@@ -561,6 +589,83 @@ export function useDashboard() {
       if (path.startsWith('environment.ais_') || path === 'environment.harbor_clusters') return;
       if (sharedSessionModeRef.current === 'simulation' && (path.startsWith('navigation.') || path.startsWith('environment.wind.') || path.startsWith('environment.depth.'))) return;
     }
+    if (path === 'environment.depth.belowTransducer') {
+      if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
+      if (val === null) {
+        delete storeRef.current.raw[path];
+        storeRef.current.timestamps[path] = Number.isFinite(timeMs) ? Math.min(Date.now(), timeMs!) : Date.now();
+        return;
+      }
+      if (typeof val !== 'number' || !Number.isFinite(val) || val < -2 || val > 500) return;
+    }
+    if (path === 'navigation.speedThroughWater' || path === 'navigation.speedOverGround') {
+      if (val === null) {
+        delete storeRef.current.raw[path];
+        delete storeRef.current.timestamps[path];
+        return;
+      }
+      if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 25.72) return;
+      if (Number.isFinite(timeMs) && timeMs! <= (storeRef.current.timestamps[path] ?? -Infinity)) return;
+    }
+    if (['navigation.headingTrue', 'navigation.headingMagnetic', 'navigation.courseOverGroundTrue'].includes(path)) {
+      if (val === null) {
+        delete storeRef.current.raw[path];
+        delete storeRef.current.timestamps[path];
+        return;
+      }
+      if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
+      if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
+    }
+    if (path === 'environment.wind.speedTrue') {
+      if (val === null) {
+        delete storeRef.current.raw[path];
+        delete storeRef.current.timestamps[path];
+        return;
+      }
+      if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 51.44) return;
+      if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
+    }
+    if (path === 'environment.wind.directionTrue') {
+      if (val === null) {
+        delete storeRef.current.raw[path];
+        delete storeRef.current.timestamps[path];
+        // Preserve averages: a valid reconstructed TWD may still be available.
+        return;
+      }
+      if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
+      if (Number.isFinite(timeMs) && timeMs! <= (storeRef.current.timestamps[path] ?? -Infinity)) return;
+    }
+    if (path === 'environment.wind.angleTrueWater') {
+      if (val === null) {
+        delete storeRef.current.raw[path];
+        delete storeRef.current.timestamps[path];
+        storeRef.current.smoothBuf.twa = [];
+        storeRef.current.longBuf.twa = [];
+        return;
+      }
+      if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
+      if (Number.isFinite(timeMs) && timeMs! <= (storeRef.current.timestamps[path] ?? -Infinity)) return;
+    }
+    if (path === 'environment.wind.angleApparent') {
+      if (val === null) {
+        delete storeRef.current.raw[path];
+        delete storeRef.current.timestamps[path];
+        storeRef.current.smoothBuf.awa = [];
+        storeRef.current.longBuf.awa = [];
+        return;
+      }
+      if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
+      if (Number.isFinite(timeMs) && timeMs! <= (storeRef.current.timestamps[path] ?? -Infinity)) return;
+    }
+    if (path === 'environment.wind.speedApparent') {
+      if (val === null) {
+        delete storeRef.current.raw[path];
+        delete storeRef.current.timestamps[path];
+        return;
+      }
+      if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 51.44) return;
+      if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
+    }
     if ((val === null && path !== 'environment.ais_top_threat' && path !== 'navigation.state') || val === undefined || (typeof val === 'number' && isNaN(val))) return;
 
     if ((path === 'environment.wind.speedApparent' || path === 'environment.wind.speedTrue') && val > 51.44) return;
@@ -568,64 +673,48 @@ export function useDashboard() {
     if (path === 'environment.depth.belowTransducer' && (val < -2.0 || val > 500)) return;
 
     const store = storeRef.current;
-    const now = timeMs || Date.now();
+    const now = Number.isFinite(timeMs) ? timeMs! : Date.now();
     const localNow = Date.now();
 
     const syntheticUpdate = path === 'simulation.ais_targets';
     if (!syntheticUpdate) {
-      store.timestamps[path] = applyingSessionRef.current ? Math.min(localNow, now) : localNow;
+      store.timestamps[path] = applyingSessionRef.current || path === 'environment.wind.speedApparent' || path === 'environment.wind.angleApparent' || path === 'environment.wind.speedTrue' || path === 'environment.wind.angleTrueWater' || path === 'environment.wind.directionTrue' || path === 'navigation.headingTrue' || path === 'navigation.speedThroughWater' || path === 'navigation.speedOverGround' || path === 'navigation.headingMagnetic' || path === 'navigation.courseOverGroundTrue' || path === 'environment.depth.belowTransducer' ? Math.min(localNow, now) : localNow;
       store.raw[path] = val;
       store.lastMessageReceivedTime = localNow;
     }
 
     const historyMinutes = configRef.current.graphs.historyMinutes;
 
-    if (path === 'environment.wind.directionTrue') {
-      const directionVal = typeof val === 'object' && val.val !== undefined ? val.val : val;
-      safePush(store.smoothBuf.twd, directionVal, now, true, historyMinutes);
-      safePush(store.longBuf.twd, directionVal, now, true, historyMinutes);
-      // Also push to twd history for radar (throttled to 10s buckets)
-      const lastTwdPt = store.histories.twd[store.histories.twd.length - 1];
-      if (!lastTwdPt || now - lastTwdPt.time >= 10000) {
-        store.histories.twd.push({ val: directionVal, time: now });
-        while (store.histories.twd.length > 0 && now - store.histories.twd[0].time > 120 * 60000) {
-          store.histories.twd.shift();
-        }
-      }
+    if (path === 'environment.wind.angleTrueWater' && freshAwa(val, now, localNow, windDataPolicy.twaNativeMaxAgeMs) !== null) {
+      safePush(store.smoothBuf.twa, val, now, true, historyMinutes);
+      safePush(store.longBuf.twa, val, now, true, historyMinutes);
     }
 
-    if (path === 'navigation.headingTrue') {
-      store.timestamps['navigation.headingTrueNative'] = now;
-      safePush(store.smoothBuf.hdg, val, now, false, historyMinutes);
-      safePush(store.longBuf.hdg, val, now, false, historyMinutes);
-    } else if (path === 'navigation.headingMagnetic') {
-      const hasNativeTrueHdg = store.timestamps['navigation.headingTrueNative'] && (now - store.timestamps['navigation.headingTrueNative'] < 5000);
-      if (!hasNativeTrueHdg) {
-        const variation = store.raw['navigation.magneticVariation'] || 0;
-        const calculatedTrueHdg = (val + variation + 2 * Math.PI) % (2 * Math.PI);
-        store.raw['navigation.headingTrue'] = calculatedTrueHdg;
-        store.timestamps['navigation.headingTrue'] = localNow;
-        safePush(store.smoothBuf.hdg, calculatedTrueHdg, now, false, historyMinutes);
-        safePush(store.longBuf.hdg, calculatedTrueHdg, now, false, historyMinutes);
-      }
+    // AWA samples come only from received AWA, independently of true-wind computation.
+    if (path === 'environment.wind.angleApparent' && freshAwa(val, now, localNow, windDataPolicy.awaMaxAgeMs) !== null) {
+      safePush(store.smoothBuf.awa, val, now, true, historyMinutes);
+      safePush(store.longBuf.awa, val, now, true, historyMinutes);
     }
 
+
+    if (['navigation.headingTrue', 'navigation.headingMagnetic', 'navigation.courseOverGroundTrue'].includes(path)) {
+      const heading = resolveHeading(store.raw, store.timestamps, localNow, windDataPolicy);
+      if (heading !== null) {
+        safePush(store.smoothBuf.hdg, heading, now, false, historyMinutes);
+        safePush(store.longBuf.hdg, heading, now, false, historyMinutes);
+      }
+    }
     if (path === 'navigation.courseOverGroundTrue') {
       safePush(store.smoothBuf.cog, val, now, false, historyMinutes);
       safePush(store.longBuf.cog, val, now, false, historyMinutes);
-
-      const hasCompass = store.raw['navigation.headingTrue'] !== undefined || store.raw['navigation.headingMagnetic'] !== undefined;
-      const sog = store.raw['navigation.speedOverGround'] || 0;
-      if (!hasCompass && sog > 0.77) {
-        store.raw['navigation.headingTrue'] = val;
-        store.timestamps['navigation.headingTrue'] = localNow;
-        safePush(store.smoothBuf.hdg, val, now, false, historyMinutes);
-        safePush(store.longBuf.hdg, val, now, false, historyMinutes);
-      }
     }
 
     // Compute true wind if necessary
     const twPaths = [
+      'environment.wind.directionTrue',
+      'navigation.position',
+      'environment.wind.angleTrueWater',
+      'navigation.headingMagnetic',
       'environment.wind.speedApparent',
       'environment.wind.angleApparent',
       'navigation.speedThroughWater',
@@ -636,54 +725,25 @@ export function useDashboard() {
 
     if (twPaths.includes(path)) {
       if (now - store.lastTWCompute > 100) {
-        const aws = store.raw['environment.wind.speedApparent'];
-        const awa = store.raw['environment.wind.angleApparent'];
-        const stw = store.raw['navigation.speedThroughWater'];
-        const sog = store.raw['navigation.speedOverGround'] || 0;
-        const hdg = store.raw['navigation.headingTrue'];
+        const aws = freshAws(store.raw['environment.wind.speedApparent'], store.timestamps['environment.wind.speedApparent'], localNow, windDataPolicy.awsMaxAgeMs);
+        const awa = freshAwa(store.raw['environment.wind.angleApparent'], store.timestamps['environment.wind.angleApparent'], localNow, windDataPolicy.awaMaxAgeMs);
 
-        if (aws !== undefined && awa !== undefined) {
-          const hasFreshStw = store.timestamps['navigation.speedThroughWater'] && (now - store.timestamps['navigation.speedThroughWater'] < 15000);
-          let speedRef = sog > 0.77 && (stw || 0) < 0.25 ? sog : hasFreshStw && stw !== undefined ? stw : sog;
-
-          const hasNativeTws = store.timestamps['environment.wind.speedTrue'] && (Date.now() - store.timestamps['environment.wind.speedTrue'] < 5000);
-          let tws_water = 0;
-          if (hasNativeTws) {
-            tws_water = store.raw['environment.wind.speedTrue'] ? msToKts(store.raw['environment.wind.speedTrue']) : 0;
-          } else {
-            tws_water = Math.sqrt(aws * aws + speedRef * speedRef - 2 * aws * speedRef * Math.cos(awa));
-            store.raw['environment.wind.speedTrue'] = tws_water;
-          }
-
-          let twa = 0;
-          const hasNativeTwa = store.timestamps['environment.wind.angleTrueWater'] && (Date.now() - store.timestamps['environment.wind.angleTrueWater'] < 5000);
-          if (hasNativeTwa && store.raw['environment.wind.angleTrueWater'] !== undefined) {
-            twa = store.raw['environment.wind.angleTrueWater'];
-          } else if (tws_water > 0.05) {
-            twa = Math.atan2(aws * Math.sin(awa), aws * Math.cos(awa) - speedRef);
-            store.raw['environment.wind.angleTrueWater'] = twa;
-          }
-
-          if (tws_water > 0.05 || hasNativeTwa) {
+        if (aws !== null && awa !== null) {
+          const twa = resolveTwa(store.raw, store.timestamps, localNow, windDataPolicy);
+          const hasNativeTwa = freshAwa(store.raw['environment.wind.angleTrueWater'], store.timestamps['environment.wind.angleTrueWater'], localNow, windDataPolicy.twaNativeMaxAgeMs) !== null;
+          if (twa !== null && !hasNativeTwa) {
             safePush(store.smoothBuf.twa, twa, now, true, historyMinutes);
             safePush(store.longBuf.twa, twa, now, true, historyMinutes);
-            if (awa !== undefined) {
-              safePush(store.smoothBuf.awa, awa, now, true, historyMinutes);
-              safePush(store.longBuf.awa, awa, now, true, historyMinutes);
-            }
           }
 
-          const hasNativeTwd = store.timestamps['environment.wind.directionTrue'] && (Date.now() - store.timestamps['environment.wind.directionTrue'] < 5000);
-          if (!hasNativeTwd && tws_water > 0.05 && hdg !== undefined) {
-            const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
-            store.raw['environment.wind.directionTrue'] = twd;
-            safePush(store.smoothBuf.twd, twd, now, true, historyMinutes);
-            safePush(store.longBuf.twd, twd, now, true, historyMinutes);
-            const lastTwdPt = store.histories.twd[store.histories.twd.length - 1];
-            if (!lastTwdPt || now - lastTwdPt.time >= 10000) {
-              store.histories.twd.push({ val: twd, time: now });
-            }
-          }
+        }
+        const twd = resolveTwd(store.raw, store.timestamps, localNow, windDataPolicy);
+        if (twd !== null) {
+          safePush(store.smoothBuf.twd, twd, now, true, historyMinutes);
+          safePush(store.longBuf.twd, twd, now, true, historyMinutes);
+          const lastTwdPt = store.histories.twd[store.histories.twd.length - 1];
+          if (!lastTwdPt || now - lastTwdPt.time >= 10000) store.histories.twd.push({ val: twd, time: now });
+          while (store.histories.twd.length && now - store.histories.twd[0].time > 120 * 60000) store.histories.twd.shift();
         }
         store.lastTWCompute = now;
       }
@@ -977,6 +1037,10 @@ export function useDashboard() {
           setWindRadarSlots([]); setFutureForecast(null);
         }
         sessionFrameRef.current = { generation: frame.generation, revision: frame.revision };
+        if (['AUTO','SAIL','MOTOR'].includes(frame.propulsionMode)) {
+          propulsionModeRef.current = frame.propulsionMode;
+          setPropulsionModeState(frame.propulsionMode);
+        }
         sharedSessionManagedRef.current = true;
         sharedSessionModeRef.current = frame.mode;
         sessionConnectedRef.current = true;
@@ -988,7 +1052,8 @@ export function useDashboard() {
             const sourceTime = frame.rawTimes?.[path];
             const signature = JSON.stringify(value);
             const previousValue = sessionRawTimesRef.current[path];
-            if (previousValue && (Number.isFinite(sourceTime) ? sourceTime <= previousValue.time : signature === previousValue.value)) continue;
+            const depthReset = path === 'environment.depth.belowTransducer' && value === null && signature !== previousValue?.value;
+            if (previousValue && (Number.isFinite(sourceTime) ? sourceTime < previousValue.time || (sourceTime === previousValue.time && !depthReset) : signature === previousValue.value)) continue;
             sessionRawTimesRef.current[path] = {time: Number.isFinite(sourceTime) ? sourceTime : frame.serverNow, value: signature};
             const observedAt = Number.isFinite(sourceTime) ? Date.now() - Math.max(0, frame.serverNow - sourceTime) : Date.now();
             processIncomingData(path, value, observedAt);
@@ -1510,14 +1575,16 @@ export function useDashboard() {
       const store = storeRef.current;
       const now = Date.now();
 
-      const stwKts = msToKts(store.raw['navigation.speedThroughWater'] || 0);
-      const sogKts = msToKts(store.raw['navigation.speedOverGround'] || 0);
+      const validStw = freshBoatSpeed(store.raw['navigation.speedThroughWater'], store.timestamps['navigation.speedThroughWater'], now, windDataPolicy.boatSpeedMaxAgeMs);
+      const stwKts = validStw === null ? 0 : msToKts(validStw);
+      const validSog = freshBoatSpeed(store.raw['navigation.speedOverGround'], store.timestamps['navigation.speedOverGround'], now, windDataPolicy.boatSpeedMaxAgeMs);
+      const sogKts = validSog === null ? 0 : msToKts(validSog);
       const isNav = stwKts > config.averaging.minSpeed || sogKts > config.averaging.minSpeed;
 
       // Depth Alarm
-      const rawDepth = store.raw['environment.depth.belowTransducer'];
+      const rawDepth = freshDepth(store.raw['environment.depth.belowTransducer'], store.timestamps['environment.depth.belowTransducer'], now, windDataPolicy.depthMaxAgeMs);
       let depthAlarm = '';
-      if (rawDepth !== undefined) {
+      if (rawDepth !== null) {
         manageHistory('depth', rawDepth);
         if (rawDepth < config.alarms.depthDanger) {
           depthAlarm = 'alarm-danger blink-alarm';
@@ -1527,37 +1594,41 @@ export function useDashboard() {
         }
       }
 
+      const currentVmg = resolveVmg(store.raw, store.timestamps, now, windDataPolicy);
+      const currentHeading = resolveHeading(store.raw, store.timestamps, now, windDataPolicy);
+      const currentTwd = resolveTwd(store.raw, store.timestamps, now, windDataPolicy);
+      const currentTwa = resolveTwa(store.raw, store.timestamps, now, windDataPolicy);
+
       // STW & SOG / VMG histories
-      if (store.raw['navigation.speedThroughWater'] !== undefined) {
+      if (validStw !== null) {
         manageHistory('stw', stwKts);
       }
-      if (store.raw['navigation.speedOverGround'] !== undefined) {
+      if (validSog !== null) {
         manageHistory('sog', sogKts);
-        const hasFreshStw = store.timestamps['navigation.speedThroughWater'] && (now - store.timestamps['navigation.speedThroughWater'] < 15000);
-        const speedRefKts = hasFreshStw && !(sogKts > 1.5 && stwKts < 0.5) ? stwKts : sogKts;
-        const vmgVal = Math.abs(speedRefKts * Math.cos(store.raw['environment.wind.angleTrueWater'] || 0));
-        manageHistory('vmg', vmgVal);
+
       }
 
+      if (currentVmg !== null) manageHistory('vmg', msToKts(currentVmg));
+
       // TWS & AWS histories
-      const rawTws = store.raw['environment.wind.speedTrue'];
-      const rawAws = store.raw['environment.wind.speedApparent'];
-      const twsVal = rawTws !== undefined && rawTws !== null ? msToKts(rawTws) : 0;
-      const awsVal = rawAws !== undefined && rawAws !== null ? msToKts(rawAws) : 0;
-      if (rawTws !== undefined) manageHistory('tws', twsVal);
-      if (rawAws !== undefined) manageHistory('aws', awsVal);
+      const rawTws = resolveTws(store.raw, store.timestamps, now, windDataPolicy);
+      const rawAws = freshAws(store.raw['environment.wind.speedApparent'], store.timestamps['environment.wind.speedApparent'], now, windDataPolicy.awsMaxAgeMs);
+      const twsVal = rawTws !== null ? msToKts(rawTws) : null;
+      const awsVal = rawAws !== null ? msToKts(rawAws) : null;
+      if (twsVal !== null) manageHistory('tws', twsVal);
+      if (awsVal !== null) manageHistory('aws', awsVal);
 
       // Leeway & Track Pointer calculation
       let smoothedLeeway = store.smoothedLeeway;
       let curTrackRot = store.curTrackRot;
-      if (store.raw['navigation.courseOverGroundTrue'] !== undefined && store.raw['navigation.headingTrue'] !== undefined) {
-        const driftDeg = radToDeg(
-          ((store.raw['navigation.courseOverGroundTrue'] - store.raw['navigation.headingTrue'] + Math.PI * 3) % (2 * Math.PI)) - Math.PI
-        );
-        smoothedLeeway = sogKts < config.averaging.minSpeed ? 0 : smoothedLeeway * 0.9 + driftDeg * 0.1;
+      const currentLeeway = resolveLeeway(store.raw, store.timestamps, now, windDataPolicy, config.averaging.minSpeed);
+      if (currentLeeway !== null) {
+        smoothedLeeway = sogKts < config.averaging.minSpeed ? 0 : smoothedLeeway * 0.9 + currentLeeway * 0.1;
         curTrackRot = getShortestRotation(curTrackRot, smoothedLeeway);
         store.smoothedLeeway = smoothedLeeway;
         store.curTrackRot = curTrackRot;
+      } else {
+        store.smoothedLeeway = 0;
       }
 
       // Analog Pointers Rotations
@@ -1570,16 +1641,16 @@ export function useDashboard() {
         awaPointerDeg = getShortestRotation(awaPointerDeg, radToDeg(smAwa.val));
         store.curAwaRot = awaPointerDeg;
       }
-      if (smTwa) {
-        twaPointerDeg = getShortestRotation(twaPointerDeg, radToDeg(smTwa.val));
+      if (currentTwa !== null) {
+        twaPointerDeg = getShortestRotation(twaPointerDeg, radToDeg(smTwa ? smTwa.val : currentTwa));
         store.curTwaRot = twaPointerDeg;
       }
 
       // Mini-Compass rotations
       const smHdgIcons = getCircularAverageFromBuffer(store.longBuf.hdg, config.averaging.longWindow * 2, false, now);
       const smTwdIcons = getCircularAverageFromBuffer(store.longBuf.twd, config.averaging.longWindow, false, now);
-      const twdAngleRad = smTwdIcons ? smTwdIcons.val : store.raw['environment.wind.directionTrue'];
-      const hdgAngleRad = smHdgIcons ? smHdgIcons.val : store.raw['navigation.headingTrue'];
+      const twdAngleRad = currentTwd === null ? undefined : smTwdIcons ? smTwdIcons.val : currentTwd;
+      const hdgAngleRad = currentHeading === null ? undefined : smHdgIcons ? smHdgIcons.val : currentHeading;
 
       let windCompassRotDeg = store.curWindCompassRot;
       let boatCompassRotDeg = store.curBoatCompassRot;
@@ -1593,12 +1664,16 @@ export function useDashboard() {
       }
 
       // Wind Trend & Gybe Alarm state machine
-      const instTwaRad = store.raw['environment.wind.angleTrueWater'];
+      const instTwaRad = currentTwa;
       let smoothedTwaDeg: number | null = null;
       let tacticCw = { active: false, color: '#bbb', gybing: false };
       let tacticCcw = { active: false, color: '#bbb', gybing: false };
 
-      if (instTwaRad !== undefined) {
+      if (instTwaRad === null) {
+        store.firstEmaRun = true;
+        store.lastGybeSide = null;
+      }
+      if (instTwaRad !== null) {
         const dynamicAlpha = Math.max(0.05, 1.1 - config.averaging.stabilityThreshold);
         const curSin = Math.sin(instTwaRad);
         const curCos = Math.cos(instTwaRad);
@@ -1631,8 +1706,7 @@ export function useDashboard() {
               store.lastGybeSide = currentTack;
             } else if (store.lastGybeSide !== currentTack) {
               store.lastGybeSide = currentTack;
-              const isMotoringDownwind = absTwaDeg > 135 && sogKts > twsVal * 0.75;
-              const isGybeDangerous = twsVal > 7.0 && sogKts > 1.0 && !isMotoringDownwind;
+              const isGybeDangerous = gybeSoundAllowed(propulsionModeRef.current, twsVal, sogKts, absTwaDeg);
               if (isGybeDangerous && now - store.lastGybeAlarmTime > 60000) {
                 store.lastGybeAlarmTime = now;
                 playGybeAlarm();
@@ -1647,7 +1721,7 @@ export function useDashboard() {
       // Tactical trend dots (lifts / headers)
       const twaNow = getCircularAverageFromBuffer(store.longBuf.twa, 2000, true, now);
       const twaRef = getCircularAverageFromBuffer(store.longBuf.twa, 10000, true, now);
-      if (twaNow && twaRef && (smoothedTwaDeg === null || Math.abs(smoothedTwaDeg) <= 155)) {
+      if (currentTwa !== null && twaNow && twaRef && (smoothedTwaDeg === null || Math.abs(smoothedTwaDeg) <= 155)) {
         const deltaTac = radToDeg(((twaNow.val - twaRef.val + Math.PI * 3) % (2 * Math.PI)) - Math.PI);
         const curTwaDegVal = radToDeg(twaNow.val);
         if (Math.abs(deltaTac) > 3.0) {
@@ -1685,7 +1759,7 @@ export function useDashboard() {
       let meteoLedState = null;
 
       const twdBuf = store.longBuf.twd;
-      if (twdBuf.length >= 2) {
+      if (currentTwd !== null && twdBuf.length >= 2) {
         const oldestTime = twdBuf[0].time;
         const availableMs = now - oldestTime;
 
@@ -1766,7 +1840,7 @@ export function useDashboard() {
 
       // Tack vs Gybe prediction with 10 degree hysteresis
       let tackLabelMode = store.currentTackLabelMode;
-      const curAbsTwa = Math.abs(radToDeg(store.raw['environment.wind.angleTrueWater'] || 0));
+      const curAbsTwa = currentTwa === null ? NaN : Math.abs(radToDeg(currentTwa));
       if (tackLabelMode === 'TACK' && curAbsTwa > 95) {
         tackLabelMode = 'GYBE';
       } else if (tackLabelMode === 'GYBE' && curAbsTwa < 85) {
@@ -1780,7 +1854,8 @@ export function useDashboard() {
       let tackCogStr = '---°';
       let tackCogUnstable = false;
 
-      if (hObj && twdObj) {
+      const maneuverValid = maneuverValidity(store.raw, store.timestamps, now, windDataPolicy, config.averaging.minSpeed);
+      if (maneuverValid.heading && hObj && twdObj) {
         const reflectAngle = (targetRad: number, axisRad: number) => {
           const dS = Math.sin(axisRad - targetRad);
           const dC = Math.cos(axisRad - targetRad);
@@ -1798,7 +1873,7 @@ export function useDashboard() {
           tackHdgStr = `${Math.round(rH).toString().padStart(3, '0')}°`;
         }
 
-        if (cObj) {
+        if (maneuverValid.cog && cObj) {
           const unstableC = !cObj.stable || !twdObj.stable || cObj.dev > config.averaging.stabilityBreakout;
           if (!isNav) {
             tackCogStr = '---°';
@@ -1834,17 +1909,19 @@ export function useDashboard() {
         return { str: main, unstable };
       };
 
-      const hdgFormatted = formatCompassDeg(hObj, store.raw['navigation.headingTrue']);
-      const cogFormatted = formatCompassDeg(cObj, store.raw['navigation.courseOverGroundTrue']);
-      const awaFormatted = formatRelativeDeg(awObj, store.raw['environment.wind.angleApparent']);
-      const twaFormatted = formatRelativeDeg(twObj, store.raw['environment.wind.angleTrueWater']);
-      const twdFormatted = formatCompassDeg(twdObj, store.raw['environment.wind.directionTrue']);
+      const hdgFormatted = currentHeading === null ? { str: '—', unstable: false } : formatCompassDeg(hObj, currentHeading);
+      const currentCog = freshAwa(store.raw['navigation.courseOverGroundTrue'], store.timestamps['navigation.courseOverGroundTrue'], now, windDataPolicy.headingMaxAgeMs);
+      const cogFormatted = currentCog === null ? { str: '---°', unstable: false } : formatCompassDeg(cObj, currentCog);
+      const validAwa = freshAwa(store.raw['environment.wind.angleApparent'], store.timestamps['environment.wind.angleApparent'], now, windDataPolicy.awaMaxAgeMs);
+      const awaFormatted = validAwa === null ? { str: '—', unstable: false } : formatRelativeDeg(awObj, validAwa);
+      const twaFormatted = currentTwa === null ? { str: '—', unstable: false } : formatRelativeDeg(twObj, currentTwa);
+      const twdFormatted = currentTwd === null ? { str: '—', unstable: false } : formatCompassDeg(twdObj, currentTwd);
 
       // SOG Color (cyan if VMG, drift color if SOG)
       let sogColor = '';
       if (displayModeSog === 'VMG') {
         sogColor = '#00b8d4';
-      } else if (isNav) {
+      } else if (isNav && validStw !== null && validSog !== null) {
         const drift = sogKts - stwKts;
         if (drift < -0.3) sogColor = '#ff3b30';
         else if (drift > 0.3) sogColor = '#00C851';
@@ -1854,21 +1931,21 @@ export function useDashboard() {
       // TWS Color
       let twsColor = '';
       const currentWindVal = displayModeTws === 'AWS' ? awsVal : twsVal;
-      if (currentWindVal >= config.graphs.reef2) {
+      if (currentWindVal !== null && currentWindVal >= config.graphs.reef2) {
         twsColor = '#ff3b30';
-      } else if (currentWindVal >= config.graphs.reef1) {
+      } else if (currentWindVal !== null && currentWindVal >= config.graphs.reef1) {
         twsColor = '#ff9800';
       } else if (displayModeTws === 'AWS') {
         twsColor = isNight ? '' : '#5c6bc0';
       }
 
-      const newStw = stwKts.toFixed(1);
-      const newSog = displayModeSog === 'VMG' ? (store.histories.vmg[store.histories.vmg.length - 1]?.val || 0).toFixed(1) : sogKts.toFixed(1);
-      const newDepth = rawDepth !== undefined ? rawDepth.toFixed(1) : '--.-';
-      const newTws = currentWindVal.toFixed(1);
-      const newAwsSvg = awsVal.toFixed(1);
+      const newStw = validStw === null ? '--.-' : stwKts.toFixed(1);
+      const newSog = displayModeSog === 'VMG' ? (currentVmg === null ? '--.-' : msToKts(currentVmg).toFixed(1)) : (validSog === null ? '--.-' : sogKts.toFixed(1));
+      const newDepth = rawDepth !== null ? rawDepth.toFixed(1) : '--.-';
+      const newTws = currentWindVal === null ? '--.-' : currentWindVal.toFixed(1);
+      const newAwsSvg = awsVal === null ? '--.-' : awsVal.toFixed(1);
 
-      const roundedLeeway = Math.round(smoothedLeeway * 10) / 10;
+      const roundedLeeway = currentLeeway === null ? null : Math.round(smoothedLeeway * 10) / 10;
       const roundedTrackRot = Math.round(curTrackRot * 10) / 10;
       const roundedAwaRot = Math.round(awaPointerDeg * 10) / 10;
       const roundedTwaRot = Math.round(twaPointerDeg * 10) / 10;

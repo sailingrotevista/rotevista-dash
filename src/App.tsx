@@ -367,9 +367,11 @@ export const App: React.FC = () => {
           <div className="gauge-inner-frame">
             {activeInstrument === 'gauge' ? (
               <AnalogGauge
-                awsVal={parseFloat(displayValues.awsSvg) || 0}
+                awsVal={displayValues.awsSvg === '--.-' ? null : parseFloat(displayValues.awsSvg)}
                 awaDeg={displayValues.awaPointerDeg}
+                awaAvailable={displayValues.awaAvg !== '—' && displayValues.awaAvg !== '---°'}
                 twaDeg={displayValues.twaPointerDeg}
+                twaAvailable={displayValues.twaAvg !== '—' && displayValues.twaAvg !== '---°'}
                 leewayDeg={displayValues.leewayDeg}
                 trackDeg={displayValues.trackRotDeg}
                 tacticCwDot={displayValues.tacticCwDot}

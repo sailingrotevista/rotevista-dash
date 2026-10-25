@@ -1,10 +1,12 @@
 import React, { useMemo, useEffect, useRef } from 'react';
 
 interface AnalogGaugeProps {
-  awsVal: number;
+  awsVal: number | null;
   awaDeg: number;
+  awaAvailable: boolean;
   twaDeg: number;
-  leewayDeg: number;
+  twaAvailable: boolean;
+  leewayDeg: number | null;
   trackDeg: number;
   tacticCwDot: { active: boolean; color: string; gybing?: boolean };
   tacticCcwDot: { active: boolean; color: string; gybing?: boolean };
@@ -15,7 +17,9 @@ interface AnalogGaugeProps {
 export const AnalogGauge: React.FC<AnalogGaugeProps> = React.memo(({
   awsVal,
   awaDeg,
+  awaAvailable,
   twaDeg,
+  twaAvailable,
   leewayDeg,
   trackDeg,
   tacticCwDot,
@@ -47,7 +51,7 @@ export const AnalogGauge: React.FC<AnalogGaugeProps> = React.memo(({
     return list;
   }, []);
 
-  const clampedLeeway = Math.max(-20, Math.min(20, leewayDeg));
+  const clampedLeeway = Math.max(-20, Math.min(20, leewayDeg ?? 0));
   const c = 150;
   const px = 150 / 20;
   const leewayWidth = Math.min(Math.abs(clampedLeeway) * px, 150);
@@ -139,7 +143,7 @@ export const AnalogGauge: React.FC<AnalogGaugeProps> = React.memo(({
       </g>
 
       {/* Track / Leeway Drift Pointer */}
-      <g id="track-pointer" transform={`rotate(${trackDeg}, 200, 200)`}>
+      <g visibility={leewayDeg === null ? "hidden" : undefined} id="track-pointer" transform={`rotate(${trackDeg}, 200, 200)`}>
         <path d="M200,42 L194,58 L206,58 Z" fill="#007aff" stroke="#fff" strokeWidth="0.5" />
       </g>
 
@@ -175,12 +179,12 @@ export const AnalogGauge: React.FC<AnalogGaugeProps> = React.memo(({
           Apparent Wind kts
         </text>
         <text id="aws-val-svg" x="0" y="42" fill="#fff" fontSize="52" fontWeight="bold" textAnchor="middle">
-          {awsVal.toFixed(1)}
+          {awsVal === null ? '--.-' : awsVal.toFixed(1)}
         </text>
       </g>
 
       {/* AWA Pointer (Orange with 'A') */}
-      <g id="awa-pointer" transform={`rotate(${awaDeg}, 200, 200)`} opacity={0.9}>
+      <g visibility={awaAvailable ? 'visible' : 'hidden'} id="awa-pointer" transform={`rotate(${awaDeg}, 200, 200)`} opacity={0.9}>
         <path d="M 200,70 L 213,95 L 200,145 L 187,95 Z" fill="#ff8c00" stroke="#000" strokeWidth="1" />
         <text x="200" y="90" fill="#000" fontSize="10" fontWeight="900" textAnchor="middle" fontFamily="Arial Black">
           A
@@ -188,7 +192,7 @@ export const AnalogGauge: React.FC<AnalogGaugeProps> = React.memo(({
       </g>
 
       {/* TWA Pointer (Yellow with 'T') and Tactical Trend Dots */}
-      <g id="twa-pointer" transform={`rotate(${twaDeg}, 200, 200)`} opacity={0.9}>
+      <g visibility={twaAvailable ? undefined : "hidden"} id="twa-pointer" transform={`rotate(${twaDeg}, 200, 200)`} opacity={0.9}>
         <path
           d="M 200,92 A 8,8 0 0 1 208,100 C 208,108 200,128 200,128 C 200,128 192,108 192,100 A 8,8 0 0 1 200,92 Z"
           fill="#ffff00"
@@ -219,7 +223,7 @@ export const AnalogGauge: React.FC<AnalogGaugeProps> = React.memo(({
       {/* Leeway Bar Indicator */}
       <g transform="translate(50, 395)">
         <text x="150" y="-12" id="leeway-val" fill="#aaa" fontSize="11" textAnchor="middle" fontWeight="bold">
-          {`LEEWAY: ${clampedLeeway.toFixed(1)}°`}
+          {leewayDeg === null ? "LEEWAY: —" : `LEEWAY: ${clampedLeeway.toFixed(1)}°`}
         </text>
         <rect x="0" y="0" width="300" height="12" fill="#222" rx="3" />
         <rect x="0" y="0" width="300" height="12" fill="url(#leeway-grad)" clipPath="url(#leeway-clip)" rx="3" />

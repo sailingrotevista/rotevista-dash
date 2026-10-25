@@ -8,6 +8,8 @@
  * file windEngine.js
  */
 const https = require('https');
+const resolveDeclination = require('./magneticDeclination')(require('geomagnetism'));
+const { awsMaxAgeMs, awaMaxAgeMs, twsNativeMaxAgeMs, twaNativeMaxAgeMs, trueWindDirectionMinSpeedMps, twdNativeMaxAgeMs, headingMaxAgeMs, boatSpeedMaxAgeMs, gustSmoothingMs, gustResetGapMs, depthMaxAgeMs } = require('./windDataPolicy.json');
 
 // ==========================================================================
 // COSTANTI DI SVILUPPO (DEVELOPER CONFIG)
@@ -24,6 +26,26 @@ function isValueEqual(a, b) {
     return false;
 }
 
+function resolveHeading(raw, timestamps, now, policy, allowCog = true) {
+  const fresh = (path, age) => {
+    const value = raw[path], time = timestamps[path];
+    return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= Math.PI * 2 &&
+      Number.isFinite(time) && now-time >= 0 && now-time < age ? value : null;
+  };
+  const trueHeading = fresh('navigation.headingTrue', policy.headingMaxAgeMs);
+  const magnetic = fresh('navigation.headingMagnetic', policy.headingMaxAgeMs);
+  if (magnetic !== null) {
+    const variation = resolveDeclination(raw, now);
+    if (variation !== null) return (magnetic + variation + Math.PI * 2) % (Math.PI * 2);
+  }
+  if (trueHeading !== null) return trueHeading;
+  if (!allowCog) return null;
+  const cog = fresh('navigation.courseOverGroundTrue', policy.headingMaxAgeMs);
+  const sog = raw['navigation.speedOverGround'], time = timestamps['navigation.speedOverGround'];
+  return cog !== null && Number.isFinite(sog) && sog > 0.77 && sog <= 25.72 &&
+    Number.isFinite(time) && now-time >= 0 && now-time < policy.boatSpeedMaxAgeMs ? cog : null;
+}
+
 class WindEngine {
     constructor(app, getConfig) {
         this.app = app;
@@ -31,9 +53,14 @@ class WindEngine {
 
         // Database dello storico in RAM sul server (Sintonizzato Pro v6.0)
         this.histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
+        this.gustFilter = {};
         this.graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
         this.lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0, twd: 0 };
         this.raw = {};
+        this.lastAwsReceivedTime = null;
+        this.lastAwaReceivedTime = null;
+        this.depthSourceTime = null;
+        this.speedSourceTimes = {};
         this.lastPathProcessTimes = {}; // Registro dei timestamp per limitazione di frequenza a 1Hz
 
         // Nuovo database dedicato per gli archi storici della bussola (6 ore = 12 slot)
@@ -42,6 +69,8 @@ class WindEngine {
         // Memoria temporale per rilevare la presenza di sensori nativi sul Cerbo
         this.lastNativeTwsTime = 0;
         this.lastNativeTwdTime = 0;
+        this.headingSourceTime = null;
+        this.headingInputTimes = {};
         this.lastNativeHeadingTrueTime = 0; // Traccia la presenza di bussola vera nativa
         this.lastNativeTwaTime = 0;         // Traccia la presenza di TWA nativo
 
@@ -58,6 +87,10 @@ class WindEngine {
 
     getRaw() {
         return this.raw;
+    }
+
+    getRawTimes() {
+        return { ...this.lastPathProcessTimes, 'environment.depth.belowTransducer': this.depthSourceTime, ...this.speedSourceTimes, ...this.headingInputTimes, 'environment.wind.speedApparent': this.lastAwsReceivedTime, 'environment.wind.angleApparent': this.lastAwaReceivedTime, 'environment.wind.speedTrue': this.lastNativeTwsTime || null, 'environment.wind.angleTrueWater': this.lastNativeTwaTime || null, 'environment.wind.directionTrue': this.lastNativeTwdTime || null, 'navigation.headingTrue': this.headingSourceTime };
     }
 
     getHistories() {
@@ -80,7 +113,96 @@ class WindEngine {
      * processIncomingDelta: Decodifica i dati dei sensori in Knots/Meters ed esegue l'aggregazione
      * Applica un filtro passa-basso continuo a ogni pacchetto e storicizza a 1Hz con dati stabilizzati.
      */
-    processIncomingDelta(path, val) {
+    processIncomingDelta(path, val, sourceTimestamp) {
+        if (path === 'environment.depth.belowTransducer') {
+            if (val !== null && (typeof val !== 'number' || !Number.isFinite(val) || val < -2 || val > 500)) return;
+            const parsed = typeof sourceTimestamp === 'number' ? sourceTimestamp : Date.parse(sourceTimestamp);
+            const time = Number.isFinite(parsed) ? Math.min(Date.now(), parsed) : Date.now();
+            if (this.depthSourceTime != null && time < this.depthSourceTime) return;
+            this.depthSourceTime = time;
+            if (val === null) { this.raw[path] = null; return; }
+        }
+
+        if (path === 'environment.wind.speedTrue') {
+            if (val === null) {
+                delete this.raw[path];
+                this.lastNativeTwsTime = 0;
+                return;
+            }
+            if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 51.44) return;
+            const parsed = typeof sourceTimestamp === 'number' ? sourceTimestamp : Date.parse(sourceTimestamp);
+            const receivedTime = Number.isFinite(parsed) ? Math.min(Date.now(), parsed) : Date.now();
+            if (receivedTime < this.lastNativeTwsTime) return;
+            this.lastNativeTwsTime = receivedTime;
+        }
+        if (path === 'environment.wind.directionTrue') {
+            if (val === null) {
+                delete this.raw[path];
+                this.lastNativeTwdTime = null;
+                // Keep observations: only the native source is invalidated.
+                return;
+            }
+            if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
+            const parsed = typeof sourceTimestamp === 'number' ? sourceTimestamp : Date.parse(sourceTimestamp);
+            const receivedTime = Number.isFinite(parsed) ? Math.min(Date.now(), parsed) : Date.now();
+            if (this.lastNativeTwdTime != null && receivedTime <= this.lastNativeTwdTime) return;
+            this.lastNativeTwdTime = receivedTime;
+        }
+        if (path === 'environment.wind.angleTrueWater') {
+            if (val === null) {
+                delete this.raw[path];
+                this.lastNativeTwaTime = null;
+                this.rollingAngles.twa = [];
+                return;
+            }
+            if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
+            const parsed = typeof sourceTimestamp === 'number' ? sourceTimestamp : Date.parse(sourceTimestamp);
+            const receivedTime = Number.isFinite(parsed) ? Math.min(Date.now(), parsed) : Date.now();
+            if (this.lastNativeTwaTime != null && receivedTime <= this.lastNativeTwaTime) return;
+            this.lastNativeTwaTime = receivedTime;
+        }
+        if (path === 'environment.wind.angleApparent') {
+            if (val === null) {
+                delete this.raw[path];
+                this.lastAwaReceivedTime = null;
+                this.rollingAngles.awa = [];
+                return;
+            }
+            if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
+            const parsed = typeof sourceTimestamp === 'number' ? sourceTimestamp : Date.parse(sourceTimestamp);
+            const receivedTime = Number.isFinite(parsed) ? Math.min(Date.now(), parsed) : Date.now();
+            if (this.lastAwaReceivedTime != null && receivedTime <= this.lastAwaReceivedTime) return;
+            this.lastAwaReceivedTime = receivedTime;
+        }
+        if (path === 'environment.wind.speedApparent') {
+            if (val === null) {
+                delete this.raw[path];
+                this.lastAwsReceivedTime = null;
+                return;
+            }
+            if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 51.44) return;
+            const parsed = typeof sourceTimestamp === 'number' ? sourceTimestamp : Date.parse(sourceTimestamp);
+            const receivedTime = Number.isFinite(parsed) ? Math.min(Date.now(), parsed) : Date.now();
+            if (this.lastAwsReceivedTime !== null && receivedTime < this.lastAwsReceivedTime) return;
+            this.lastAwsReceivedTime = receivedTime;
+        }
+        if (path === 'navigation.speedThroughWater' || path === 'navigation.speedOverGround') {
+            if (val === null) { delete this.raw[path]; this.speedSourceTimes[path] = null; return; }
+            if (typeof val !== 'number' || !Number.isFinite(val) || val < 0 || val > 25.72) return;
+            const parsed = typeof sourceTimestamp === 'number' ? sourceTimestamp : Date.parse(sourceTimestamp);
+            const time = Number.isFinite(parsed) ? Math.min(Date.now(), parsed) : Date.now();
+            if (this.speedSourceTimes[path] != null && time <= this.speedSourceTimes[path]) return;
+            this.speedSourceTimes[path] = time;
+        }
+        if (['navigation.headingTrue', 'navigation.headingMagnetic', 'navigation.courseOverGroundTrue'].includes(path)) {
+            if (val === null) { delete this.raw[path]; this.headingInputTimes[path] = null; if (path === 'navigation.headingTrue') this.headingSourceTime = null; return; }
+            if (typeof val !== 'number' || !Number.isFinite(val) || Math.abs(val) > Math.PI * 2) return;
+            const parsed = typeof sourceTimestamp === 'number' ? sourceTimestamp : Date.parse(sourceTimestamp);
+            const time = Number.isFinite(parsed) ? Math.min(Date.now(), parsed) : Date.now();
+            if (this.headingInputTimes[path] != null && time <= this.headingInputTimes[path]) return;
+            this.headingInputTimes[path] = time;
+            if (path === 'navigation.headingTrue') this.headingSourceTime = time;
+        }
         // Navigation status is categorical, including an explicit null reset;
         // never pass it through the numerical smoothing used for instruments.
         if (path === 'navigation.state') {
@@ -164,71 +286,57 @@ class WindEngine {
         const smoothedVal = raw[path];
 
         if (path === 'navigation.speedThroughWater') {
-            this.manageHistory('stw', smoothedVal * 1.94384);
+            const age = now - this.speedSourceTimes[path];
+            if (this.speedSourceTimes[path] != null && age >= 0 && age < boatSpeedMaxAgeMs) this.manageHistory('stw', smoothedVal * 1.94384);
         }
         else if (path === 'navigation.speedOverGround') {
-            this.manageHistory('sog', smoothedVal * 1.94384);
+            const age = now - this.speedSourceTimes[path];
+            if (this.speedSourceTimes[path] != null && age >= 0 && age < boatSpeedMaxAgeMs) this.manageHistory('sog', smoothedVal * 1.94384);
         }
         else if (path === 'environment.depth.belowTransducer') {
-            this.manageHistory('depth', smoothedVal);
+            const age = now - this.depthSourceTime;
+            if (this.depthSourceTime != null && age >= 0 && age < depthMaxAgeMs) this.manageHistory('depth', smoothedVal);
         }
         else if (path === 'environment.wind.speedApparent') {
-            this.manageHistory('aws', smoothedVal * 1.94384);
+            if (now - this.lastAwsReceivedTime < awsMaxAgeMs) this.manageHistory('aws', smoothedVal * 1.94384);
         }
         else if (path === 'environment.wind.angleApparent') {
-            this.pushRollingAngle('awa', smoothedVal, now);
+            if (now - this.lastAwaReceivedTime < awaMaxAgeMs) this.pushRollingAngle('awa', smoothedVal, this.lastAwaReceivedTime);
         }
         else if (path === 'environment.wind.angleTrueWater') {
-            this.lastNativeTwaTime = now;
-            this.pushRollingAngle('twa', smoothedVal, now);
+            if (now - this.lastNativeTwaTime < twaNativeMaxAgeMs) this.pushRollingAngle('twa', smoothedVal, this.lastNativeTwaTime);
         }
         else if (path === 'environment.wind.speedTrue') {
-            this.lastNativeTwsTime = now; // Rilevato TWS nativo della centralina!
-            this.manageHistory('tws', smoothedVal * 1.94384);
-        }
-        else if (path === 'navigation.headingTrue') {
-            this.lastNativeHeadingTrueTime = now; // Rilevata prua vera nativa dalla rete NMEA
-            this.pushRollingAngle('hdg', smoothedVal, now);
-        }
-        // --- DECODIFICA PRUA MAGNETICA SERVER-SIDE ---
-        else if (path === 'navigation.headingMagnetic') {
-            const hasNativeTrueHdg = (now - this.lastNativeHeadingTrueTime < 5000);
-            if (!hasNativeTrueHdg) {
-                const variation = raw['navigation.magneticVariation'] || 0;
-                const trueHdg = (smoothedVal + variation + 2 * Math.PI) % (2 * Math.PI);
-                raw['navigation.headingTrue'] = trueHdg;
-                this.pushRollingAngle('hdg', trueHdg, now);
-            }
-        }
-        else if (path === 'environment.wind.directionTrue') {
-            this.lastNativeTwdTime = now; // Rilevato TWD nativo della centralina!
-            this.manageHistory('twd', smoothedVal);
-            this.pushRollingAngle('twd', smoothedVal, now);
+            if (now - this.lastNativeTwsTime < twsNativeMaxAgeMs) this.manageHistory('tws', smoothedVal * 1.94384);
         }
         else if (path === 'navigation.courseOverGroundTrue') {
             this.pushRollingAngle('cog', smoothedVal, now);
-            // Se non è installata alcuna bussola fisica sulla rete e la barca è in movimento stabile (> 1.5 nodi),
-            // emuliamo l'Heading usando il COG per consentire il calcolo del TWD e della bussola radar.
-            const hasCompass = raw['navigation.headingTrue'] !== undefined || raw['navigation.headingMagnetic'] !== undefined;
-            const sog = raw['navigation.speedOverGround'] || 0;
-            if (!hasCompass && sog > 0.77) { // 0.77 m/s = 1.5 nodi
-                raw['navigation.headingTrue'] = smoothedVal;
-                this.pushRollingAngle('hdg', smoothedVal, now);
-            }
+        }
+        const headingTimes = this.getRawTimes();
+        const heading = resolveHeading(raw, headingTimes, now, { headingMaxAgeMs, boatSpeedMaxAgeMs, gustSmoothingMs, gustResetGapMs, depthMaxAgeMs });
+        if (heading !== null && ['navigation.headingTrue', 'navigation.headingMagnetic', 'navigation.courseOverGroundTrue'].includes(path)) {
+            this.pushRollingAngle('hdg', heading, this.headingInputTimes[path]);
         }
 
         // 2. Calcolo combinato di FALLBACK (Si attiva solo se la centralina non invia TWS/TWD nativi)
         const aws = raw["environment.wind.speedApparent"];
         const awa = raw["environment.wind.angleApparent"];
-        const stw = raw["navigation.speedThroughWater"];
-        const sog = raw["navigation.speedOverGround"] || 0;
-        const hdg = raw["navigation.headingTrue"];
+        const freshSpeed = path => {
+            const time = this.speedSourceTimes[path];
+            return time != null && now - time >= 0 && now - time < boatSpeedMaxAgeMs ? raw[path] : undefined;
+        };
+        const stw = freshSpeed("navigation.speedThroughWater");
+        const measuredSog = freshSpeed("navigation.speedOverGround");
+        const sog = measuredSog ?? 0;
+        const measuredSpeed = stw !== undefined && !(sog > 0.77 && stw < 0.25) ? stw : measuredSog;
+        const hdg = heading;
+        let resolvedTwa = this.lastNativeTwaTime != null && now - this.lastNativeTwaTime < twaNativeMaxAgeMs ? raw["environment.wind.angleTrueWater"] : undefined;
 
-        if (aws !== undefined && awa !== undefined) {
+        if (aws !== undefined && awa !== undefined && this.lastAwsReceivedTime !== null && now - this.lastAwsReceivedTime < awsMaxAgeMs && this.lastAwaReceivedTime != null && now - this.lastAwaReceivedTime < awaMaxAgeMs) {
             const awsKts = aws * 1.94384;
             
             // RILEVAMENTO "LOG BLOCCATO" SUL SERVER
-            const hasStw = lastPathProcessTimes["navigation.speedThroughWater"] && (now - lastPathProcessTimes["navigation.speedThroughWater"] < 15000);
+            const hasStw = stw !== undefined;
             let speedRef = 0;
             
             if (hasStw && stw !== undefined) {
@@ -247,25 +355,35 @@ class WindEngine {
             const tw_water_y = awsKts * Math.sin(awa);
 
             // Calcolo TWS
-            if (now - this.lastNativeTwsTime > 5000) {
+            if (now - this.lastNativeTwsTime >= twsNativeMaxAgeMs) {
                 const tws = Math.sqrt(tw_water_x * tw_water_x + tw_water_y * tw_water_y);
                 this.manageHistory('tws', tws);
             }
 
-            const twa = Math.atan2(tw_water_y, tw_water_x);
-            const vmg = Math.abs(speedKtsRef * Math.cos(twa));
-            this.manageHistory('vmg', vmg);
+            const hasNativeTwa = this.lastNativeTwaTime != null && now - this.lastNativeTwaTime < twaNativeMaxAgeMs && raw['environment.wind.angleTrueWater'] !== undefined;
+            const calmVector = Math.hypot(tw_water_x, tw_water_y) <= trueWindDirectionMinSpeedMps * 1.94384;
+            const twa = hasNativeTwa ? raw['environment.wind.angleTrueWater'] : Math.atan2(tw_water_y, tw_water_x);
+            resolvedTwa = !hasNativeTwa && calmVector ? undefined : twa;
 
-            if (now - this.lastNativeTwaTime > 5000) {
+
+            if (!hasNativeTwa && !calmVector) {
                 this.pushRollingAngle('twa', twa, now);
             }
 
-            // Calcolo TWD stabile (Prua + TWA)
-            if (hdg !== undefined && (now - this.lastNativeTwdTime > 5000)) {
-                const twd = (hdg + twa + 2 * Math.PI) % (2 * Math.PI);
-                this.manageHistory('twd', twd);
-                this.pushRollingAngle('twd', twd, now);
-            }
+        }
+        if (Number.isFinite(resolvedTwa) && Number.isFinite(measuredSpeed)) {
+            this.manageHistory('vmg', Math.abs(measuredSpeed * 1.94384 * Math.cos(resolvedTwa)));
+        }
+        const compass = resolveHeading(raw, headingTimes, now, { headingMaxAgeMs, boatSpeedMaxAgeMs }, false);
+        const nativeTwdValid = this.lastNativeTwdTime != null && now >= this.lastNativeTwdTime &&
+            now - this.lastNativeTwdTime < twdNativeMaxAgeMs && Number.isFinite(raw['environment.wind.directionTrue']);
+        const canDerive = Number.isFinite(resolvedTwa) && Number.isFinite(compass);
+        const twd = canDerive ? compass + resolvedTwa : nativeTwdValid ? raw['environment.wind.directionTrue'] :
+            Number.isFinite(resolvedTwa) && Number.isFinite(hdg) ? hdg + resolvedTwa : null;
+        if (twd !== null) {
+            const normalized = ((twd % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+            this.manageHistory('twd', normalized);
+            this.pushRollingAngle('twd', normalized, !canDerive && nativeTwdValid ? this.lastNativeTwdTime : now);
         }
     }
 
@@ -417,16 +535,20 @@ class WindEngine {
             }
             // A. VENTO VELOCITÀ -> SUSTAINED PEAK (EMA Time-Aware) (Inalterato per minimizzare le modifiche)
             else if (type === 'tws' || type === 'aws') {
-                const tauMs = 2500;
-                let ema = tempBuf[0].val;
-                let maxSustained = ema;
-
-                for (let i = 1; i < tempBuf.length; i++) {
-                    const dt = Math.max(1, tempBuf[i].time - tempBuf[i-1].time);
-                    const alpha = 1 - Math.exp(-dt / tauMs);
-                    ema = (tempBuf[i].val * alpha) + (ema * (1 - alpha));
-                    if (isFinite(ema) && ema > maxSustained) maxSustained = ema;
+                let state = this.gustFilter[type];
+                let maxSustained = -Infinity;
+                for (const point of tempBuf) {
+                    const dt = state ? point.time - state.time : 0;
+                    if (!state || dt < 0 || dt >= gustResetGapMs) {
+                        state = { val: point.val, time: point.time };
+                        maxSustained = point.val;
+                    } else {
+                        const alpha = 1 - Math.exp(-dt / gustSmoothingMs);
+                        state = { val: state.val + alpha * (point.val - state.val), time: point.time };
+                    }
+                    maxSustained = Math.max(maxSustained, state.val);
                 }
+                this.gustFilter[type] = state;
                 finalValue = maxSustained;
             }
             // B. PROFONDITÀ -> MINIMO (Ottimizzato a 0 allocazioni)

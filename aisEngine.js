@@ -1,3 +1,4 @@
+const { extractReportedAis } = require('./aisReportedData');
 const { AisSharedAlerts } = require('./aisSharedAlerts');
 const { BubbleEntryTracker } = require('./bubbleEntryTracker');
 /**
@@ -520,6 +521,7 @@ class AisEngine {
 
                     this.aisPersistentCache[key] = {
                         id: key,
+                        reportedAis: extractReportedAis(v),
                         name: name,
                         type: shipType || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].type : 0),
                         lat: vLat,
@@ -673,6 +675,7 @@ class AisEngine {
                     isMoored: isMoored,
                     anchorState: anchorState,
                     reportedNavigationState: v.navStateRaw || '',
+                    reportedAis: v.reportedAis,
                     swingRadius: null,
                     anchorCenter: null,
                     isMoving,

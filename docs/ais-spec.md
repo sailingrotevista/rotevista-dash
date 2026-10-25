@@ -125,6 +125,19 @@ Riferimenti: [tracker degli ingressi](../bubbleEntryTracker.js), [politica di pr
 - Un target perso già silenziato non deve risvegliare l'allarme soltanto perché scadono i 10 minuti; una nuova posizione permette di riprendere la valutazione normale.
 - Il banner segnala l'età quando supera un quinto della finestra effettiva, distinguendo posizione prevista e ultima posizione riportata.
 
+## Dati nel popup di ispezione
+
+- Se i dettagli sono aperti e si seleziona un altro target sulla mappa, aggiornare il contenuto mantenendo il popup aperto e la scheda corrente. Il clic sul medesimo target e gli altri comandi mantengono il comportamento precedente.
+- Conservare la scheda sintetica Info & dimensions: dimensioni, pescaggio, destinazione/ETA, stato AIS/classe, radio/bandiera e osservazioni già presenti.
+- Il blocco unico “AIS STATUS (A/B)” riunisce destinazione, ETA e stato ricevuto. La classe è nel titolo solo se disponibile. Mostrare soltanto righe valorizzate, omettere segnaposto e stato non definito; nascondere il blocco se resterebbe soltanto la classe.
+- Mantenere la destinazione come trasmessa, senza dedurre il nome di un porto da un codice. Formattare ETA valide con fuso esplicito come “29 Oct, 12:00 UTC”; non interpretare orari ambigui come locali.
+- Lo stato ricevuto appare direttamente sotto il titolo, senza ripetere il prefisso “Status:”, e non viene sostituito con la classificazione del tracker o del porto.
+- “RADIO & FLAG” e “OBSERVED STATUS” occupano la stessa riga, rispettivamente a sinistra e a destra, con bandiera sotto il callsign; quest’ultimo mostra la classificazione di Rotevista.
+- In “TRAJECTORY STABILITY”, dati insufficienti lasciano il valore vuoto e un cambio da confermare appare come “CHANGE?”. Per target non mobili usare “AT ANCHOR” se il pattern osservato è OSCILLATING, altrimenti “STATIONARY”; non dedurre oscillazione dal solo stato AIS.
+- I dettagli diagnostici del pattern di sosta e della stabilità sono nascosti normalmente: un tocco su “TRAJECTORY STABILITY” li mostra per 8 secondi, un secondo tocco li richiude. Cambio target o chiusura della scheda li nascondono; nessun effetto sul motore.
+- Non aggiungere alla scheda una griglia diagnostica con coordinate, sorgenti e timestamp di ogni misura.
+- I dati originali restano disponibili nel modello separatamente dai valori calcolati.
+
 ## Riferimenti di implementazione
 
 - [Motore di collisione](../collisionPipeline.js)

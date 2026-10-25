@@ -16,6 +16,7 @@ class DashboardSession {
     constructor({ readLive, environment='signalk', now=Date.now() }) {
         this.readLive=readLive;
         this.environment=environment;
+        this.propulsionMode='AUTO';
         this.mode='live'; this.generation=randomUUID(); this.changedAt=now; this.revision=0;
         this.liveAlerts=new AisSharedAlerts({now}); this.simAlerts=new AisSharedAlerts({now});
         this.lastTick=now; this.startedAt=now; this.dynamic=[]; this.simOwn={...marina.myGps,sog:5.2,cog:45,hdg:45};
@@ -33,6 +34,12 @@ class DashboardSession {
         this.bubbleEntries=new BubbleEntryTracker();
         this.simAlerts=new AisSharedAlerts({now});
         this.tick(now);return this.snapshot();
+    }
+    setPropulsionMode(mode, now=Date.now()) {
+        if (!['AUTO','SAIL','MOTOR'].includes(mode)) throw Object.assign(new Error('Invalid propulsion mode.'), {status:400});
+        this.propulsionMode=mode;
+        this.tick(now);
+        return this.snapshot();
     }
     tick(now=Date.now()) {
         const live=this.readLive() || {};
@@ -99,7 +106,7 @@ class DashboardSession {
             }
         }
         this.revision++;
-        this.current={mode:this.mode,generation:this.generation,environment:this.environment,changedAt:this.changedAt,
+        this.current={propulsionMode:this.propulsionMode,mode:this.mode,generation:this.generation,environment:this.environment,changedAt:this.changedAt,
             revision:this.revision,serverNow:now,raw:outRaw,rawTimes:this.mode==='simulation' ? Object.fromEntries(Object.keys(outRaw).map(path=>[path,now])) : (live.rawTimes || {}),own,targets,harborClusters:clusters,
             sharedAlerts:this.sharedAlerts.snapshot(now),waitingForLivePosition:this.mode==='mixed'&&!own};
         return this.current;
@@ -116,6 +123,10 @@ function registerDashboardRoutes(register,session) {
     register('GET','/rotevista-dashboard',(_req,res)=>{res.header('Cache-Control','no-store');res.json(session.snapshot());});
     register('GET','/rotevista-alert-session',handlers.session);
     register('POST','/rotevista-alert-actions',[handlers.guard,readAlertAction,handlers.action]);
+    register('POST','/rotevista-propulsion-mode',[handlers.guard,readAlertAction,(req,res)=>{
+        if(req.body?.sessionId!==session.sharedAlerts.sessionId) return res.status(409).json({error:'Dashboard session changed. Try again.'});
+        try {res.json(session.setPropulsionMode(req.body?.mode));}catch(error){res.status(error.status || 500).json({error:error.message});}
+    }]);
     register('POST','/rotevista-dashboard-mode',[handlers.guard,readAlertAction,(req,res)=>{
         if(req.body?.sessionId!==session.sharedAlerts.sessionId) return res.status(409).json({error:'Dashboard session changed. Try again.'});
         try {res.json(session.setMode(req.body?.mode));}catch(error){res.status(error.status || 500).json({error:error.message});}

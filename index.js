@@ -57,7 +57,7 @@ module.exports = function (app) {
     const aisEngine = new AisEngine(app, () => currentConfig, windEngine, harborDetector, collisionPipeline);
 
     const { DashboardSession, registerDashboardRoutes } = require('./dashboardSession');
-    const readDashboardLive = () => ({raw:windEngine.getRaw(),rawTimes:windEngine.lastPathProcessTimes,targets:aisEngine.getNearbyVessels(),
+    const readDashboardLive = () => ({raw:windEngine.getRaw(),rawTimes:windEngine.getRawTimes(),targets:aisEngine.getNearbyVessels(),
         harborClusters:aisEngine.getHarborClusters(),config:currentConfig});
     const dashboardSession = new DashboardSession({readLive:readDashboardLive});
 
@@ -193,7 +193,7 @@ module.exports = function (app) {
                             update.values.forEach(v => {
                                 aisEngine.updateWindEvidence(v.path, v.value, update.timestamp);
                                 if (!aisEngine.updateOwnGeometry(v.path, v.value)) {
-                                    windEngine.processIncomingDelta(v.path, v.value);
+                                    windEngine.processIncomingDelta(v.path, v.value, update.timestamp);
                                 }
                             });
                         }

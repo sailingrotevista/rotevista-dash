@@ -2777,3 +2777,31 @@ body.night-mode .ais-support-email-btn,
         max-height: 60cqh;
     }
 }
+
+/* Source-labelled AIS inspection data; reports and inference stay separate. */
+
+.ais-stability-toggle {
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+.ais-stability-toggle:focus-visible {
+    outline: 2px solid #0284c7;
+    outline-offset: 2px;
+}
+.ais-stability-debug,
+.ais-stability-debug > span {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.ais-stability-debug { margin-top: 6px; gap: 8px; }
+
+.ais-tool-btn .propulsion-auto-icon {
+  display: block;
+  width: 62%;
+  height: 62%;
+  flex: 0 0 auto;
+  margin: auto;
+}

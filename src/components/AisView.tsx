@@ -4,6 +4,8 @@ import 'leaflet/dist/leaflet.css';
 import { AisTarget, HarborCluster, PropulsionMode } from '../types';
 import { getAvailableMapArea, getMapCenterOffset } from '../utils/mapViewport.mjs';
 import { chooseAisLabelPlacement, escapeAisLabelText } from '../utils/aisLabelPlacement.mjs';
+import { AisStatusInfo } from './AisStatusInfo';
+import { AisTrajectoryStability } from './AisTrajectoryStability';
 import { openDashboardMenu } from '../utils/dashboardModes.mjs';
 import { compareAisTargets } from '../utils/aisPriority.mjs';
 
@@ -57,7 +59,7 @@ interface AisViewProps {
   onSelectTarget: (targetId: string | null) => void;
   ownShipName?: string;
   propulsionMode?: PropulsionMode;
-  onSetPropulsionMode?: (mode: PropulsionMode) => void;
+  onSetPropulsionMode?: (mode: PropulsionMode) => Promise<boolean>;
   inspectToken?: number;
   vectorMinutes?: number;
 }
@@ -1346,11 +1348,12 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         });
         const isThreat = isRed || isOrange;
         if (!isSelected) {
-          const openMenuImmediately = isPrimaryThreat;
+          const keepDetailsOpen = Boolean(showListDrawerRef.current && selectedTargetRef.current);
+          const openMenuImmediately = isPrimaryThreat || keepDetailsOpen;
           setSelectedTarget(t);
           onSelectTarget(t.id);
           if (openMenuImmediately) {
-            setTargetDetailTab('info');
+            if (!keepDetailsOpen) setTargetDetailTab('info');
             setShowListDrawer(true);
           } else {
             setShowListDrawer(false);
@@ -1677,14 +1680,14 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
               type="button"
               className={`ais-tool-btn ${propulsionMode === 'MOTOR' ? 'btn-active' : ''}`}
               style={{ fontSize: '1.2rem' }}
-              onClick={() => {
+              onClick={async () => {
                 if (!onSetPropulsionMode) return;
-                const nextMode: PropulsionMode = propulsionMode === 'MOTOR' ? 'SAIL' : 'MOTOR';
-                onSetPropulsionMode(nextMode);
+                const nextMode: PropulsionMode = propulsionMode === 'AUTO' ? 'SAIL' : propulsionMode === 'SAIL' ? 'MOTOR' : 'AUTO';
+                if (!await onSetPropulsionMode(nextMode)) return;
 
                 const msgText = nextMode === 'MOTOR'
-                  ? 'COLREG: Power-driven vessel rules applied (give-way / stand-on by engine mechanics).'
-                  : 'COLREG: Sailing vessel rules applied (port/starboard tack & windward/leeward).';
+                  ? 'Motor: gybe sound muted on all connected displays.'
+                  : nextMode === 'SAIL' ? 'Sail: gybe warning enabled on all connected displays.' : 'Auto: automatic gybe sound filtering on all connected displays.';
 
                 setPropulsionToast({ text: msgText, mode: nextMode });
 
@@ -1695,10 +1698,15 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                   setPropulsionToast(null);
                 }, 3500);
               }}
-              title={`Propulsione: ${propulsionMode === 'MOTOR' ? 'MOTORE' : 'VELA (Auto)'}`}
-              aria-label="Modalità Propulsione"
+              title={`Propulsion: ${propulsionMode}. Click to cycle Auto / Sail / Motor.`}
+              aria-label={`Propulsion: ${propulsionMode}`}
             >
-              {propulsionMode === 'MOTOR' ? '🚤' : '⛵'}
+              {propulsionMode === 'MOTOR' ? '🚤' : propulsionMode === 'SAIL' ? '⛵' : (
+                <svg className="propulsion-auto-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M20 8a8.5 8.5 0 0 0-14-2L3 9m0-5v5h5M4 16a8.5 8.5 0 0 0 14 2l3-3m0 5v-5h-5" />
+                  <path d="m9 16 3-8 3 8m-5-3h4" />
+                </svg>
+              )}
             </button>
           </div>
         </div>
@@ -1939,45 +1947,18 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                         {selectedTarget.draft ? `${selectedTarget.draft.toFixed(1)}m` : '--'}
                       </span>
                     </div>
-                    <div className="ais-detail-cell cell-wide">
-                      <span className="ais-cell-label">DESTINATION & ETA</span>
-                      <span className="ais-cell-val cyan">
-                        {selectedTarget.destination || 'NOT DECLARED'}{' '}
-                        {selectedTarget.eta ? `(ETA ${selectedTarget.eta})` : ''}
-                      </span>
-                    </div>
-                    <div className="ais-detail-cell cell-wide">
-                      <span className="ais-cell-label">AIS STATUS (CLASS)</span>
-                      <span className="ais-cell-val">
-                        {getVesselStatusLabel(selectedTarget)} ({selectedTarget.aisClass ? `AIS ${selectedTarget.aisClass}` : 'AIS CLASS UNKNOWN'})
-                      </span>
-                    </div>
-                    <div className="ais-detail-cell cell-wide">
+                    <AisStatusInfo target={selectedTarget} />
+                    <div className="ais-detail-cell">
                       <span className="ais-cell-label">RADIO & FLAG</span>
                       <span className="ais-cell-val">
-                        📻 {selectedTarget.callsign || '--'} • {selectedTarget.flag || '--'}
+                        📻 {selectedTarget.callsign || '--'}<br />{selectedTarget.flag || '--'}
                       </span>
                     </div>
-                    {selectedTarget.restPattern && (
-                      <div className="ais-detail-cell cell-wide">
-                        <span className="ais-cell-label">OBSERVED REST PATTERN</span>
-                        <span className="ais-cell-val">
-                          {selectedTarget.restPattern.kind === 'UNDETERMINED' ? 'NOT YET DETERMINED' : selectedTarget.restPattern.kind}
-                          {' · '}{selectedTarget.restPattern.sampleCount} fixes
-                          {' · '}{Math.floor(selectedTarget.restPattern.observedDurationSeconds / 60)} min observed
-                          {selectedTarget.restPattern.radiusMeters !== null && ` · radius ${Math.round(selectedTarget.restPattern.radiusMeters)} m`}
-                        </span>
-                      </div>
-                    )}
-                    {selectedTarget.predictionStability && (
-                      <div className="ais-detail-cell cell-wide">
-                        <span className="ais-cell-label">TRAJECTORY STABILITY</span>
-                        <span className="ais-cell-val">
-                          {{ INSUFFICIENT_DATA: 'INSUFFICIENT DATA', STABLE: 'STABLE',
-                            VARIABLE: 'VARIABLE', MANEUVERING: 'CHANGE TO CONFIRM', NOT_MOVING: 'STATIONARY' }[selectedTarget.predictionStability.state]}
-                        </span>
-                      </div>
-                    )}
+                    <div className="ais-detail-cell">
+                      <span className="ais-cell-label">OBSERVED STATUS</span>
+                      <span className="ais-cell-val">{getVesselStatusLabel(selectedTarget)}</span>
+                    </div>
+                    <AisTrajectoryStability key={selectedTarget.id} target={selectedTarget} />
                   </div>
 
                   {!selectedTarget.isSimulated && <a
