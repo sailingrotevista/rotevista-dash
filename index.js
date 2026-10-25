@@ -49,11 +49,17 @@ module.exports = function (app) {
     let routeRegistered = false;
     let unsubscribes = [];
     let pruneInterval = null; // Timer in background per la potatura automatica dei sensori spenti
+    let sharedAlertInterval = null;
     let aisInterval = null;   // Timer in background per il motore cinematico AIS (15s)
     const collisionPipeline = new CollisionPipeline();
     const harborDetector = new HarborDetector();
     const windEngine = new WindEngine(app, () => currentConfig);
     const aisEngine = new AisEngine(app, () => currentConfig, windEngine, harborDetector, collisionPipeline);
+
+    const { DashboardSession, registerDashboardRoutes } = require('./dashboardSession');
+    const readDashboardLive = () => ({raw:windEngine.getRaw(),rawTimes:windEngine.lastPathProcessTimes,targets:aisEngine.getNearbyVessels(),
+        harborClusters:aisEngine.getHarborClusters(),config:currentConfig});
+    const dashboardSession = new DashboardSession({readLive:readDashboardLive});
 
     /**
         * plugin.start: Inizializza il plugin.
@@ -83,6 +89,8 @@ module.exports = function (app) {
             
         // 2. Registra le rotte API solo la prima volta (Abilitate per CORS remoto)
         if (!routeRegistered) {
+            registerDashboardRoutes((method,path,handlers) => app[method.toLowerCase()](path,...(Array.isArray(handlers)?handlers:[handlers])),dashboardSession);
+            app.get('/rotevista-live-input', (_req,res) => {res.header('Cache-Control','no-store');res.json(readDashboardLive());});
             app.get('/rotevista-config', (req, res) => {
                 res.header("Access-Control-Allow-Origin", "*"); // Sblocca la Dashboard locale su Mac
                 res.header("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -100,6 +108,7 @@ module.exports = function (app) {
                     'navigation.position': raw['navigation.position'], // Chirurgico: Espone le coordinate GPS correnti per la diagnostica e il radar
                     ais_targets: aisEngine.getNearbyVessels(),
                     ais_top_threat: aisEngine.getTopThreat(),
+                    ais_shared_alerts: aisEngine.sharedAlerts.snapshot(),
                     harbor_clusters: aisEngine.getHarborClusters()
                 };
                 res.json(responseData);
@@ -110,6 +119,7 @@ module.exports = function (app) {
                     targets: aisEngine.getNearbyVessels(),
                     harborClusters: aisEngine.getHarborClusters(),
                     topThreat: aisEngine.getTopThreat(),
+                    sharedAlerts: aisEngine.sharedAlerts.snapshot(),
                     diagnostics: aisEngine.getDiagnostics()
                 });
             });
@@ -204,6 +214,8 @@ module.exports = function (app) {
             aisInterval = null;
         }
         const intervalMs = ((currentConfig.aisAlerter && currentConfig.aisAlerter.checkIntervalSec) || 15) * 1000;
+        if (sharedAlertInterval) clearInterval(sharedAlertInterval);
+        sharedAlertInterval = setInterval(() => dashboardSession.tick(), 1000);
         aisInterval = setInterval(() => aisEngine.process(), intervalMs);
         setTimeout(() => aisEngine.process(), 1000); // Primo calcolo a caldo entro 1s
         // Inizializza la cache cartografica locale LRU su disco per Cerbo GX
@@ -214,6 +226,8 @@ module.exports = function (app) {
         * plugin.stop: Chiamato quando il plugin viene disattivato.
         */
     plugin.stop = function () {
+        if (sharedAlertInterval) clearInterval(sharedAlertInterval);
+        sharedAlertInterval = null;
         unsubscribes.forEach(f => f());
         unsubscribes = [];
         if (pruneInterval) {

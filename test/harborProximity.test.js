@@ -52,7 +52,8 @@ test('safe bubble uses present hull clearance, not antenna range or future CPA',
     assert.equal(target.alertKind, 'PROXIMITY');
     assert.equal(target.safeBubbleMeters, 45);
     assert.equal(target.cpa, null);
-    assert.equal(top.id, target.id);
+    assert.equal(top, null, 'first discovery inside remains visible without a startup banner');
+    assert.equal(target.proximityEntryObserved, false);
     assert.equal(fixture({ clustered: true, distance: 50, bubble: 10 }).target.risk, 'GREY');
 });
 

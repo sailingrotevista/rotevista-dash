@@ -1,3 +1,5 @@
+const { AisSharedAlerts } = require('./aisSharedAlerts');
+const { BubbleEntryTracker } = require('./bubbleEntryTracker');
 /**
  * ==========================================================================
  * Rotevista Dash - Signal K AIS Ingestion & Threat Orchestrator Engine
@@ -82,6 +84,8 @@ class AisEngine {
 
         this.aisPersistentCache = {};
         this.motionTracker = new TargetMotionTracker();
+        this.bubbleEntryTracker = new BubbleEntryTracker();
+        this.sharedAlerts = new AisSharedAlerts();
         this.lastNearbyVessels = [];
         this.lastHarborClusters = [];
         this.topThreat = null;
@@ -108,6 +112,17 @@ class AisEngine {
 
     getTopThreat() {
         return this.topThreat;
+    }
+
+    publishSharedAlerts(now = Date.now()) {
+        const state = this.sharedAlerts.update(this.lastNearbyVessels, this.lastOwnGps.lat !== null ? this.lastOwnGps : null, now);
+        if (this.lastPublishedAlertRevision !== state.revision && typeof this.app.handleMessage === 'function') {
+            this.lastPublishedAlertRevision = state.revision;
+            this.app.handleMessage('rotevista-dash', {
+            context: 'vessels.self', updates: [{ values: [{ path: 'environment.ais_shared_alerts', value: state }] }]
+            });
+        }
+        return state;
     }
 
     getDiagnostics() {
@@ -703,6 +718,7 @@ class AisEngine {
             let harborClusters = this.harborDetector.processHarbors(nearbyVessels, myGps, raw, trueWindDir, now);
             for (let i = 0; i < nearbyVessels.length; i++) {
                 let v = nearbyVessels[i];
+                v.proximityEntryObserved = this.bubbleEntryTracker.update(v, myGps, cfg.criticalProximity);
                 if (this.aisPersistentCache[v.id]) {
                     this.aisPersistentCache[v.id].isMoored = Boolean(v.isMoored);
                 }
@@ -714,6 +730,8 @@ class AisEngine {
                 }
             }
 
+            this.bubbleEntryTracker.prune(new Set(Object.keys(this.aisPersistentCache)));
+
             // 8. Ordinamento Bersagli per Pericolosità (RED > ORANGE > GREY) e Distanza
             this.collisionPipeline.pruneInactive(now);
             this.collisionPipeline.sortTargets(nearbyVessels);
@@ -723,8 +741,11 @@ class AisEngine {
 
             // 9. Individuazione del Top Threat per il Banner
             const redThreat = nearbyVessels.find(v => v.risk === "RED");
-            const orangeThreat = nearbyVessels.find(v => v.risk === "ORANGE");
+            const orangeThreat = nearbyVessels.find(v => v.risk === "ORANGE" &&
+                (v.alertKind !== 'PROXIMITY' || v.proximityEntryObserved));
             this.topThreat = redThreat || orangeThreat || null;
+
+            this.sharedAlerts.update(nearbyVessels, myGps, now);
 
             // 10. Emissione Delta WebSocket verso la Dashboard
             if (typeof app.handleMessage === 'function') {

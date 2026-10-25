@@ -1,6 +1,6 @@
 {
   "name": "@sailingrotevista/rotevista-dash",
-  "version": "9.3.0-beta.7",
+  "version": "9.4.0-beta.0",
   "description": "Wind Dashboard with navigation and course aids",
   "main": "index.js",
   "publishConfig": {
@@ -32,6 +32,11 @@
     "windEngine.js",
     "aisEngine.js",
     "targetMotionTracker.js",
+    "bubbleEntryTracker.js",
+    "aisSharedAlerts.js",
+    "dashboardSession.js",
+    "dashboardScenario.js",
+    "dashboardMarina.json",
     "targetPredictionStability.js",
     "public",
     "icons",

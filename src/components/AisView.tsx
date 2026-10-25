@@ -45,10 +45,13 @@ interface AisViewProps {
   ownShipCourse: { hdg: number; cog: number; sog: number };
   isNightMode: boolean;
   onSwitchToWind: () => void;
-  onSnoozeThreat: (targetId: string) => void;
+  onSnoozeThreat: (targetId: string) => Promise<boolean>;
+  alertActionPending?: boolean;
   onOpenSupport: () => void;
   onInspectionChange?: (isInspecting: boolean) => void;
   mixedSimulation?: boolean;
+  dashboardMode?: 'live' | 'simulation' | 'mixed';
+  dashboardEnvironment?: string;
   onReopenTopThreat?: () => void;
   selectedTargetId: string | null;
   onSelectTarget: (targetId: string | null) => void;
@@ -121,9 +124,12 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   isNightMode,
   onSwitchToWind,
   onSnoozeThreat,
+  alertActionPending = false,
   onOpenSupport,
   onInspectionChange,
   mixedSimulation = false,
+  dashboardMode = 'live',
+  dashboardEnvironment = 'signalk',
   onReopenTopThreat,
   selectedTargetId,
   onSelectTarget,
@@ -1600,7 +1606,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         {/* TOP LEFT GROUP: BETA TAG & STATUS COUNTERS */}
         <div className="ais-top-left-group">
           <button type="button" className="ais-beta-tag" title="Open dashboard menu" aria-label="Open dashboard menu" onClick={openDashboardMenu}>
-            {mixedSimulation ? 'LIVE + SIM' : 'Beta 2'}
+            {dashboardEnvironment === 'dev' ? 'DEV · ' : ''}{dashboardMode === 'simulation' ? 'SIMULATION' : mixedSimulation ? 'LIVE + SIM' : 'Beta 2'}
           </button>
           <div
             className="ais-status-counters"
@@ -1784,9 +1790,12 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                 <button
                   type="button"
                   className="banner-btn ais-detail-snooze"
+                  disabled={alertActionPending}
+                  aria-busy={alertActionPending}
                   aria-label={selectedTarget.areaProximityOnly ? `Acknowledge proximity to ${selectedTarget.name || selectedTarget.id}` : `Snooze ${selectedTarget.name || selectedTarget.id} for 10 minutes`}
-                  onClick={() => {
-                    onSnoozeThreat(selectedTarget.id);
+                  onClick={async () => {
+                    const accepted = await onSnoozeThreat(selectedTarget.id);
+                    if (!accepted) return;
                     setSelectedTarget(null);
                     setShowListDrawer(false);
                   }}

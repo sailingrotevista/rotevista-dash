@@ -55,7 +55,13 @@ export const App: React.FC = () => {
     harborClusters,
     topThreat,
     snoozeThreat,
+    sharedSnoozeReady,
+    alertActionError,
+    alertActionPending,
+    dismissAlertActionError,
     isMixedSimulation,
+    dashboardMode,
+    dashboardEnvironment,
     unsnoozeThreats,
     selectedAisTargetId,
     setSelectedAisTargetId,
@@ -212,23 +218,28 @@ export const App: React.FC = () => {
     .join(' ');
 
   const handleSnoozeThreat = useCallback(
-    (targetId: string) => {
-      snoozeThreat(targetId);
+    async (targetId: string) => {
+      const succeeded = await snoozeThreat(targetId);
+      if (!succeeded) return false;
       if (selectedAisTargetId === targetId) {
         setSelectedAisTargetId(null);
       }
+      return true;
     },
     [snoozeThreat, selectedAisTargetId, setSelectedAisTargetId]
   );
 
   return (
     <div className={`app-root-wrapper ${isNightMode ? 'night-theme' : ''}`}>
+      {alertActionError && <div role="alert" style={{ position:'fixed', bottom:16, left:16, right:16, zIndex:10000, padding:12, background:'#7f1d1d', color:'white', borderRadius:8 }}  >{alertActionError} <button type="button" onClick={dismissAlertActionError} aria-label="Dismiss alert action error">✕</button></div>}
       <ViewportDiagnostics />
       {/* Banner Allarme Tattico ARPA (Visibile sia in Vento che in AIS) */}
       <AisTacticalBanner
         threat={topThreat}
         onInspect={handleInspectThreat}
         onSnooze={handleSnoozeThreat}
+        sharedSnoozeReady={sharedSnoozeReady}
+        actionPending={alertActionPending}
         isNightMode={isNightMode}
         isInspecting={appView === 'ais' && isInspectingAisTarget}
       />
@@ -540,7 +551,10 @@ export const App: React.FC = () => {
             isNightMode={isNightMode}
             onSwitchToWind={handleSwitchToWind}
             onSnoozeThreat={handleSnoozeThreat}
+            alertActionPending={alertActionPending}
             mixedSimulation={isMixedSimulation}
+            dashboardMode={dashboardMode}
+            dashboardEnvironment={dashboardEnvironment}
             onInspectionChange={setIsInspectingAisTarget}
             onReopenTopThreat={unsnoozeThreats}
             selectedTargetId={selectedAisTargetId}

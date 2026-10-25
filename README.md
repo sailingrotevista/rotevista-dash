@@ -77,12 +77,42 @@ npm run dev
 npm run build
 ```
 
-The base address (for example `http://localhost:3000/`) opens the live dashboard directly. Open `http://localhost:3000/?menu=1` for the mode menu. Choose **Live data**, **Simulation**, or **Live + simulated targets**, with an optional **Layout debug** checkbox. Tap the dashboard status indicator (or the AIS badge) to return to the menu. Live data selection stays offline and retries if Signal K is unavailable; it does not substitute synthetic navigation. Existing direct links remain supported.
+The base address (for example `http://localhost:3000/`) joins the current shared dashboard mode. Open `http://localhost:3000/?menu=1` to choose **Live data**, **Simulation**, or **Live + simulated targets** for all devices connected to that server. The optional **Layout debug** checkbox remains local to the current screen. The old `simulate` query parameters no longer select a private client simulator; use the menu.
 
-Open `http://localhost:3000/?simulate=1` to force simulation even when the Cerbo/Signal K server is reachable. This mode uses local configuration and does not connect to live Signal K data. Use the menu or `?mode=live` for live data. Other query parameters can be combined, for example `?simulate=1&layoutDebug=1`.
+The server generates one scenario and supplies the same own-ship data, target positions and shared banner to every client through `/rotevista-dashboard`. New clients join the existing scenario without restarting it. Simulation data is clearly marked and stays in dashboard session memory; it is not written to the Signal K navigation data tree. Full simulation uses a synthetic own ship and instruments. Mixed mode retains real own-ship data and real AIS assessments unchanged, adding four centrally evaluated `sim:` contacts with a five-minute simulation base window. It waits for a real own position and removes synthetic contacts when that position becomes stale. Returning to Live removes all synthetic contacts. A server restart resets the mode to Live.
 
-Open `http://localhost:3000/?simulate=mixed` for **LIVE + SIM** mode: own-ship navigation, instruments, harbor clusters and real AIS risk assessments come from Signal K. Four local synthetic contacts are added around the current real position, with separate `sim:` identities and `SIM ·` names. Only synthetic contacts use the local simulation pipeline (5-minute base window); real assessments remain those of the installed plugin. Live and synthetic updates retain both target lists, and no synthetic data is sent to Signal K. Synthetic contacts stop and disappear if the live socket closes or no own-position update has arrived for 30 seconds; they restart at the latest real position when data returns. Mixed mode requires live data and never falls back to a fictional own-ship position.
+Vite dev/preview has its **own isolated session**, capability and shared alert state. Its backend reads live inputs from the Cerbo using GET requests only, including fallback for an older installed plugin; mode changes, snoozes and acknowledgements are handled locally and never proxied to the Cerbo. Devices connected to the dev server share its mode, while devices connected to Signal K share the installed plugin's separate mode. Restart the dev server after changing the root Node runtime modules.
+
 ---
 
 ## 📄 License
 Licensed under the MIT License.
+
+### Shared AIS alerts
+
+Live dashboards use one in-memory server state for the banner target, the 10-second
+priority hold, the 3-second snooze-button delay, proximity acknowledgements and
+10-minute collision snoozes. Reconnecting dashboards receive the current state;
+inspection and map position remain local. The shared session owns alert controls
+in Live, Simulation and Mixed modes; dev controls remain isolated from the Cerbo.
+
+`GET /rotevista-dashboard` carries the authoritative session state and banner;
+the older live AIS endpoints remain available. Shared alerts carry a session identifier,
+revision and server timing. Alert controls are independent of Signal K admin
+settings: any client able to open the dashboard can acknowledge/snooze shared
+alerts. The dashboard obtains an in-memory capability from
+`GET /rotevista-alert-session` and supplies it in a custom header to
+`POST /rotevista-alert-actions`. These endpoints do not grant access to settings.
+Browser cross-origin requests are rejected, capability responses are not
+CORS-readable or cacheable, and POST payloads must be bounded JSON. This is a
+shared dashboard control capability, not per-user authentication: anyone with
+network access to the dashboard can use its alert controls. Restrict dashboard
+network access accordingly. Failed actions are reported and never silently
+replaced by a local-only acknowledgement.
+
+Nothing is written to disk. A restart loses shared acknowledgement/snooze state;
+first-discovered contacts already inside the bubble remain visual without a new
+entry banner. Acknowledgements are removed after 24 hours without the target,
+when it moves, or when own ship leaves the 2 NM context. Lost-contact snooze and
+orange-to-red escalation retain the existing collision rules. Update/reload all
+clients along with the server plugin to use shared alerts.

@@ -1,8 +1,12 @@
 import { defineConfig } from 'vite';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { installDashboardDev } = require(process.cwd() + '/dashboardDevServer.js');
 import react from '@vitejs/plugin-react';
 import http from 'node:http';
 import https from 'node:https';
 function setupMiddlewares(server: { middlewares: any }, isVenusReachable: boolean) {
+  installDashboardDev(server);
   if (!isVenusReachable) {
     server.middlewares.use((req: any, res: any, next: any) => {
       if (

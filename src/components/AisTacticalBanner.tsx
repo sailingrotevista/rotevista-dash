@@ -10,6 +10,8 @@ interface AisTacticalBannerProps {
   onSnooze: (targetId: string) => void;
   isNightMode?: boolean;
   isInspecting?: boolean;
+  sharedSnoozeReady?: boolean;
+  actionPending?: boolean;
 }
 
 export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
@@ -18,6 +20,8 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
   onSnooze,
   isNightMode,
   isInspecting = false,
+  sharedSnoozeReady,
+  actionPending = false,
 }) => {
   const bannerRef = useRef<HTMLDivElement>(null);
   const hasBanner = Boolean(threat && threat.risk !== 'GREY');
@@ -45,7 +49,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
   }, [snoozeKey]);
   // Comparing identities also hides the button on the first render of a new
   // target, before the effect runs. Metric updates do not restart the delay.
-  const canSnooze = snoozeKey !== null && readySnoozeKey === snoozeKey;
+  const canSnooze = snoozeKey !== null && (sharedSnoozeReady ?? (readySnoozeKey === snoozeKey));
 
   if (!threat || threat.risk === 'GREY') return null;
 
@@ -140,9 +144,10 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
         <button
           type="button"
           className="banner-btn btn-snooze"
-          disabled={!canSnooze}
+          disabled={!canSnooze || actionPending}
+          aria-busy={actionPending}
           style={{ visibility: canSnooze ? 'visible' : 'hidden' }}
-          onClick={() => { if (canSnooze) onSnooze(threat.id); }}
+          onClick={() => { if (canSnooze && !actionPending) onSnooze(threat.id); }}
           title={isProximity ? 'Acknowledge all boats currently inside the safe bubble' : 'Snooze alarm for 10 minutes'}
         >
           {isProximity ? 'ACKNOWLEDGE PROXIMITY' : 'SNOOZE 10M'}

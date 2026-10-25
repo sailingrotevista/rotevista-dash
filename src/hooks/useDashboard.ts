@@ -31,11 +31,25 @@ import { isThreatSnoozed, reconcileSnooze } from '../utils/aisSnooze.mjs';
 import { MixedAisSimulation, mergeAisTargets } from '../utils/mixedAisSimulation.mjs';
 import { BannerThreatSelector } from '../utils/aisPriority.mjs';
 import { proximityAcknowledgementExpired, acknowledgeCurrentBubble, nearestBubblePresence } from '../utils/proximityAcknowledgement.mjs';
+import { requestSharedAlertAction } from '../utils/sharedAlertRequest.mjs';
+import { resetDashboardMeasurements, restoreDashboardHistory } from '../utils/dashboardMeasurements.mjs';
+import { subscribeDashboardRecovery } from '../utils/dashboardRecovery.mjs';
 import { isAnchoredNavigationState } from '../utils/navigationState.mjs';
 
+interface SharedAlertSnapshot {
+  sessionId: string;
+  startedAt: number;
+  revision: number;
+  serverNow: number;
+  banner: AisTarget | null;
+  snoozeReadyAt: number | null;
+  acknowledgements: Record<string, { id: string; lat: number; lon: number }>;
+  snoozes: Record<string, { until: number; initialRisk: string; lostPositionTime?: number }>;
+}
+
 // Explicit opt-in keeps the simulator usable even with a reachable Signal K proxy.
-const FORCE_SIMULATION = new URLSearchParams(window.location.search).get('simulate') === '1';
-const MIXED_SIMULATION = new URLSearchParams(window.location.search).get('simulate') === 'mixed';
+const FORCE_SIMULATION = false;
+const MIXED_SIMULATION = false;
 const REQUIRE_LIVE_DATA = !FORCE_SIMULATION;
 
 const DEFAULT_CONFIG: AppConfig = {
@@ -156,6 +170,57 @@ export function useDashboard() {
   const [harborClusters, setHarborClusters] = useState<HarborCluster[]>([]);
   const [topThreat, setTopThreat] = useState<AisTarget | null>(null);
   const [selectedAisTargetId, setSelectedAisTargetId] = useState<string | null>(null);
+  const [dashboardMode, setDashboardMode] = useState<'live' | 'simulation' | 'mixed'>('live');
+  const [dashboardEnvironment, setDashboardEnvironment] = useState('signalk');
+  const sharedSessionManagedRef = useRef(false);
+  const sharedSessionModeRef = useRef('live');
+  const sharedEnvironmentRef = useRef('signalk');
+  const applyingSessionRef = useRef(false);
+  const sessionConnectedRef = useRef(false);
+  const sessionRawTimesRef = useRef<Record<string, {time: number; value: string}>>({});
+  const sessionFrameRef = useRef<{ generation: string; revision: number } | null>(null);
+  const [sharedAlerts, setSharedAlerts] = useState<SharedAlertSnapshot | null>(null);
+  const sharedAlertsRef = useRef<SharedAlertSnapshot | null>(null);
+  const sharedReadyDeadlineRef = useRef(0);
+  const [sharedSnoozeReady, setSharedSnoozeReady] = useState(false);
+  const [alertActionError, setAlertActionError] = useState('');
+  const [alertActionPending, setAlertActionPending] = useState(false);
+  const alertActionPendingRef = useRef(false);
+  const receiveSharedAlerts = useCallback((snapshot: SharedAlertSnapshot, fromSession = false) => {
+    if (sharedSessionManagedRef.current && !fromSession) return;
+    if (FORCE_SIMULATION || MIXED_SIMULATION || !snapshot?.sessionId || !Number.isFinite(snapshot.revision)) return;
+    const previous = sharedAlertsRef.current;
+    if (previous && (snapshot.startedAt < previous.startedAt ||
+        (snapshot.sessionId === previous.sessionId && snapshot.revision <= previous.revision))) return;
+    sharedAlertsRef.current = snapshot;
+    sharedReadyDeadlineRef.current = Date.now() + Math.max(0, (snapshot.snoozeReadyAt ?? snapshot.serverNow) - snapshot.serverNow);
+    setSharedSnoozeReady(snapshot.snoozeReadyAt !== null && snapshot.snoozeReadyAt <= snapshot.serverNow);
+    setSharedAlerts(snapshot);
+  }, []);
+  useEffect(() => {
+    if (!sharedAlerts || sharedAlerts.snoozeReadyAt === null) return;
+    const timer = setTimeout(() => setSharedSnoozeReady(true), Math.max(0, sharedReadyDeadlineRef.current - Date.now()));
+    return () => clearTimeout(timer);
+  }, [sharedAlerts]);
+  const sharedAction = useCallback(async (type: string, target?: AisTarget) => {
+    const state = sharedAlertsRef.current;
+    if (!state || alertActionPendingRef.current) return false;
+    alertActionPendingRef.current = true;
+    setAlertActionPending(true);
+    setAlertActionError('');
+    try {
+      const result = await requestSharedAlertAction({type,target,state});
+      if (sharedAlertsRef.current?.sessionId === state.sessionId) receiveSharedAlerts(result, true);
+      return true;
+    } catch (error) {
+      setAlertActionError(error instanceof Error ? error.message : 'Alert action failed.');
+      return false;
+    } finally {
+      alertActionPendingRef.current = false;
+      setAlertActionPending(false);
+    }
+  }, [receiveSharedAlerts]);
+
   const [snoozedThreats, setSnoozedThreats] = useState<Record<string, { until: number; initialRisk: string; lostPositionTime?: number }>>({});
   const [proximityAcknowledgements, setProximityAcknowledgements] = useState<Record<string, { id: string; lat: number; lon: number }>>({});
   const [ownShipPosition, setOwnShipPosition] = useState<{ lat: number; lon: number }>({ lat: 36.780956, lon: 14.545439 });
@@ -181,12 +246,21 @@ export function useDashboard() {
     }
   }, [appView]);
 
-  const snoozeThreat = useCallback((targetId: string) => {
+  const snoozeThreat = useCallback(async (targetId: string) => {
     const target = latestAisRef.current.targets.find(t => t.id === targetId);
+    if (sharedAlertsRef.current) {
+      const shown = target || sharedAlertsRef.current.banner;
+      if (!shown || shown.id !== targetId) return false;
+      return sharedAction(shown.alertKind === 'PROXIMITY' ? 'acknowledge' : 'snooze', shown);
+    }
+    if (!FORCE_SIMULATION && !MIXED_SIMULATION) {
+      setAlertActionError('Shared alert service is not ready. Reconnect or update the server plugin.');
+      return false;
+    }
     if (target?.alertKind === 'PROXIMITY' && target.areaProximityOnly && !target.isMoving) {
       const current = acknowledgeCurrentBubble(latestAisRef.current.targets);
       setProximityAcknowledgements(prev => ({ ...prev, ...current }));
-      return;
+      return true;
     }
     setTopThreat(currentTop => {
       const initialRisk = target?.risk || (currentTop?.id === targetId ? currentTop.risk : 'ORANGE');
@@ -197,16 +271,20 @@ export function useDashboard() {
       }));
       return currentTop;
     });
-  }, []);
+    return true;
+  }, [sharedAction]);
 
   const unsnoozeThreats = useCallback(() => {
+    if (sharedAlertsRef.current) { void sharedAction('reopen'); return; }
+    if (!FORCE_SIMULATION && !MIXED_SIMULATION) return;
     setSnoozedThreats({});
     setProximityAcknowledgements({});
-  }, []);
+  }, [sharedAction]);
 
   const bannerSelectorRef = useRef(new BannerThreatSelector());
   const [bannerSelectionTick, setBannerSelectionTick] = useState(0);
   const activeThreat = useMemo(() => {
+    if (sharedAlerts) return sharedAlerts.banner;
     const candidates: AisTarget[] = [];
     const seen = new Set<string>();
     const isHarborTarget = (t: AisTarget) => Boolean(t.areaProximityOnly && t.alertKind !== 'PROXIMITY');
@@ -226,13 +304,13 @@ export function useDashboard() {
     });
     const now = Date.now();
     const valid = candidates.filter(t => {
-      if (t.alertKind === 'PROXIMITY' && proximityAcknowledgements[t.id]) return false;
+      if (t.alertKind === 'PROXIMITY' && (t.proximityEntryObserved === false || proximityAcknowledgements[t.id])) return false;
       return !isThreatSnoozed(t, snoozedThreats[t.id], now);
     });
     const nearest = nearestBubblePresence(valid);
     const bannerCandidates = valid.filter(t => t.alertKind !== 'PROXIMITY' || t.id === nearest?.id);
     return bannerSelectorRef.current.select(bannerCandidates, now);
-  }, [topThreat, aisTargets, snoozedThreats, proximityAcknowledgements, bannerSelectionTick]);
+  }, [topThreat, aisTargets, snoozedThreats, proximityAcknowledgements, bannerSelectionTick, sharedAlerts]);
   const priorityDeadline = bannerSelectorRef.current.pendingDeadline;
   useEffect(() => {
     if (priorityDeadline === null) return;
@@ -256,9 +334,9 @@ export function useDashboard() {
     });
   }, [aisTargets]);
   const displayedAisTargets = useMemo(() => aisTargets.map(t =>
-    t.areaProximityOnly && !t.isMoving && proximityAcknowledgements[t.id]
+    t.areaProximityOnly && !t.isMoving && (sharedAlerts ? sharedAlerts.acknowledgements[t.id] : proximityAcknowledgements[t.id])
       ? { ...t, risk: 'GREY' as const, riskMsg: '', proximityAcknowledged: true } : t
-  ), [aisTargets, proximityAcknowledgements]);
+  ), [aisTargets, proximityAcknowledgements, sharedAlerts]);
 
   useEffect(() => {
     setSnoozedThreats(prev => {
@@ -479,6 +557,10 @@ export function useDashboard() {
   const realAisTargetsRef = useRef<AisTarget[]>([]);
   const simulatedAisTargetsRef = useRef<AisTarget[]>([]);
   const processIncomingData = useCallback((path: string, val: any, timeMs?: number) => {
+    if (sharedSessionManagedRef.current && !applyingSessionRef.current) {
+      if (path.startsWith('environment.ais_') || path === 'environment.harbor_clusters') return;
+      if (sharedSessionModeRef.current === 'simulation' && (path.startsWith('navigation.') || path.startsWith('environment.wind.') || path.startsWith('environment.depth.'))) return;
+    }
     if ((val === null && path !== 'environment.ais_top_threat' && path !== 'navigation.state') || val === undefined || (typeof val === 'number' && isNaN(val))) return;
 
     if ((path === 'environment.wind.speedApparent' || path === 'environment.wind.speedTrue') && val > 51.44) return;
@@ -491,7 +573,7 @@ export function useDashboard() {
 
     const syntheticUpdate = path === 'simulation.ais_targets';
     if (!syntheticUpdate) {
-      store.timestamps[path] = localNow;
+      store.timestamps[path] = applyingSessionRef.current ? Math.min(localNow, now) : localNow;
       store.raw[path] = val;
       store.lastMessageReceivedTime = localNow;
     }
@@ -624,6 +706,8 @@ export function useDashboard() {
         }
       }
     }
+
+    if (path === 'environment.ais_shared_alerts') { receiveSharedAlerts(val); return; }
 
     if (path === 'environment.ais_targets' || syntheticUpdate) {
       if (Array.isArray(val)) {
@@ -863,6 +947,86 @@ export function useDashboard() {
     });
   }, []);
 
+  // A single environment session supplies the exact same scenario to all clients.
+  useEffect(() => {
+    let disposed = false;
+    let busy = false;
+    let resumePending = false;
+    let controller: AbortController | null = null;
+    const poll = async () => {
+      if (disposed || busy) return;
+      busy = true;
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller?.abort(), 4000);
+      try {
+        const response = await fetch('/rotevista-dashboard', { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) throw new Error('Dashboard session unavailable');
+        const frame = await response.json();
+        if (disposed || resumePending || !frame?.generation || !['live','simulation','mixed'].includes(frame.mode)) return;
+        const previous = sessionFrameRef.current;
+        if (previous?.generation === frame.generation && previous.revision >= frame.revision) return;
+        const changed = (previous && previous.generation !== frame.generation) || (!previous && frame.mode === 'simulation');
+        if (changed) {
+          sharedAlertsRef.current = null;
+          setSharedAlerts(null);
+          setAlertActionError('');
+          setSelectedAisTargetId(null);
+          const store = storeRef.current;
+          setHistoriesState(resetDashboardMeasurements(store) as any);
+          sessionRawTimesRef.current = {};
+          setWindRadarSlots([]); setFutureForecast(null);
+        }
+        sessionFrameRef.current = { generation: frame.generation, revision: frame.revision };
+        sharedSessionManagedRef.current = true;
+        sharedSessionModeRef.current = frame.mode;
+        sessionConnectedRef.current = true;
+        setDashboardMode(frame.mode); setDashboardEnvironment(frame.environment);
+        sharedEnvironmentRef.current = frame.environment;
+        applyingSessionRef.current = true;
+        try {
+          for (const [path, value] of Object.entries(frame.raw || {})) {
+            const sourceTime = frame.rawTimes?.[path];
+            const signature = JSON.stringify(value);
+            const previousValue = sessionRawTimesRef.current[path];
+            if (previousValue && (Number.isFinite(sourceTime) ? sourceTime <= previousValue.time : signature === previousValue.value)) continue;
+            sessionRawTimesRef.current[path] = {time: Number.isFinite(sourceTime) ? sourceTime : frame.serverNow, value: signature};
+            const observedAt = Number.isFinite(sourceTime) ? Date.now() - Math.max(0, frame.serverNow - sourceTime) : Date.now();
+            processIncomingData(path, value, observedAt);
+          }
+          processIncomingData('environment.ais_targets', frame.targets || [], frame.serverNow);
+          processIncomingData('environment.harbor_clusters', frame.harborClusters || [], frame.serverNow);
+          if (frame.sharedAlerts) receiveSharedAlerts(frame.sharedAlerts, true);
+        } finally { applyingSessionRef.current = false; }
+        if (changed && frame.mode !== 'simulation') {
+          const generation = frame.generation;
+          void fetch('/rotevista-history', { cache: 'no-store' })
+            .then(result => result.ok ? result.json() : null)
+            .then(history => {
+              // A response requested before another mode change must not mix
+              // real histories into a later simulation, even after a round trip.
+              if (!history || disposed || sessionFrameRef.current?.generation !== generation ||
+                  sharedSessionModeRef.current === 'simulation') return;
+              setHistoriesState(restoreDashboardHistory(storeRef.current, history) as any);
+              if (Array.isArray(history.windRadarSlots)) setWindRadarSlots(history.windRadarSlots);
+              setFutureForecast(history.futureForecast || null);
+            }).catch(() => {});
+        }
+      } catch {
+        if (!disposed && !resumePending) sessionConnectedRef.current = false;
+      } finally {
+        clearTimeout(timeout); busy = false;
+        if (resumePending && !disposed) { resumePending = false; void poll(); }
+      }
+    };
+    const unsubscribeRecovery = subscribeDashboardRecovery(document, window, () => {
+      if (busy) { resumePending = true; controller?.abort(); }
+      else void poll();
+    });
+    void poll();
+    const timer = setInterval(() => { void poll(); }, 1000);
+    return () => { disposed = true; unsubscribeRecovery(); clearInterval(timer); controller?.abort(); };
+  }, [processIncomingData, receiveSharedAlerts]);
+
   // Connessione a Signal K o fallback a simulazione offline
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -1047,6 +1211,7 @@ export function useDashboard() {
               if (Array.isArray(d.targets)) processIncomingData('environment.ais_targets', d.targets);
               if (Array.isArray(d.harborClusters)) processIncomingData('environment.harbor_clusters', d.harborClusters);
               if (d.topThreat !== undefined) processIncomingData('environment.ais_top_threat', d.topThreat);
+              if (d.sharedAlerts) receiveSharedAlerts(d.sharedAlerts);
             }
           })
           .catch(() => {});
@@ -1092,6 +1257,7 @@ export function useDashboard() {
               { path: 'environment.wind.directionTrue', minPeriod: 333 },
               { path: 'environment.ais_targets', minPeriod: 5000 },
               { path: 'environment.ais_top_threat', minPeriod: 5000 },
+              { path: 'environment.ais_shared_alerts', minPeriod: 0 },
               { path: 'environment.harbor_clusters', minPeriod: 15000 },
               { path: 'environment.rotevista_config', minPeriod: 1000 },
             ],
@@ -1110,7 +1276,8 @@ export function useDashboard() {
           fetch('/rotevista-history')
             .then(res => (res.ok ? res.json() : null))
             .then(data => {
-              if (data && !storeRef.current.isSimulating) {
+              if (sharedSessionModeRef.current === 'simulation') return;
+              if (data && !storeRef.current.isSimulating && sharedSessionModeRef.current !== 'simulation') {
                 const store = storeRef.current;
                 let hasHistory = false;
                 (['stw', 'sog', 'vmg', 'depth', 'tws', 'aws', 'twd'] as const).forEach(key => {
@@ -1132,6 +1299,7 @@ export function useDashboard() {
                 } else {
                   fetchAisTargets();
                 }
+                if (data.ais_shared_alerts) receiveSharedAlerts(data.ais_shared_alerts);
                 if (data.ais_top_threat !== undefined) {
                   setTopThreat(data.ais_top_threat);
                 }
@@ -1170,7 +1338,7 @@ export function useDashboard() {
                   store.longBuf.twd = [...histItems, ...(store.longBuf.twd || [])].sort((a, b) => a.time - b.time);
                 }
 
-                if (hasHistory) {
+                if (hasHistory && sharedSessionModeRef.current !== 'simulation') {
                   setHistoriesState({
                     stw: [...store.histories.stw],
                     sog: [...store.histories.sog],
@@ -1253,7 +1421,7 @@ export function useDashboard() {
           fetch('/rotevista-history')
             .then(res => (res.ok ? res.json() : null))
             .then(data => {
-              if (data && !storeRef.current.isSimulating) {
+              if (data && !storeRef.current.isSimulating && sharedSessionModeRef.current !== 'simulation') {
                 const store = storeRef.current;
                 if (data.rollingAngles) {
                   (['hdg', 'cog', 'twa', 'awa', 'twd'] as const).forEach(key => {
@@ -1852,12 +2020,12 @@ export function useDashboard() {
       ].filter(Boolean) as number[];
 
       const oldestTime = oldestTimestamps.length > 0 ? Math.min(...oldestTimestamps) : null;
-      const isSocketOpen = store.isSocketOpen;
+      const isSocketOpen = store.isSocketOpen || sessionConnectedRef.current;
       const isDataFlowing = now - store.lastMessageReceivedTime < 6000;
 
       let nextStatusText = 'OFFLINE';
       let nextStatusClass = 'offline';
-      if (store.isSimulating) {
+      if (sharedSessionModeRef.current === 'simulation' || store.isSimulating) {
         nextStatusText = 'SIMULAZIONE';
         nextStatusClass = 'simulating';
       } else if (isSocketOpen && isDataFlowing) {
@@ -1877,7 +2045,9 @@ export function useDashboard() {
         nextStatusText = isSocketOpen ? 'ATTESA DATI...' : 'OFFLINE';
         nextStatusClass = 'offline';
       }
-      if (MIXED_SIMULATION) nextStatusText = `${nextStatusText} + SIM`;
+      if (sharedSessionModeRef.current === 'mixed') nextStatusText = 'MIXED · LIVE + SIM';
+      if (sharedSessionModeRef.current === 'simulation') nextStatusText = 'SIMULATION';
+      if (sharedEnvironmentRef.current === 'dev') nextStatusText = `DEV · ${nextStatusText}`;
       setConnectionStatus(prev =>
         prev.text === nextStatusText && prev.className === nextStatusClass
           ? prev
@@ -1948,8 +2118,14 @@ export function useDashboard() {
     aisTargets: displayedAisTargets,
     harborClusters,
     topThreat: activeThreat,
+    sharedSnoozeReady: sharedAlerts ? sharedSnoozeReady : undefined,
+    alertActionError,
+    alertActionPending,
+    dismissAlertActionError: () => setAlertActionError(''),
     snoozeThreat,
-    isMixedSimulation: MIXED_SIMULATION,
+    isMixedSimulation: dashboardMode === 'mixed',
+    dashboardMode,
+    dashboardEnvironment,
     unsnoozeThreats,
     selectedAisTargetId,
     setSelectedAisTargetId,
