@@ -290,14 +290,6 @@ class WindEngine {
         if (gapBefore) graphTempBuf[type] = [];
         const tempBuf = graphTempBuf[type];
 
-        // Anti-dropout dinamico sul vento forte
-        if ((type === 'tws' || type === 'aws') && value < 0.05 && tempBuf.length > 0) {
-            const lastPoint = tempBuf[tempBuf.length - 1];
-            const reef1 = currentConfig.graphs ? currentConfig.graphs.reef1 : 15;
-            const glitchThreshold = reef1 * 0.5;
-            if (lastPoint && lastPoint.val > glitchThreshold) return;
-        }
-
         // Cattura la velocità del vento corrente (in m/s) al momento della lettura
         const currentTws = type === 'twd' ? resolveTws(raw, this.getRawTimes(), now, windDataPolicy) : null;
         tempBuf.push({ val: value, tws: currentTws, time: now });

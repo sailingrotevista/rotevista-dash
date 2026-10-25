@@ -122,6 +122,7 @@ Prima del prossimo rilascio verificare visivamente le ultime modifiche al popup 
 - Prima di un fix GPS non disegnare un'icona della propria barca alle coordinate iniziali della mappa. La posizione iniziale è solo un centro di presentazione.
 - Alla scadenza GPS conservare l'ultima posizione nota come punto grigio con indicazione GPS stale, senza vettori, ghost o cerchi centrati sulla propria barca. Sospendere inseguimento e triangolo di collisione basati su quella posizione; resta possibile ispezionare un target.
 - Con posizione valida ma prua non disponibile usare un punto senza orientamento. I vettori richiedono posizione, COG e SOG validi.
+- Lo scafo segue la prua; il vettore geografico e lo spostamento della ghost seguono il COG, con distanze calcolate dalla SOG. La ghost conserva l’orientamento di prua dello scafo. Le rotazioni restano indipendenti anche attraversando 0°/360°.
 - Nella lista usare `---°` per prua assente, `--.-` per velocità assente e indicare GPS non disponibile/scaduto invece di mostrare una barca ferma per mancanza del dato.
 
 Verifiche: [navigazione della propria barca](../test/ownShipNavigation.test.js).

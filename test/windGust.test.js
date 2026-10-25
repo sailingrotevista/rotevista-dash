@@ -32,3 +32,39 @@ test('sustained gust rises progressively and restarts after a long data gap',()=
  assert.equal(e.gustFilter.aws.val,5);
  }finally{Date.now=original;}
 });
+
+for (const [channel,path] of [['aws','environment.wind.speedApparent'],['tws','environment.wind.speedTrue']]) {
+ test(`${channel}: persistent measured zero after wind keeps history advancing and silence still expires`,()=>{
+  const original=Date.now;let now=1800000;Date.now=()=>now;
+  try {
+   const e=new WindEngine({debug(){}},()=>({graphs:{historyMinutes:5,reef1:15}}));
+   for(let second=0;second<=120;second++) {
+    now=1800000+second*1000;
+    e.processIncomingDelta(path,second<2 ? 10/1.94384 : 0,now);
+    e.sampleHistory(now);
+   }
+   const history=e.getHistories()[channel];
+   assert.ok(history.length>20);
+   assert.ok(now-history.at(-1).time<=5000);
+   assert.ok(history.at(-1).val<0.01);
+   assert.ok(history.every(p=>!p.gapBefore));
+   assert.equal(e.getRawTimes()[path],now);
+   now+=5000;e.sampleHistory(now);
+   const count=history.length;
+   now+=5000;e.sampleHistory(now);
+   assert.equal(history.length,count);
+  }finally{Date.now=original;}
+ });
+ test(`${channel}: an isolated zero is smoothed rather than discarded or treated as a gap`,()=>{
+  const e=new WindEngine({},()=>({graphs:{historyMinutes:5,reef1:15}}));
+  const start=1800000;
+  e.manageHistory(channel,10,start);
+  e.manageHistory(channel,10,start+1000);
+  e.manageHistory(channel,0,start+2000);
+  assert.equal(e.graphTempBuf[channel].at(-1).val,0);
+  for(let second=3;second<=6;second++) e.manageHistory(channel,10,start+second*1000);
+  assert.ok(e.gustFilter[channel].val>6 && e.gustFilter[channel].val<10);
+  assert.equal(e.getHistories()[channel].at(-1).val,10);
+  assert.equal(e.getHistories()[channel].at(-1).gapBefore,undefined);
+ });
+}

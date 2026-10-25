@@ -94,6 +94,7 @@ Verifiche: [priorità e aggiornamento prua](../test/windHeadingValidity.test.js)
 - Il primo campione assoluto inizializza il filtro al valore ricevuto. Dopo almeno `gustResetGapMs = 5000` senza campioni, reinizializzare al nuovo valore e non trascinare il massimo precedente all'interruzione.
 - Mantenere la stessa logica in motore e GUI. Non modificare le medie circolari né il filtro angolare ±15°, lasciati invariati su richiesta dell'utente.
 - Il filtro attenua variazioni brevi; non identifica direttamente il rollio.
+- Gli zeri validi e i valori prossimi a zero alimentano lo stesso filtro, anche dopo vento sostenuto: non scartarli in base alla misura precedente. Uno zero isolato viene smorzato; letture persistenti a zero fanno scendere progressivamente lo storico senza bloccarlo. Il silenzio del sensore mantiene la scadenza di 5 secondi e non genera misure zero.
 
 Verifiche: [continuità del filtro raffiche](../test/windGust.test.js).
 

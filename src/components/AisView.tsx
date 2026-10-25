@@ -1023,7 +1023,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       opacity = 1.0,
       interactive = false,
       onClick?: () => void,
-      cssVars?: { rot?: number; vecLen?: number; cpaLen?: number; ghostDist?: number; isRings?: boolean }
+      cssVars?: { rot?: number; courseRot?: number; vecLen?: number; cpaLen?: number; ghostDist?: number; isRings?: boolean }
     ) => {
       activeKeys.add(key);
       const map = mapRef.current;
@@ -1065,6 +1065,13 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
           const nextRot = prevRot + delta;
           el.dataset.rot = String(nextRot);
           el.style.setProperty('--vessel-rot', `${nextRot.toFixed(2)}deg`);
+        }
+        if (cssVars?.courseRot !== undefined) {
+          const prevRot = el.dataset.courseRot !== undefined ? parseFloat(el.dataset.courseRot) : cssVars.courseRot;
+          const delta = ((cssVars.courseRot - prevRot + 540) % 360) - 180;
+          const nextRot = prevRot + delta;
+          el.dataset.courseRot = String(nextRot);
+          el.style.setProperty('--course-rot', `${nextRot.toFixed(2)}deg`);
         }
         if (cssVars?.vecLen !== undefined) {
           el.dataset.vecLen = String(cssVars.vecLen);
@@ -1121,13 +1128,15 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       ? `<div class="vessel-course-vector" style="border-left:2px dashed #00c3ff;opacity:0.9;"></div>`
       : '';
     const ownGhostHtml = ownGhostPx >= 45 && activeGhostTarget
-      ? `<div class="cpa-ghost-vessel" data-ghost-id="${activeGhostTarget.id}"><svg viewBox="0 0 30 30" width="30" height="30"><path d="M 15,2 L 25,25 L 15,19 L 5,25 Z" fill="#00c3ff" stroke="#0369a1" stroke-width="1.8" stroke-linejoin="round" /></svg></div>`
+      ? `<div class="cpa-ghost-vessel" data-ghost-id="${activeGhostTarget.id}"><svg class="own-ghost-heading" viewBox="0 0 30 30" width="30" height="30"><path d="M 15,2 L 25,25 L 15,19 L 5,25 Z" fill="#00c3ff" stroke="#0369a1" stroke-width="1.8" stroke-linejoin="round" /></svg></div>`
       : '';
     const ownIconHtml = `
       <div class="own-ship-icon-wrapper" style="filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.35));">
-        ${ownVecHtml}
-        ${ownGhostHtml}
-        <svg viewBox="0 0 30 30" width="30" height="30">
+        <div class="own-ship-motion">
+          ${ownVecHtml}
+          ${ownGhostHtml}
+        </div>
+        <svg class="own-ship-heading" viewBox="0 0 30 30" width="30" height="30">
           ${ownShipPosition.valid && ownShipCourse.hdg !== null
             ? '<path d="M 15,2 L 25,25 L 15,19 L 5,25 Z" fill="#00c3ff" stroke="#0369a1" stroke-width="1.8" stroke-linejoin="round" />'
             : `<circle cx="15" cy="15" r="7" fill="${ownShipPosition.valid ? '#00c3ff' : '#94a3b8'}" stroke="#475569" stroke-width="2" />`}
@@ -1147,7 +1156,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       1.0,
       true,
       handleCenterOnOwnShip,
-      { rot: ownHeading, vecLen: ownVecPx, ghostDist: ownGhostPx }
+      { rot: ownHeading, courseRot: ownShipCourse.cog ?? 0, vecLen: ownVecPx, ghostDist: ownGhostPx }
     ) : null;
 
     // 1b. Dynamic Coaxial Range Rings & Labels (traslano con translate3d insieme alla barca/target)
