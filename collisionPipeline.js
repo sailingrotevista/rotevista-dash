@@ -548,16 +548,21 @@ function applyHarborProximityPolicy(target, bubbleMeters = 45) {
         delete target.areaProximityOnly;
         delete target.alertKind;
         delete target.safeBubbleMeters;
+        delete target.withinSafeBubble;
         delete target.proximityArea;
         return target;
     }
     const bubble = Number.isFinite(bubbleMeters) && bubbleMeters > 0 ? bubbleMeters : 45;
     const inside = Number.isFinite(target.currentHullClearanceMeters) && target.currentHullClearanceMeters <= bubble;
+    // The entry tracker owns initialization, motion evidence and hysteresis.
+    // Do not create a visual warning independently from that decision.
+    const active = Number.isFinite(target.currentHullClearanceMeters) && target.proximityEntryObserved === true;
     Object.assign(target, {
         areaProximityOnly: true,
-        alertKind: inside ? 'PROXIMITY' : undefined,
-        risk: inside ? 'ORANGE' : 'GREY',
-        riskMsg: inside ? 'SAFE BUBBLE PROXIMITY' : '',
+        withinSafeBubble: inside,
+        alertKind: active ? 'PROXIMITY' : undefined,
+        risk: active ? 'ORANGE' : 'GREY',
+        riskMsg: active ? 'SAFE BUBBLE PROXIMITY' : '',
         safeBubbleMeters: bubble,
         cpa: null, tcpa: -1, crossDir: '', crossRule: '',
     });

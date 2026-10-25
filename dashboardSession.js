@@ -85,7 +85,11 @@ class DashboardSession {
                     String(raw['navigation.state'] || '').includes('anchor') && this.mode==='mixed');
                 this.dynamic=result.targets.filter(t=>t.isMoving);
                 targets=this.mode==='mixed' ? [...targets,...result.targets] : result.targets;
-                for (const t of targets) if (t.isSimulated) t.proximityEntryObserved=this.bubbleEntries.update(t,own,live.config?.aisAlerter?.criticalProximity);
+                for (const t of targets) if (t.isSimulated) {
+                    const positionTime=this.mode==='simulation' ? now : live.rawTimes?.['navigation.position'];
+                    t.proximityEntryObserved=this.bubbleEntries.update(t,{...own,positionTime},live.config?.aisAlerter?.criticalProximity,now);
+                    if (t.inCluster && !t.isMoving && t.motionState!=='MOVING') pipeline.applyHarborProximityPolicy(t,live.config?.aisAlerter?.criticalProximity);
+                }
                 this.bubbleEntries.prune(new Set(targets.filter(t=>t.isSimulated).map(t=>t.id)));
                 this.simAlerts.update(targets,own,now);
                 if (now-this.scenarioStartedAt>60000 && this.dynamic.every(t=>t.tcpa<0 && !['RED','ORANGE'].includes(t.risk))) this.dynamic=[];

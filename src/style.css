@@ -2072,6 +2072,12 @@ body.night-mode .ais-tool-btn.btn-active,
     gap: 2px;
 }
 
+.ais-detail-alert-box.neutral {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    color: #475569;
+}
+
 .ais-detail-alert-box.red {
     background: #fff1f2;
     border: 1px solid #f43f5e;

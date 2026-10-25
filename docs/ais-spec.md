@@ -94,6 +94,27 @@ Limite attuale: il riconoscimento automatico della nostra sosta tramite motion t
 - Il banner condiviso mantiene per 10 secondi un concorrente di pari gravità prima di sostituire il target; un'escalation non aspetta questo intervallo.
 - Per la prossimità mostrare un solo rappresentante: il target non riconosciuto con la minima separazione attuale tra gli scafi.
 
+## Safe bubble: presenza iniziale, ingresso e isteresi
+
+Regola aggiornata con l'utente il 25 ottobre 2026 dopo il monitoraggio del riavvio del Cerbo:
+
+- La prima apparizione già dentro la bubble non genera segnalazione: nessun banner, arancione, tag `PROXIMITY` o conteggio warning.
+- Il target rimane normalmente visibile e ispezionabile; nei dettagli resta disponibile la separazione tra gli scafi, con presentazione neutra.
+- Registrare la presenza relativa prima che il porto sia riconosciuto. L'inclusione successiva nell'area non è un ingresso nella bubble.
+- Il solo jitter oltre entrambe le soglie non deve riarmare una presenza riconosciuta ferma. Serve movimento reale confermato dal tracker, oppure uno spostamento della nostra barca.
+- Per lo spostamento proprio, il filtro locale della bubble usa almeno 10 m di avanzamento con SOG di almeno 0,8 kn, oppure oltre 35 m dal riferimento. Questo non equivale al riconoscimento automatico della nostra barca all'ancora.
+- Con evidenza di movimento, attivare l'ingresso entro la distanza configurata, normalmente 45 m; usare un margine esterno di 10 m per l'uscita, normalmente oltre 55 m.
+- Confermare le transizioni con almeno 2 nuove osservazioni ricevute della geometria relativa e almeno 10 secondi fra la prima e l'ultima conferma. Le posizioni possono riguardare il target o la nostra barca; il trascorrere del tempo, le riletture e le proiezioni non contano.
+- Il filtro temporale è aggiuntivo: non sostituisce l'evidenza di movimento. Con aggiornamenti lenti la conferma può richiedere più di 10 secondi.
+- Una volta attivo, mantenere il warning anche fra 45 e 55 m. Il rientro richiede un'uscita confermata, non una singola lettura fuori soglia.
+- Se il target è tornato fermo, le oscillazioni della stessa sosta non devono far cambiare continuamente lo stato del warning già attivo.
+- Banner, colore, tag e contatori devono usare lo stesso stato confermato del tracker della bubble; non ricalcolare indipendentemente un warning dal solo confronto con 45 m.
+- Non creare acknowledge automatici per nascondere le presenze iniziali: assenza di ingresso osservato e riconoscimento manuale sono condizioni diverse.
+- L'acknowledge condiviso resta valido per le presenze riconosciute senza riarmo dovuto alla sola uscita/rientro nella bubble; restano le regole di movimento, contesto e pulizia già definite.
+- Queste regole riguardano la prossimità dei target fermi nelle aree riconosciute. Gli allarmi nominali dei target mobili e degli ostacoli fuori area rimangono indipendenti.
+
+Riferimenti: [tracker degli ingressi](../bubbleEntryTracker.js), [politica di prossimità](../collisionPipeline.js), [test degli ingressi e del jitter](../test/bubbleEntryTracker.test.js).
+
 ## Dati vecchi e contatti persi
 
 - L'età della posizione deriva dall'ultimo timestamp AIS valido della posizione, non dall'arrivo di nome, dimensioni o altri metadati.

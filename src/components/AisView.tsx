@@ -1786,7 +1786,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                 </button>
               </div>
 
-              {(selectedTarget.risk === 'RED' || selectedTarget.risk === 'ORANGE' || (selectedTarget.areaProximityOnly && !selectedTarget.proximityAcknowledged)) && (
+              {(selectedTarget.risk === 'RED' || selectedTarget.risk === 'ORANGE') && (
                 <button
                   type="button"
                   className="banner-btn ais-detail-snooze"
@@ -1813,8 +1813,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                 </div>
               )}
               {selectedTarget.areaProximityOnly && (
-                <div className="ais-detail-alert-box orange">
-                  <span className="alert-title">{selectedTarget.proximityAcknowledged ? 'PROXIMITY ACKNOWLEDGED' : 'MOORING AREA · SAFE BUBBLE'}</span>
+                <div className={`ais-detail-alert-box ${selectedTarget.alertKind === 'PROXIMITY' && !selectedTarget.proximityAcknowledged ? 'orange' : 'neutral'}`}>
+                  <span className="alert-title">{selectedTarget.proximityAcknowledged ? 'PROXIMITY ACKNOWLEDGED' : selectedTarget.alertKind === 'PROXIMITY' ? 'MOORING AREA · SAFE BUBBLE' : 'MOORING AREA · CLEARANCE'}</span>
                   <span className="alert-desc">
                     Current hull clearance: {formatDist(selectedTarget.currentHullClearanceMeters ?? null)} · Safe bubble: {selectedTarget.safeBubbleMeters} m
                   </span>

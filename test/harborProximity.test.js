@@ -48,8 +48,9 @@ test('safe bubble uses present hull clearance, not antenna range or future CPA',
     const { target, top } = fixture({ clustered: true, distance: 50 });
     assert.equal(target.dist, 50);
     assert.ok(target.currentHullClearanceMeters < 45);
-    assert.equal(target.risk, 'ORANGE');
-    assert.equal(target.alertKind, 'PROXIMITY');
+    assert.equal(target.risk, 'GREY');
+    assert.equal(target.alertKind, undefined);
+    assert.equal(target.withinSafeBubble, true);
     assert.equal(target.safeBubbleMeters, 45);
     assert.equal(target.cpa, null);
     assert.equal(top, null, 'first discovery inside remains visible without a startup banner');
@@ -79,4 +80,25 @@ test('proximity acknowledgement has no timer and does not rearm after leaving th
     assert.equal(proximityAcknowledgementExpired(area, undefined, null), false);
     assert.equal(proximityAcknowledgementExpired(area, { isMoving: true }, { lat: 36, lon: 14 }), true);
     assert.equal(proximityAcknowledgementExpired(area, { isMoving: false }, { lat: 36 + 4000 / 111139, lon: 14 }), true);
+});
+
+test('the same entry state drives visual risk, tag and banner eligibility across hysteresis', () => {
+    const target = { inCluster: true, isMoving: false, motionState: 'STATIONARY', currentHullClearanceMeters: 50,
+        proximityEntryObserved: true };
+    applyHarborProximityPolicy(target,45);
+    assert.equal(target.withinSafeBubble,false);
+    assert.equal(target.risk,'ORANGE');
+    assert.equal(target.alertKind,'PROXIMITY');
+    target.proximityEntryObserved=false;
+    applyHarborProximityPolicy(target,45);
+    assert.equal(target.risk,'GREY');
+    assert.equal(target.alertKind,undefined);
+});
+
+test('no entry state means no startup warning and never implies an automatic acknowledgement', () => {
+    const target = { inCluster: true, isMoving: false, currentHullClearanceMeters: 0 };
+    applyHarborProximityPolicy(target,45);
+    assert.equal(target.risk,'GREY');
+    assert.equal(target.withinSafeBubble,true);
+    assert.equal(target.proximityAcknowledged,undefined);
 });

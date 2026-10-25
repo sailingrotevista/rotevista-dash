@@ -37,6 +37,9 @@ test('anchoring reduces alerts while a 10kn target at 500m on a collision course
     const proximity = { inCluster: true, isMoving: false, currentHullClearanceMeters: 40 };
     applyHarborProximityPolicy(proximity, 45);
     assert.equal(proximity.safeBubbleMeters, 45);
+    assert.equal(proximity.risk, 'GREY');
+    proximity.proximityEntryObserved = true;
+    applyHarborProximityPolicy(proximity, 45);
     assert.equal(proximity.risk, 'ORANGE');
 });
 

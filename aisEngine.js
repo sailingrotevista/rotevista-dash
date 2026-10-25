@@ -718,7 +718,10 @@ class AisEngine {
             let harborClusters = this.harborDetector.processHarbors(nearbyVessels, myGps, raw, trueWindDir, now);
             for (let i = 0; i < nearbyVessels.length; i++) {
                 let v = nearbyVessels[i];
-                v.proximityEntryObserved = this.bubbleEntryTracker.update(v, myGps, cfg.criticalProximity);
+                v.proximityEntryObserved = this.bubbleEntryTracker.update(v, {
+                    ...myGps, sog: mySpeedKn,
+                    positionTime: this.windEngine.lastPathProcessTimes?.['navigation.position'],
+                }, cfg.criticalProximity, now);
                 if (this.aisPersistentCache[v.id]) {
                     this.aisPersistentCache[v.id].isMoored = Boolean(v.isMoored);
                 }

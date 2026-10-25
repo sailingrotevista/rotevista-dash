@@ -107,6 +107,7 @@ export interface AisTarget {
   isSimulated?: boolean;
   areaProximityOnly?: boolean;
   proximityEntryObserved?: boolean;
+  withinSafeBubble?: boolean;
   areaKind?: 'PORT' | 'ANCHORAGE' | 'PROVISIONAL';
   reportedNavigationState?: string;
   proximityAcknowledged?: boolean;
