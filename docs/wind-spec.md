@@ -197,3 +197,20 @@ Verifiche: [validità manovre](../test/windManeuverValidity.test.js).
 - SAIL mantiene le condizioni TWS > 7 kn e SOG > 1 kn, senza esclusione per SOG > 75% TWS.
 - AUTO mantiene anche la precedente esclusione automatica SOG > 75% TWS al lasco/poppa.
 - Invariati smorzamento TWA, fascia 155–170° sul lato opposto per confermare il cambio e pausa di 60 secondi tra avvisi. Il cambio modalità non genera da solo un suono.
+
+## Scorrimento temporale dei grafici
+
+- Il bordo destro dei grafici STW, SOG/VMG, profondità e TWS/AWS rappresenta il tempo corrente, non il timestamp dell'ultimo campione.
+- Aggiornare la finestra ogni secondo anche senza nuove misure, e alla ripresa della pagina.
+- Senza sensore valido, non aggiungere valori: la traccia esistente scorre verso sinistra e scompare quando esce dalla durata visibile. Escludere campioni futuri dalla finestra.
+- Conservare durata configurata, raddoppio da fermi, aggregazione dei campioni, scale e buffer storici.
+
+Verifiche: [finestra temporale grafici](../test/graphViewport.test.js).
+
+### Interruzioni conservate nello storico
+
+- Dopo una pausa di almeno 15 secondi fra campioni elaborati di un canale, server e aggregatore GUI iniziano un nuovo intervallo senza mescolare il buffer incompleto precedente con i dati appena tornati.
+- Il primo punto alla ripresa porta `gapBefore: true`, conservato nella risposta dello storico e nel ripristino dopo ricaricamento. Il grafico interrompe sia linea sia riempimento su quel confine anche se la distanza temporale è inferiore alla soglia geometrica ordinaria.
+- Nessun punto zero o campione di riempimento viene generato durante il silenzio.
+
+Verifiche: [interruzioni dello storico](../test/windHistoryGaps.test.js).

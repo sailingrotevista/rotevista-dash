@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { graphViewport } from '../utils/graphViewport.mjs';
 import { HistoryPoint, AppConfig, GraphMode } from '../types';
 
 interface SparklineProps {
@@ -30,29 +31,22 @@ export const Sparkline: React.FC<SparklineProps> = React.memo(({
 
   const visibleMinutes = (config.graphs.historyMinutes || 5) * (isNavigating ? 1 : 2);
   const viewportMs = visibleMinutes * 60000;
-  const latestTime = data && data.length > 0 ? data[data.length - 1].time : 0;
-  const viewportStart = latestTime - viewportMs;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const refresh = () => setNow(Date.now());
+    const timer = window.setInterval(refresh, 1000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
 
-  // 1. FILTER, SORT AND DEDUPLICATE STRICTLY BY TIME
-  const visibleData = useMemo(() => {
-    if (!data || data.length === 0) return [];
-
-    // Filter points in viewport
-    const inRange = data.filter(p => p && isFinite(p.val) && typeof p.time === 'number' && p.time >= viewportStart);
-
-    // Sort ascending by time
-    inRange.sort((a, b) => a.time - b.time);
-
-    // Strictly ensure time increases monotonically (no duplicates, no backward steps)
-    const sanitized: HistoryPoint[] = [];
-    for (let i = 0; i < inRange.length; i++) {
-      const pt = inRange[i];
-      if (sanitized.length === 0 || pt.time > sanitized[sanitized.length - 1].time) {
-        sanitized.push(pt);
-      }
-    }
-    return sanitized;
-  }, [data, viewportStart]);
+  const { start: viewportStart, points: visibleData } = useMemo(
+    () => graphViewport(data, now, viewportMs), [data, now, viewportMs],
+  );
 
   // 2. SCALE CALCULATION (Exact match with original charts.js calculateScale)
   const { min, max } = useMemo(() => {
@@ -216,7 +210,7 @@ export const Sparkline: React.FC<SparklineProps> = React.memo(({
       const y2 = h - Math.max(0, Math.min(1, (pB.val - min) / range)) * h;
 
       const deltaTime = pB.time - pA.time;
-      const isHistoryGap = deltaTime <= 0 || deltaTime > maxAllowedGap;
+      const isHistoryGap = pB.gapBefore === true || deltaTime <= 0 || deltaTime > maxAllowedGap;
 
       const props = getColorProps(pB.val);
       const offset1 = Math.max(0, Math.min(100, (x1 / w) * 100));

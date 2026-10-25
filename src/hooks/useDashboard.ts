@@ -505,6 +505,8 @@ export function useDashboard() {
     hasEverConnectedToSignalK: false,
   });
 
+  const historyInputTimesRef = useRef<Record<string, number>>({});
+
   // Manage history insertion
   const manageHistory = useCallback((type: keyof typeof storeRef.current.histories, value: number) => {
     if (value === undefined || value === null || !isFinite(value)) return;
@@ -521,10 +523,14 @@ export function useDashboard() {
       store.lastUpdates[type] = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
     }
 
+    const lastInput = historyInputTimesRef.current[type];
+    const gapBefore = Number.isFinite(lastInput) && now - lastInput >= 15000;
+    historyInputTimesRef.current[type] = now;
+    if (gapBefore) store.graphTempBuf[type] = [];
     const tempBuf = store.graphTempBuf[type];
     tempBuf.push({ val: value, time: now });
 
-    const bucketReady = (now - store.lastUpdates[type] > bucketIntervalMs) || store.histories[type].length === 0;
+    const bucketReady = gapBefore || (now - store.lastUpdates[type] > bucketIntervalMs) || store.histories[type].length === 0;
     if (!bucketReady) return;
 
     let finalValue = value;
@@ -569,7 +575,7 @@ export function useDashboard() {
     if (!isFinite(finalValue)) return;
     finalValue = Math.max(0, finalValue);
 
-    store.histories[type].push({ val: finalValue, time: now });
+    store.histories[type].push({ val: finalValue, time: now, ...(gapBefore ? { gapBefore: true } : {}) });
 
     const maxViewportMinutes = historyMinutes * 2;
     const maxHistoryMs = maxViewportMinutes * 60000 + 60000;
@@ -1033,6 +1039,7 @@ export function useDashboard() {
           setSelectedAisTargetId(null);
           const store = storeRef.current;
           setHistoriesState(resetDashboardMeasurements(store) as any);
+          historyInputTimesRef.current = {};
           sessionRawTimesRef.current = {};
           setWindRadarSlots([]); setFutureForecast(null);
         }

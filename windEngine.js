@@ -54,6 +54,7 @@ class WindEngine {
         // Database dello storico in RAM sul server (Sintonizzato Pro v6.0)
         this.histories = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
         this.gustFilter = {};
+        this.historyInputTimes = {};
         this.graphTempBuf = { stw: [], sog: [], depth: [], tws: [], vmg: [], aws: [], twd: [] };
         this.lastUpdates = { stw: 0, sog: 0, depth: 0, tws: 0, vmg: 0, aws: 0, twd: 0 };
         this.raw = {};
@@ -443,6 +444,10 @@ class WindEngine {
             lastUpdates[type] = Math.floor(now / bucketIntervalMs) * bucketIntervalMs;
         }
 
+        const lastInput = this.historyInputTimes[type];
+        const gapBefore = Number.isFinite(lastInput) && now - lastInput >= 15000;
+        this.historyInputTimes[type] = now;
+        if (gapBefore) graphTempBuf[type] = [];
         const tempBuf = graphTempBuf[type];
 
         // Anti-dropout dinamico sul vento forte
@@ -458,7 +463,7 @@ class WindEngine {
         tempBuf.push({ val: value, tws: currentTws, time: now });
 
         // Controllo avanzamento del secchiello temporale (Bucket)
-        const bucketReady = (now - lastUpdates[type] > bucketIntervalMs) || histories[type].length === 0;
+        const bucketReady = gapBefore || (now - lastUpdates[type] > bucketIntervalMs) || histories[type].length === 0;
         if (!bucketReady) return;
 
         let finalValue = value;
@@ -579,14 +584,15 @@ class WindEngine {
         if (!isTwdType) {
             if (!isFinite(finalValue)) return;
             finalValue = Math.max(0, finalValue);
-            histories[type].push({ val: finalValue, time: now });
+            histories[type].push({ val: finalValue, time: now, ...(gapBefore ? { gapBefore: true } : {}) });
         } else {
             // Salvataggio specifico del TWD contenente l'oggetto { val, min, max, time }
             histories['twd'].push({
                 val: finalValue.val,
                 min: finalValue.min,
                 max: finalValue.max,
-                time: now
+                time: now,
+                ...(gapBefore ? { gapBefore: true } : {})
             });
 
             // --- TRIGGER DI CONGELAMENTO ARCO (Ogni :00 e :30 dell'orologio) ---

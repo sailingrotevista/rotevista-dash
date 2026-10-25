@@ -52,6 +52,7 @@ export interface AppConfig {
 export type PropulsionMode = 'AUTO' | 'SAIL' | 'MOTOR';
 
 export interface HistoryPoint {
+  gapBefore?: boolean;
   val: number;
   time: number;
   tws?: number;
