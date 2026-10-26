@@ -1,124 +1,138 @@
-# Specifiche del motion tracker
+# Specifiche di TargetMotionTracker: due stati
 
-Stato: revisionata e approvata con l'utente il 25 ottobre 2026.
-Verificata sul codice locale il 25 ottobre 2026, versione 9.4.0-beta.0.
+Stato: regole concordate il 26 ottobre 2026 e promosse nel [tracker operativo locale](../ais/targetMotionTracker.js). AisEngine e sessione dev usano questa implementazione; la chiave self condivide l’istanza AIS. La modifica richiede ancora pubblicazione/installazione per essere attiva sul Cerbo.
 
-## Scopo
+Questa revisione sostituisce il precedente progetto a quattro stati e le prove di partenza con due fix oltre un riferimento, durata minima, progressione, SOG >2 kn o fattori proporzionali. Tali regole non sono più attive.
 
-Distinguere uno spostamento reale da jitter AIS e movimenti confinati in una zona di sosta, anche quando la velocità riportata ha picchi occasionali.
+## Stati principali e prima osservazione
 
-Il tracker descrive il movimento e la sosta di ogni target. Non assegna direttamente l'etichetta di porto: HarborDetector combina queste evidenze con quelle degli altri target e con lo stato AIS dichiarato.
+Sono ammessi soltanto MOVING e STATIONARY.
 
-## Quali dati possono diventare osservazioni
-
-- Usare soltanto posizioni ricevute, valide e ordinate temporalmente.
-- Non usare posizioni proiettate come nuovi fix.
-- Non contare più volte la stessa posizione sorgente quando il server la rilegge.
-- Un nuovo nome, una dimensione o uno stato AIS non costituiscono una nuova posizione.
-- Non aumentare il numero di campioni o la durata osservata soltanto perché passa il tempo.
-- Conservare separatamente il timestamp sorgente, anche quando un timestamp leggermente futuro viene limitato per l'elaborazione.
-
-## Stato del movimento
-
-| Stato interno | Significato |
+| SOG nella prima osservazione valida | Stato iniziale |
 | --- | --- |
-| `STATIONARY` | Posizione confinata nell'area di riferimento |
-| `POSSIBLE_MOVEMENT` | Uscita dall'area ancora da confermare |
-| `MOVING` | Movimento reale riconosciuto |
+| SOG numerica finita fra 0 e 0,5 kn inclusi | STATIONARY |
+| SOG maggiore di 0,5 kn | MOVING |
+| Mancante, null, non numerica, negativa o non finita | MOVING |
 
-Alla prima osservazione, senza indicazioni di ormeggio o ancoraggio, la soglia iniziale di movimento è 0,8 kn. Le osservazioni successive possono riconoscere una partenza anche a velocità inferiori: non classificare definitivamente una barca come ferma in base alla sola SOG.
+La soglia iniziale è configurata da `initialStationaryMaxSpeedKnots`. Si applica soltanto al primo fix, non alle successive regole di arresto e ripartenza.
 
-### Riconoscimento della sosta
+Gli indizi AIS di ormeggio/ancoraggio e l’appartenenza a un’area non sostituiscono questa regola. AisEngine distingue ora uno zero realmente ricevuto da una SOG assente o invalida, che rimane null; vengono conservati i timestamp di SOG e COG quando presenti.
 
-- Per passare da movimento a sosta, richiedere almeno 3 fix nuovi distribuiti su almeno 120 secondi e confinati entro 25 m dal riferimento usato dal tracker.
-- Il raggio iniziale è 25 m; con indicazione di ancoraggio è 60 m.
-- Un picco di velocità senza spostamento coerente non deve far partire una barca virtualmente.
+## Acquisizione
 
-### Riconoscimento della partenza
+1. Validare coordinate e tempi; escludere fix futuri o esplicitamente proiettati.
+2. Scartare le posizioni fuori ordine e riconoscere i duplicati tramite timestamp sorgente.
+3. Registrare osservazioni e scia soltanto con una nuova posizione sorgente. Coordinate uguali con timestamp successivo sono nuove osservazioni di permanenza.
+4. Conservare separatamente gli ultimi tre fix reali, non compressi geometricamente, usati per la ripartenza.
+5. Aggiornare il buffer prua/vento con i propri timestamp: una nuova prua su una posizione riletta non aggiunge un fix.
+6. Leggere il contesto dell'area e valutare lo stato.
 
-- Mantenere fermo il riferimento: non trascinarlo dietro a una barca che si allontana lentamente.
-- Oltre il raggio di riferimento più 10 m, passare a possibile movimento.
-- Confermare la partenza con almeno 2 fix progressivi, almeno 10 secondi e almeno 10 m di avanzamento tra i fix della partenza candidata.
-- Un ritorno verso l'area non conferma una partenza.
-- Una vera partenza azzera l'evidenza di instabilità accumulata dal jitter durante la sosta.
-- Le escursioni che rientrano possono insegnare un'area confinata: massimo appreso 40 m senza indicazione di ancoraggio e 80 m con indicazione di ancoraggio.
+SOG e COG mancanti nelle osservazioni rimangono null. Non inventare zeri, timestamp o posizioni intermedie. Nessun filtro a 30 secondi viene introdotto: l’arresto usa durata e numero di fix indicati sotto; la ripartenza usa gli ultimi tre fix per AIS e tre posizioni nello storico di cinque minuti per la nostra barca.
 
-## Descrizione della sosta: `restPattern`
+## MOVING → STATIONARY
 
-Questa descrizione è distinta dallo stato di movimento. Una barca può essere `STATIONARY` ma non avere ancora un pattern di sosta confermato.
+Occorrono insieme:
 
-Per confermare il pattern servono almeno 5 fix validi distribuiti su almeno 120 secondi. Un'interruzione fra posizioni superiore a 360 secondi fa ripartire la raccolta dell'evidenza di sosta, senza dichiarare automaticamente una partenza.
+- almeno **5 fix reali distinti**;
+- almeno **300 secondi (5 minuti)** tra primo e ultimo punto valutato;
+- **diametro massimo di 50 m**, inteso come distanza massima fra qualsiasi coppia dei punti valutati.
 
-| Pattern | Regola attuale |
-| --- | --- |
-| `UNDETERMINED` | Evidenza insufficiente oppure geometria non ancora classificabile |
-| `FIXED` | Pattern confermato con raggio massimo di 12 m attorno al centro osservato |
-| `OSCILLATING` | Pattern confermato con raggio di almeno 20 m e almeno 2 ritorni dopo escursioni |
+La sola SOG bassa non conferma l'arresto. Il diametro non è una distanza dal primo punto né una dispersione media.
 
-Per contare un ritorno, la sequenza deve allontanarsi almeno 20 m dal primo punto utile e rientrare entro 10 m da quel riferimento.
+La verifica usa il più lungo gruppo consecutivo finale delle osservazioni recenti che rispetta il diametro; si interrompe al primo punto precedente incompatibile. Non riutilizza osservazioni di una fase di movimento precedente alla ripartenza appena confermata. Se il gruppo ha abbastanza fix e durata, stabilisce una nuova sosta, ne fissa il riferimento e riavvia la finestra dei fix per la ripartenza. L'arresto è un'unica conferma, non due stati separati.
 
-- Il centro è il centro delle posizioni osservate, non la posizione fisica dell'ancora.
-- Escludere dalla descrizione le posizioni esterne all'area di riferimento oltre il margine di partenza e limitare l'effetto degli outlier.
-- La descrizione della sosta non deve ampliare da sola l'area usata per riconoscere il movimento.
-- `FIXED` è compatibile con ormeggio, ma non ne è una prova individuale assoluta.
-- `OSCILLATING` è un'evidenza utilizzabile da HarborDetector per riconoscere ancoraggio e correggere un precedente contributo all'area portuale.
-- Un tempo osservato lungo con soli 4 fix non soddisfa il requisito dei 5 fix.
+Le osservazioni recenti restano compresse geometricamente e limitate a 15 minuti / 120 punti; il diametro viene verificato fra tutti i punti mantenuti del gruppo valutato. Un ingresso a 1 Hz può comunque coprire cinque minuti grazie alla conservazione degli estremi temporali, senza richiedere 300 elementi.
 
-## Indizio di ormeggio dal vento: `windMooring`
+## STATIONARY → MOVING
 
-Usare posizione ferma e prua stabile rispetto a vento misurato per rafforzare l'ipotesi di ormeggio. Non sostituire con questo indizio il riconoscimento del movimento.
+Per i target AIS la verifica ordinaria usa **esattamente gli ultimi 3 fix reali**. Calcola soltanto lo **spostamento netto dal primo al terzo**, non la somma del percorso.
 
-| Parametro | Valore iniziale |
+| Contesto della sosta | Spostamento necessario |
 | --- | ---: |
-| Pattern di sosta confermato | Obbligatorio |
-| Intervallo osservato fra heading utili | Almeno 5 minuti |
-| Heading AIS distinti per timestamp | Almeno 3 |
-| Vento vero minimo | 6 kn |
-| Scostamento heading dal primo heading utile | Entro 15° |
-| Distanza angolare vento-prua | Almeno 45°, inclusa la poppa |
-| Variazione del vento che rafforza l'indizio | Almeno 30° |
-| Età massima delle misure correlate | 180 secondi |
-| Distanza massima del target dalla nostra misura del vento | 1 NM |
+| Porto | almeno 50 m |
+| Ancoraggio | almeno 150 m |
+| Fuori area | almeno 300 m |
+| Area provvisoria | ripiego 300 m: valore specifico ancora da concordare |
 
-- Usare heading AIS valido, non COG.
-- Trattare gli angoli in modo circolare: 359° e 1° sono vicini.
-- Non contare più volte lo stesso timestamp dell'heading.
-- Heading e misure di vento devono essere recenti e compatibili con il fix; non usare misure future rispetto al fix.
-- Non usare come vento il ripiego sulla nostra prua quando manca la misura.
-- L'indizio diventa forte se la prua resta stabile mentre il vento cambia di almeno 30°.
-- In assenza di nuove misure l'indizio non matura; quando le misure diventano vecchie non deve continuare a essere presentato come disponibile.
-- Corrente, cima a terra, doppia ancora, vento locale diverso e heading errato limitano l'affidabilità dell'indizio. Non rappresenta una certificazione di ormeggio.
+- Nessun requisito ulteriore di SOG, durata o avanzamento progressivo.
+- La finestra scorre: non accumulare la distanza dal primo fix di una candidata lontana nel tempo o dal riferimento originario della sosta.
+- Per AIS non sostituire i tre fix reali con punti selezionati dalla compressione della traccia. La nostra barca usa la selezione storica descritta sotto.
+- Al raggiungimento della distanza (tolleranza numerica 1e-6 m) passa a MOVING, azzera la conferma della sosta e resetta l'analisi della previsione. La scia disponibile rimane.
+- I fix precedenti al nuovo arresto non sono riutilizzati come prova della successiva ripartenza: dopo MOVING → STATIONARY la finestra inizia con l'ultimo fix dell'arresto confermato.
 
-## Storico privato e scia visualizzata
+Questo criterio è intenzionalmente conservativo e dipende dalla frequenza di ricezione. A 1 Hz la finestra copre circa due secondi; a un fix ogni tre minuti copre sei minuti. Non adattare implicitamente le distanze o il campionamento per compensare questa differenza. Uno spostamento lento può restare STATIONARY se ogni finestra di tre fix rimane sotto soglia; questa scelta è distinta dal controllo di prossimità, che non è modificato qui.
 
-- Il tracker conserva osservazioni anche dei target fermi, necessarie a descrivere la sosta; non mostrare automaticamente tutte queste tracce sulla mappa.
-- Storico privato delle osservazioni: finestra di 15 minuti, massimo 120 punti.
-- Scia: durata impostata dalla configurazione del plugin, massimo 60 punti.
-- Comprimere gli aggiornamenti troppo frequenti senza limitarsi a conservare gli ultimi 60 fix: preservare gli estremi temporali e privilegiare i cambiamenti della traiettoria.
-- Nella GUI mostrare normalmente un terzo della finestra configurata; quando il target è selezionato, mostrare tutta la scia disponibile nella finestra.
-- Una finestra richiesta non garantisce copertura completa se i dati non sono stati ricevuti.
-- Eliminare lo stato dei target rimossi dalla cache del motore.
+### Nostra barca: tre posizioni reali nello storico di cinque minuti
 
-## Limiti e sviluppi non ancora implementati
+La chiave riservata `self`, già usata da OwnMotionState, mantiene lo stesso algoritmo di distanza ma cambia la selezione dei punti di ripartenza:
 
-- Il riconoscimento automatico della nostra barca all'ancora non è ancora collegato al tracker dei target.
-- Non trasformare questi pattern in un sistema di sorveglianza dell'ancoraggio con riarmi automatici: non è l'obiettivo concordato.
-- Le soglie sono parametri iniziali modificabili all'inizio di `ais/targetMotionTracker.js`; nuovi valori richiedono verifica e aggiornamento della specifica.
+- Riutilizzare le osservazioni reali già conservate dal tracker, senza creare altri campioni o ridurre la frequenza del GPS.
+- Considerare soltanto quelle negli ultimi `ownDepartureHistorySeconds` (300 secondi) e non precedenti all’ultima conferma di arresto.
+- Scegliere primo e ultimo punto disponibili nella finestra, più il punto interno temporalmente più vicino alla metà dell’intervallo. I tre timestamp devono essere distinti.
+- Se sono disponibili meno di tre posizioni, non confermare la partenza. Non inventare interpolazioni.
+- Stesse soglie 50/150/300 m dal primo all’ultimo punto selezionato, senza requisito di SOG o durata minima: è possibile confermare prima dei cinque minuti.
+- Nessun accumulo da punti più vecchi della finestra. Un nuovo arresto riavvia la selezione dall’ultimo fix della conferma.
+- I target AIS continuano a usare esattamente gli ultimi tre fix non compressi. La selezione storica della nostra barca non modifica gli array di osservazioni e non rinnova i timestamp.
 
-## Riferimenti
+Simulazione rettilinea con GPS a 1 Hz e 2 kn fuori area: la nostra barca supera 300 m e torna MOVING dopo 292 secondi (circa 4 minuti e 52 secondi). Gli stessi dati trattati come target AIS restano sotto 300 m in ogni finestra degli ultimi tre fix: la distinzione è intenzionale. GPS e mappa non vengono limitati dal tracker.
 
-- [Tracker](../ais/targetMotionTracker.js)
-- [Stabilità della previsione](../ais/targetPredictionStability.js)
-- [Integrazione AIS](../ais/aisEngine.js)
-- [Visualizzazione dei target e delle scie](../src/components/AisView.tsx)
-- [Specifiche AIS e collisioni](ais-spec.md)
+### Nessuna candidatura intermedia
 
-## Movimento della nostra barca
+Il tracker espone soltanto MOVING e STATIONARY. `possibleMovement` e l'oggetto `departure` sono stati rimossi perché non servono alla regola: con meno di tre fix o distanza insufficiente il target resta STATIONARY; al soddisfacimento dei requisiti passa direttamente a MOVING. Nessuna candidatura viene accumulata nel tempo.
 
-- Riutilizzare `TargetMotionTracker` tramite [OwnMotionState](../ais/ownMotionState.js), con un’unica istanza condivisa: ogni identificativo mantiene il proprio storico. La chiave riservata `self` contiene la nostra barca; il modulo OwnMotionState interpreta soltanto il risultato, senza creare un altro tracker.
-- I fix provengono dalla posizione propria con timestamp sorgente originale; le letture duplicate nei cicli della sessione e del motore non aggiungono osservazioni. Richiedere coordinate valide e posizione recente secondo `positionMaxAgeMs`.
-- La sosta confermata abilita la politica collisione al 25%; la sola prima classificazione STATIONARY non basta. Mantenere la conferma durante POSSIBLE_MOVEMENT e revocarla con MOVING confermato. La distinzione FIXED/OSCILLATING non è un prerequisito della riduzione.
-- Il contesto PORT viene soltanto letto dai poligoni già appresi dagli altri target: la nostra barca non alimenta HarborDetector. Nessuna persistenza su disco.
-- Usare le soglie comuni, senza introdurre un nuovo algoritmo di classificazione. Per GPS scaduto non usare la sosta osservata come conferma attuale; dopo una lunga interruzione ripartire dall’osservazione iniziale.
+## Contesto da HarborDetector
 
-Verifiche: [tracker proprio](../test/ownMotionState.test.js).
+Il costruttore accetta `{ harborDetector }` come secondo argomento opzionale. Usa la query di sola lettura `getAreaAtPosition(lat, lon)` dell'ultima elaborazione completata.
+
+- `areaContext` descrive la posizione attuale del target.
+- `restAreaContext` descrive il riferimento fisso della sosta e sceglie la soglia. Uscire dal perimetro non cambia automaticamente una soglia di 50/150 m in 300 m.
+- Il riferimento della sosta rimane fermo, ma non è un trigger geometrico aggiuntivo di ripartenza: la distanza è sempre fra primo e terzo fix correnti.
+- PORT non produce uno stato INPORT; le descrizioni del vento e della sosta non possono modificare lo stato principale.
+
+L'alternativa «uscita reale dall'area + un'altra evidenza» è ancora da definire e non viene eseguita. Una ricostruzione del perimetro non è considerata di per sé movimento del target.
+
+## Storici e dati descrittivi preservati
+
+- Osservazioni recenti: fino a 15 minuti, massimo 120 punti compressi geometricamente.
+- Scia: durata configurata dal chiamante, massimo 60 punti.
+- Ultimi tre fix: buffer dedicato non compresso, indipendente dagli altri due.
+- Buffer prua/vento separato: limiti provvisori ereditati di 15 minuti / 120 elementi, correlazione recente entro 180 secondi e target entro 1 NM dalla nostra misura locale.
+- Rest pattern e stabilità della previsione rimangono informazioni descrittive. Il pattern può descrivere un'oscillazione, ma non promuove OSCILLATING né conserva un ulteriore stato principale. Nessun INPORT automatico.
+- Tutta la memoria resta in RAM, rimossa quando il target viene eliminato.
+
+## Parti non cambiate o ancora aperte
+
+- La matrice geografica del Modulo 4 è applicata anche alla simulazione: vedere [specifica AIS](ais-spec.md#matrice-geografica-degli-avvisi). La bubble, gli snooze e gli acknowledge mantengono le proprie regole.
+- Area provvisoria e percorso alternativo di uscita area sono ancora da definire per le transizioni del tracker.
+- Il tracker operativo è collegato ai motori locali: la SOG assente è null, HarborDetector fornisce il contesto e la nostra barca usa lo storico di cinque minuti. Rimane da verificare l’installazione sui dispositivi.
+- Il clustering portuale non viene rivisto da questa modifica.
+
+## Verifiche
+
+[Test automatici](../test/experimentalMotionTracker.test.js):
+
+- Ingresso con SOG fra 0 e 0,5 kn inclusi, maggiore di 0,5 kn, mancante e invalida; metadati e area non forzano lo stato.
+- Cinque fix/cinque minuti e diametro massimo fra coppie; endpoints a 50 m accettati e oltre 50 m respinti.
+- Report a 1 Hz compressi e AIS ogni tre minuti; duplicati non contano.
+- Ripartenza esattamente sugli ultimi tre fix, soglie 50/150/300 m, anche con SOG zero e intervalli brevissimi.
+- Nessun accumulo dal riferimento remoto, nessuna somma del percorso, buffer non influenzato dalla compressione.
+- Contesto della sosta, separazione delle evidenze prua/vento, nuovo arresto seguito da nuova ripartenza.
+- Pattern di oscillazione solo descrittivo, con stato principale sempre STATIONARY nel caso simulato.
+
+Test aggiuntivi: selezione storica per self, timestamp originali distinti, finestra mobile, nessuna interpolazione o modifica degli array, partenza a 2 kn entro cinque minuti, partenza anticipata con distanza sufficiente e reset della finestra dopo un nuovo arresto.
+
+Verifiche locali di regole e integrazione: [tracker pubblico e motore](../test/targetMotionTracker.test.js), [nostra barca](../test/ownMotionState.test.js), [sessione dev](../test/dashboardSession.test.js). Nessuna prova sui dispositivi o riavvio del Cerbo eseguito per questa modifica.
+
+## Integrazione e provenienza
+
+- AisEngine istanzia il tracker con il proprio HarborDetector. Non viene più reinserito nel tracker un isMoored dedotto dal detector come prova AIS.
+- La sessione installata riusa ownMotion calcolato dall’unica istanza condivisa. Il fallback dev istanzia lo stesso algoritmo e legge i perimetri upstream tramite la funzione pura getAreaAtPositionFromAreas, senza creare un detector o scrivere sul Cerbo.
+- Con posizione propria scaduta non si conferma una sosta attuale; dopo un gap GPS oltre 360 secondi OwnMotionState azzera la propria osservazione. Il fattore collisione dipende dalla matrice geografica, non dalla sola conferma di sosta o dal solo stato AIS dichiarato.
+- Una SOG assente inizializza MOVING, ma non inventa una velocità: cache e JSON mantengono null e la GUI usa --.- / SPEED UNAVAILABLE. Senza SOG valida non viene proiettata la posizione del target. Le formule di collisione esistenti non sono riscritte da questa integrazione.
+- La tolleranza preesistente di 30 secondi per il timestamp sorgente leggermente futuro è conservata: t è limitato al tempo di elaborazione dall’ingresso AIS, sourceTime resta originale per evitare duplicati. Oltre la tolleranza la misura viene scartata.
+- Il vecchio stato principale POSSIBLE_MOVEMENT non viene più emesso. La bubble riconosce ancora quel valore per compatibilità con dati precedenti, senza cambiare le sue regole.
+- ais/experimental/targetMotionTracker.js è ora un semplice re-export del tracker promosso, non una seconda implementazione.
+
+## Parametri descrittivi prua/vento conservati
+
+Il supporto descrittivo all’ormeggio richiede sosta confermata, almeno tre heading distinti distribuiti su almeno cinque minuti, vento almeno 6 kn, spread prua entro 15 gradi e distanza angolare vento-prua almeno 45 gradi (inclusa la poppa). Una variazione del vento di almeno 30 gradi rafforza l’indizio. La correlazione usa tempi recenti entro 180 secondi e distanza entro 1 NM dalla nostra misura. Non è uno stato principale e non modifica le transizioni MOVING/STATIONARY.

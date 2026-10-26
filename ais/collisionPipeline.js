@@ -542,9 +542,32 @@ function isAnchoredNavigationState(value) {
     return text === 'anchored' || text === 'at anchor' || text === '1';
 }
 
-function applyHarborProximityPolicy(target, bubbleMeters = 45) {
-    const stationary = target.isMoving !== true && target.motionState !== 'MOVING';
-    if (!stationary || !target.inCluster) {
+function isVesselMoving(vessel = {}) {
+    if (vessel.motionState === 'MOVING') return true;
+    if (vessel.motionState === 'STATIONARY') return false;
+    if (typeof vessel.isMoving === 'boolean') return vessel.isMoving;
+    if (vessel.isAnchored === true) return false;
+    return Number.isFinite(vessel.sog) && vessel.sog >= 0.8;
+}
+
+function isInRecognizedArea(vessel = {}) {
+    if (typeof vessel.inRecognizedArea === 'boolean') return vessel.inRecognizedArea;
+    return vessel.inCluster === true || ['PORT', 'ANCHORAGE', 'PROVISIONAL'].includes(vessel.areaKind);
+}
+
+// Module 4 policy: movement first, area second. Reduction is applied once.
+function resolveAlertPolicy(ownShip = {}, target = {}) {
+    const ownMoving = isVesselMoving(ownShip), targetMoving = isVesselMoving(target);
+    const ownInArea = isInRecognizedArea(ownShip), targetInArea = isInRecognizedArea(target);
+    if (!ownMoving && !targetMoving) return { mode:'BUBBLE_ONLY', reason:'BOTH_STATIONARY', ownMoving, targetMoving, ownInArea, targetInArea };
+    const reduced = ownMoving ? targetInArea : ownInArea;
+    return { mode:reduced ? 'REDUCED' : 'NORMAL',
+        reason:reduced ? ownMoving ? 'TARGET_IN_AREA' : 'OWN_IN_AREA' : 'NORMAL_LIMITS',
+        ownMoving, targetMoving, ownInArea, targetInArea };
+}
+
+function applyProximityPolicy(target, bubbleMeters = 45) {
+    if (target.alertPolicy?.mode !== 'BUBBLE_ONLY') {
         delete target.areaProximityOnly;
         delete target.alertKind;
         delete target.safeBubbleMeters;
@@ -596,10 +619,12 @@ class CollisionPipeline {
         const targetKnots = Number.isFinite(target.sog) ? Math.max(0, target.sog) : 0;
         const ownKnots = Math.max(positive(cfg.minimumOwnSpeedKnots, 4), Number.isFinite(ownShip.sog) ? ownShip.sog : 0);
         const distanceFactor = Math.max(1, targetKnots / referenceKnots);
-        const ownAtAnchor = ownShip.isAnchored === true;
+        const alertPolicy = resolveAlertPolicy(ownShip, target);
+        const ownAtAnchor = !alertPolicy.ownMoving;
+        const reduced = alertPolicy.mode === 'REDUCED';
         const fraction = (value, fallback) => Number.isFinite(value) && value > 0 && value <= 1 ? value : fallback;
-        const anchoredCpaFactor = ownAtAnchor ? fraction(cfg.ownAnchoredCpaFactor, 0.25) : 1;
-        const anchoredTcpaFactor = ownAtAnchor ? fraction(cfg.ownAnchoredTcpaFactor, 0.25) : 1;
+        const anchoredCpaFactor = reduced ? fraction(cfg.ownAnchoredCpaFactor, 0.25) : 1;
+        const anchoredTcpaFactor = reduced ? fraction(cfg.ownAnchoredTcpaFactor, 0.25) : 1;
         const redCpa = baseRed * distanceFactor * anchoredCpaFactor;
         const orangeCpa = redCpa * positive(cfg.warningDistanceRatio, 2);
         const baseMinutes = positive(cfg.baseTcpaMinutes, 5);
@@ -608,7 +633,7 @@ class CollisionPipeline {
             baseMinutes * (1 + coefficient * Math.max(0, targetKnots / ownKnots - 1))) * anchoredTcpaFactor;
         return { redCpa, orangeCpa, critTcpa: horizonTcpa, horizonTcpa, baseRedCpa: baseRed,
             referenceKnots, distanceFactor, baseTcpaMinutes: baseMinutes,
-            ownAtAnchor, anchoredCpaFactor, anchoredTcpaFactor };
+            ownAtAnchor, reduced, reductionReason:alertPolicy.reason, alertPolicy, anchoredCpaFactor, anchoredTcpaFactor };
     }
 
     _computeTrend(history) {
@@ -649,7 +674,10 @@ class CollisionPipeline {
         let targetHull = getHullBoundingRadius(target, category);
 
         const uncertainty = null; // Fixed hypothetical cones no longer drive alerts.
-        let kinematics = computeCpaTcpa(ownShip, target, uncertainty, { ownHull, targetHull });
+        const alertPolicy = resolveAlertPolicy(ownShip, target);
+        const ownKinematics = { ...ownShip, isMoving:alertPolicy.ownMoving, sog:alertPolicy.ownMoving ? ownShip.sog : 0 };
+        const targetKinematics = { ...target, isMoving:alertPolicy.targetMoving, sog:alertPolicy.targetMoving ? target.sog : 0 };
+        let kinematics = computeCpaTcpa(ownKinematics, targetKinematics, uncertainty, { ownHull, targetHull });
 
         // CPA values already represent hull-to-hull clearances: do not subtract
         // another geometric margin. The uncertainty layer remains separate.
@@ -665,8 +693,8 @@ class CollisionPipeline {
         let reason = '';
         let rawBasis = null;
         let instabilityWarning = null;
-        const ownIsMoving = (ownShip.sog || 0) >= 0.8;
-        const targetIsMoving = target.isMoving === true || (target.sog || 0) >= 0.8;
+        const ownIsMoving = alertPolicy.ownMoving;
+        const targetIsMoving = alertPolicy.targetMoving;
         const eitherMoving = ownIsMoving || targetIsMoving;
         const tcpa = kinematics.tcpaMinutes;
         if (eitherMoving && !kinematics.isDiverging && tcpa >= 0 && tcpa <= thresholds.horizonTcpa) {
@@ -694,6 +722,9 @@ class CollisionPipeline {
         }
 
         // 3. Macchina a Stati con Isteresi Asimmetrica e Tracking Storico
+        // Bubble policy has its own entry tracker and acknowledgements. Do not
+        // retain an old collision alarm through its de-escalation timer here.
+        if (alertPolicy.mode === 'BUBBLE_ONLY') this.targetStates.delete(targetId);
         let state = this.targetStates.get(targetId);
         if (!state) {
             state = {
@@ -705,7 +736,7 @@ class CollisionPipeline {
                 deescalateTimerStartedAt: null,
                 lastSeen: now
             };
-            this.targetStates.set(targetId, state);
+            if (alertPolicy.mode !== 'BUBBLE_ONLY') this.targetStates.set(targetId, state);
         }
 
         state.lastSeen = now;
@@ -760,6 +791,8 @@ class CollisionPipeline {
             category,
             // Stato filtrato dalla macchina a stati
             alertState: state.currentState,
+            alertPolicy,
+            areaProximityOnly:alertPolicy.mode === 'BUBBLE_ONLY',
             trend,
             deltaCpaPerMin,
             // Metriche geometriche e cinematiche (precisione piena per le decisioni)
@@ -767,11 +800,11 @@ class CollisionPipeline {
             rangeNM: kinematics.rangeNM,
             bearingNowDeg: kinematics.bearingNowDeg,
             currentHullClearanceMeters: kinematics.currentHullClearanceMeters,
-            cpaNominalMeters: netCpaNominal,
-            cpaMinMeters: netCpaMin,
-            cpaMaxMeters: netCpaMax,
-            tcpaSeconds: kinematics.tcpaSeconds,
-            tcpaMinutes: kinematics.tcpaMinutes,
+            cpaNominalMeters: alertPolicy.mode === 'BUBBLE_ONLY' ? null : netCpaNominal,
+            cpaMinMeters: alertPolicy.mode === 'BUBBLE_ONLY' ? null : netCpaMin,
+            cpaMaxMeters: alertPolicy.mode === 'BUBBLE_ONLY' ? null : netCpaMax,
+            tcpaSeconds: alertPolicy.mode === 'BUBBLE_ONLY' ? -1 : kinematics.tcpaSeconds,
+            tcpaMinutes: alertPolicy.mode === 'BUBBLE_ONLY' ? -1 : kinematics.tcpaMinutes,
             isDiverging: kinematics.isDiverging,
             // Dettagli diagnostici incertezza e scafo
             hullMarginMeters: totalHullMargin,
@@ -854,7 +887,9 @@ const _pipelineExports = {
     computeSighting,
     evaluateColreg,
     compareTargets,
-    applyHarborProximityPolicy,
+    applyProximityPolicy,
+    applyHarborProximityPolicy:applyProximityPolicy,
+    resolveAlertPolicy,
     isAnchoredNavigationState
 };
 

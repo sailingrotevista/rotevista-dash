@@ -1,22 +1,29 @@
+// Shared operational motion tracker. See docs/motion-tracker-spec.md.
 'use strict';
 const { TargetPredictionStability } = require('./targetPredictionStability');
+
+const REST_CONFIRMATION_FIXES = 5;
+const REST_CONFIRMATION_SECONDS = 300;
 
 // Soglie modificabili: il tracker usa solo fix ricevuti, mai posizioni proiettate.
 const MOTION_TRACKER_CONFIG = {
     maxObservationPoints: 120,
     observationMinutes: 15,
     maxTrailPoints: 60,
-    initialMovingSpeedKnots: 0.8,
-    stationaryRadiusMeters: 25,
-    anchoredRadiusMeters: 60,
-    maxLearnedStationaryRadiusMeters: 40,
-    maxLearnedAnchoredRadiusMeters: 80,
-    settleSeconds: 120,
-    minimumSettleFixes: 3,
-    departureMarginMeters: 10,
-    departureProgressMeters: 10,
-    departureSeconds: 10,
-    departureFixes: 2,
+    initialStationaryMaxSpeedKnots: 0.5,
+    sourceTimestampToleranceSeconds: 30,
+    settleDiameterMeters: 50,
+    settleSeconds: REST_CONFIRMATION_SECONDS,
+    minimumSettleFixes: REST_CONFIRMATION_FIXES,
+    departureOutsideAreaMeters: 300,
+    departureAnchorageMeters: 150,
+    departurePortMeters: 50,
+    departureFixes: 3,
+    ownDepartureHistorySeconds: 300,
+    // Inherited limits until the dedicated evidence-window parameters are reviewed.
+    // Wind records are bounded separately and never geometrically compressed.
+    windEvidenceSeconds: 900,
+    maxWindEvidencePoints: 120,
     // Descrizione della sosta: diagnostica, non modifica gli stati di movimento.
     windMooringMinimumSeconds: 300,
     windMooringMinimumSamples: 3,
@@ -26,8 +33,8 @@ const MOTION_TRACKER_CONFIG = {
     windMooringWindShiftDegrees: 30,
     windMooringMaximumAgeSeconds: 180,
     windMooringMaximumRangeMeters: 1852,
-    restMinimumFixes: 5,
-    restMinimumSpanSeconds: 120,
+    restMinimumFixes: REST_CONFIRMATION_FIXES,
+    restMinimumSpanSeconds: REST_CONFIRMATION_SECONDS,
     restMaximumGapSeconds: 360,
     restFixedRadiusMeters: 12,
     restOscillationRadiusMeters: 20,
@@ -48,13 +55,13 @@ function angleDifference(a, b) {
     return Math.abs(((a - b + 540) % 360) - 180);
 }
 
-function describeWindMooring(state, config, confirmed) {
+function describeWindMooring(state, config, confirmed, now = state.lastFix.t) {
     const empty = { available: false, supported: false, strong: false, sampleCount: 0 };
     if (!confirmed) return empty;
-    const samples = state.observations.filter(p => p.t >= Math.max(state.area.since, state.restObservationSince) && p.windHeading);
+    const samples = state.windEvidence.filter(p => p.t >= Math.max(state.area.since, state.restObservationSince));
     if (!samples.length) return empty;
     const last = samples.at(-1).windHeading;
-    if (state.lastFix.t - last.t > config.windMooringMaximumAgeSeconds * 1000) return empty;
+    if (now - last.t > config.windMooringMaximumAgeSeconds * 1000) return empty;
     // Every sample has a distinct AIS heading timestamp; repeated values are fine,
     // repeated reports are not independent evidence.
     const headingSpread = Math.max(...samples.map(p => angleDifference(p.windHeading.heading, samples[0].windHeading.heading)));
@@ -73,10 +80,10 @@ function describeRest(state, config) {
     if (state.motionState === 'MOVING') return null;
     const since = Math.max(state.area.since, state.restObservationSince);
     const observations = state.observations.filter(p => p.t >= since);
-    // The descriptive area must not include a pending departure or enlarge the
-    // reference used to decide whether the vessel has resumed real movement.
+    // Bound the descriptive rest geometry without moving the rest reference.
+    // These statistics do not feed the rolling three-fix departure decision.
     let points = observations.filter(p => distanceMeters(state.area.lat, state.area.lon, p.lat, p.lon) <=
-        state.area.radius + config.departureMarginMeters);
+        state.departureThresholdMeters);
     const median = values => {
         const sorted = [...values].sort((a, b) => a - b);
         const middle = Math.floor(sorted.length / 2);
@@ -108,10 +115,10 @@ function describeRest(state, config) {
         }
     }
     const observedSpanSeconds = points.length > 1 ? (points.at(-1).t - points[0].t) / 1000 : 0;
-    const confirmed = state.motionState === 'STATIONARY' && points.length >= config.restMinimumFixes &&
-        observedSpanSeconds >= config.restMinimumSpanSeconds;
+    const confirmed = state.restConfirmed || (points.length >= config.restMinimumFixes &&
+        observedSpanSeconds >= config.restMinimumSpanSeconds);
     let kind = 'UNDETERMINED';
-    if (confirmed && radiusMeters <= config.restFixedRadiusMeters) kind = 'FIXED';
+    if (confirmed && Number.isFinite(radiusMeters) && radiusMeters <= config.restFixedRadiusMeters) kind = 'FIXED';
     else if (confirmed && radiusMeters >= config.restOscillationRadiusMeters && returnCount >= config.restMinimumReturns) kind = 'OSCILLATING';
     return {
         windMooring: describeWindMooring(state, config, confirmed),
@@ -124,154 +131,206 @@ function describeRest(state, config) {
     };
 }
 
+const MOTION_STATES = Object.freeze({ MOVING: 'MOVING', STATIONARY: 'STATIONARY' });
+
 class TargetMotionTracker {
-    constructor(config = {}) {
+    constructor(config = {}, { harborDetector = null } = {}) {
         this.config = { ...MOTION_TRACKER_CONFIG, ...config };
         this.targets = new Map();
+        this.harborDetector = harborDetector;
     }
 
-    update(id, fix, { now, historyMs, moored = false, anchored = false, wind = null }) {
+    update(id, fix, { now, historyMs, wind = null }) {
+        // 1. Validate before touching either position history or state.
+        if (!fix || !Number.isFinite(now) || !Number.isFinite(fix.t) ||
+            !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon) ||
+            Math.abs(fix.lat) > 90 || Math.abs(fix.lon) > 180 || fix.t > now ||
+            (fix.sourceTime !== undefined && (!Number.isFinite(fix.sourceTime) || fix.sourceTime > now+this.config.sourceTimestampToleranceSeconds*1000)) ||
+            fix.isProjected === true || fix.projected === true) return this.get(id, now, historyMs);
         let state = this.targets.get(id);
-        if (!Number.isFinite(fix.t) || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon) ||
-            Math.abs(fix.lat) > 90 || Math.abs(fix.lon) > 180 || fix.t > now) {
-            return this.get(id, now, historyMs);
-        }
-        // Lo stato AIS può arrivare separatamente dalla posizione: aggiorna il
-        // contesto senza inventare un nuovo campione o una conferma di movimento.
-        if (state && anchored && !state.anchored && state.motionState !== 'MOVING') {
-            state.anchored = true;
-            state.area.radius = Math.max(state.area.radius, this.config.anchoredRadiusMeters);
-        }
-        if (state && (fix.sourceTime ?? fix.t) <= (state.lastFix.sourceTime ?? state.lastFix.t)) return this.get(id, now, historyMs);
-        const point = { lat: fix.lat, lon: fix.lon, t: fix.t, cog: fix.cog, sog: fix.sog };
+        const sourceTime = fix.sourceTime ?? fix.t;
+        if (state && sourceTime < (state.lastFix.sourceTime ?? state.lastFix.t)) return this.get(id, now, historyMs);
+        const isNewPosition = !state || sourceTime > (state.lastFix.sourceTime ?? state.lastFix.t);
         if (!state) {
             state = {
-                observations: [], trail: [], lastFix: fix,
-                motionState: !moored && !anchored && fix.sog >= this.config.initialMovingSpeedKnots ? 'MOVING' : 'STATIONARY',
-                area: { lat: fix.lat, lon: fix.lon, radius: anchored ? this.config.anchoredRadiusMeters : this.config.stationaryRadiusMeters, since: fix.t },
-                departure: null,
-                anchored,
-                restObservationSince: fix.t,
-                restPattern: null,
+                observations: [], trail: [], recentFixes: [], windEvidence: [], lastFix: { ...fix },
+                isOwnShip: id === 'self', departureWindowSince: fix.t,
+                // A valid slow received SOG initializes rest; missing/invalid
+                // values never become a synthetic zero-speed observation.
+                motionState: Number.isFinite(fix.sog) && fix.sog >= 0 &&
+                    fix.sog <= this.config.initialStationaryMaxSpeedKnots ? 'STATIONARY' : 'MOVING',
+                movingSince: fix.t,
+                area: { lat: fix.lat, lon: fix.lon, since: fix.t },
+                areaContext: null, restAreaContext: null, departureThresholdMeters: this.config.departureOutsideAreaMeters,
+                restConfirmed: false,
+                restObservationSince: fix.t, restPattern: null,
                 prediction: new TargetPredictionStability(),
             };
             this.targets.set(id, state);
         }
-        if (fix.t - state.lastFix.t > this.config.restMaximumGapSeconds * 1000) state.restObservationSince = fix.t;
-        const age = this.config.windMooringMaximumAgeSeconds * 1000;
-        const validAngle = n => Number.isFinite(n) && n >= 0 && n < 360;
-        if (validAngle(fix.hdg) && Number.isFinite(fix.headingTime) && fix.headingTime <= fix.t &&
-            fix.t - fix.headingTime <= age && fix.headingTime > (state.lastWindHeadingTime ?? -Infinity) &&
-            wind && validAngle(wind.direction) && Number.isFinite(wind.speedKnots) && wind.speedKnots >= 0 &&
-            [wind.directionTime, wind.speedTime].every(t => Number.isFinite(t) && t <= fix.t && fix.t - t <= age) &&
-            Number.isFinite(wind.lat) && Number.isFinite(wind.lon) &&
-            distanceMeters(fix.lat, fix.lon, wind.lat, wind.lon) <= this.config.windMooringMaximumRangeMeters) {
-            point.windHeading = { heading: fix.hdg, t: fix.headingTime, direction: wind.direction, speedKnots: wind.speedKnots };
-            state.lastWindHeadingTime = fix.headingTime;
-        }
-        state.observations.push(point);
-        state.observations = compactAisTrail(state.observations, now,
-            this.config.observationMinutes * 60000, this.config.maxObservationPoints);
-        state.trail.push({ lat: point.lat, lon: point.lon, t: point.t });
-        state.trail = compactAisTrail(state.trail, now, historyMs, this.config.maxTrailPoints);
-        state.lastFix = { ...fix };
-        state.prediction.update(fix);
-        const wasMoving = state.motionState === 'MOVING';
 
+        // 2/3. Only a distinct source fix enters position arrays. Equal positions
+        // with later source times are genuine evidence that the vessel stayed put.
+        let point;
+        if (isNewPosition) {
+            if (fix.t - state.lastFix.t > this.config.restMaximumGapSeconds * 1000) {
+                state.restObservationSince = fix.t;
+                state.restConfirmed = false;
+            }
+            point = { lat: fix.lat, lon: fix.lon, t: fix.t,
+                sourceTime, cog: Number.isFinite(fix.cog) ? fix.cog : null,
+                sog: Number.isFinite(fix.sog) ? fix.sog : null,
+                cogTime: fix.cogTime ?? null, sogTime: fix.sogTime ?? null };
+            state.recentFixes.push(point);
+            state.recentFixes = state.recentFixes.slice(-this.config.departureFixes);
+            state.observations.push(point);
+            state.observations = compactAisTrail(state.observations, now,
+                this.config.observationMinutes * 60000, this.config.maxObservationPoints);
+            state.trail.push({ lat: point.lat, lon: point.lon, t: point.t });
+            state.trail = compactAisTrail(state.trail, now, historyMs, this.config.maxTrailPoints);
+            state.lastFix = { ...fix };
+            state.prediction.update({ ...fix, cog: point.cog, sog: point.sog });
+        }
+
+        // 4. Independent heading timestamps may supply wind evidence even when
+        // the position is reread. They never add a position fix or settle duration.
+        this.recordWindEvidence(state, fix, wind, now);
+        if (!isNewPosition) {
+            if (state.restPattern) state.restPattern.windMooring = describeWindMooring(state, this.config, state.restConfirmed);
+            return this.get(id, now, historyMs);
+        }
+
+        // 5. Read the previous completed HarborDetector geometry, without learning
+        // or treating geometric membership as an AIS mooring observation.
+        this.updateAreaContext(state, fix);
+        // 6. Evaluate motion after recording the actual observations and context.
         if (state.motionState === 'MOVING') {
-            // Un arresto richiede più fix nuovi distribuiti nel tempo, non una SOG nulla.
-            const cutoff = fix.t - this.config.settleSeconds * 1000;
-            const start = Math.min(
-                Math.max(0, state.observations.findIndex(p => p.t >= cutoff) - 1),
-                Math.max(0, state.observations.length - this.config.minimumSettleFixes),
-            );
-            const recent = state.observations.slice(start);
-            const first = recent[0];
-            if (recent.length >= this.config.minimumSettleFixes &&
-                fix.t - first.t >= this.config.settleSeconds * 1000 &&
-                recent.every(p => distanceMeters(first.lat, first.lon, p.lat, p.lon) <= this.config.stationaryRadiusMeters)) {
-                state.motionState = 'STATIONARY';
-                state.anchored = anchored;
-                state.area = { lat: first.lat, lon: first.lon, radius: anchored ? this.config.anchoredRadiusMeters : this.config.stationaryRadiusMeters, since: first.t };
-                state.departure = null;
-            }
-        } else {
-            // Il riferimento resta fisso: una partenza lenta non trascina l'area con sé.
-            const range = distanceMeters(state.area.lat, state.area.lon, fix.lat, fix.lon);
-            const boundary = state.area.radius + this.config.departureMarginMeters;
-            if (range <= boundary) {
-                // Una traiettoria che esce e poi ritorna può insegnare l'area di
-                // oscillazione. Non aggiorniamo il riferimento durante l'uscita.
-                if (state.departure) this.learnReturnedArea(state);
-                state.motionState = 'STATIONARY';
-                state.departure = null;
-            } else {
-                if (!state.departure) state.departure = { first: point, lastRange: range, fixes: 1 };
-                else if (range >= state.departure.lastRange) {
-                    state.departure.fixes++;
-                    state.departure.lastRange = range;
-                } else {
-                    // Un ritorno verso l'area non conferma una partenza.
-                    state.departure = { first: point, lastRange: range, fixes: 1 };
-                }
-                state.motionState = 'POSSIBLE_MOVEMENT';
-                const candidate = state.departure;
-                if (candidate.fixes >= this.config.departureFixes &&
-                    fix.t - candidate.first.t >= this.config.departureSeconds * 1000 &&
-                    distanceMeters(candidate.first.lat, candidate.first.lon, fix.lat, fix.lon) >= this.config.departureProgressMeters) {
-                    state.motionState = 'MOVING';
-                    state.departure = null;
-                }
-            }
+            this.evaluateStop(state, fix);
+            if (state.motionState === 'STATIONARY') this.updateAreaContext(state, fix);
         }
-        if (!wasMoving && state.motionState === 'MOVING') {
-            // Departure starts a new trajectory; stationary jitter is not evidence
-            // of irregular navigation after leaving the berth/anchorage.
-            state.prediction = new TargetPredictionStability();
-            state.prediction.update(fix);
-            state.restObservationSince = fix.t;
-        }
-        // Recompute only for real, ordered fixes. Polling/metadata updates cannot
-        // accumulate samples, extend observed duration or mature classification.
+        else this.evaluateDeparture(state, point);
         state.restPattern = describeRest(state, this.config);
+        if (state.restPattern?.confirmed) state.restConfirmed = true;
+        // Rest pattern / wind remain descriptive; neither adds a principal state.
         return this.get(id, now, historyMs);
     }
 
-    learnReturnedArea(state) {
-        const points = state.observations.filter(p => p.t >= state.area.since);
-        if (points.length < this.config.minimumSettleFixes) return;
-        const lat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
-        const lon = points.reduce((sum, p) => sum + p.lon, 0) / points.length;
-        const radius = Math.max(state.anchored ? this.config.anchoredRadiusMeters : this.config.stationaryRadiusMeters,
-            ...points.map(p => distanceMeters(lat, lon, p.lat, p.lon)));
-        const maxRadius = state.anchored ? this.config.maxLearnedAnchoredRadiusMeters : this.config.maxLearnedStationaryRadiusMeters;
-        // Un singolo salto lontano non deve ingrandire l'area senza limite.
-        if (radius <= maxRadius) state.area = { ...state.area, lat, lon, radius };
+    recordWindEvidence(state, fix, wind, now) {
+        const cfg = this.config, age = cfg.windMooringMaximumAgeSeconds * 1000;
+        state.windEvidence = state.windEvidence.filter(p => p.t >= now-cfg.windEvidenceSeconds*1000);
+        const angle = value => Number.isFinite(value) && value >= 0 && value < 360;
+        const recent = time => Number.isFinite(time) && time <= now && now-time <= age;
+        if (!angle(fix.hdg) || !recent(fix.headingTime) || fix.headingTime <= (state.lastWindHeadingTime ?? -Infinity) ||
+            !recent(state.lastFix.t) || !wind || !angle(wind.direction) || !Number.isFinite(wind.speedKnots) || wind.speedKnots < 0 ||
+            !recent(wind.directionTime) || !recent(wind.speedTime) ||
+            Math.abs(fix.headingTime-wind.directionTime) > age || Math.abs(fix.headingTime-wind.speedTime) > age ||
+            !Number.isFinite(wind.lat) || !Number.isFinite(wind.lon) ||
+            distanceMeters(state.lastFix.lat,state.lastFix.lon,wind.lat,wind.lon) > cfg.windMooringMaximumRangeMeters) return;
+        state.windEvidence.push({ t: fix.headingTime, positionTime: state.lastFix.t,
+            windHeading: { heading: fix.hdg, t: fix.headingTime, direction: wind.direction, speedKnots: wind.speedKnots,
+                directionTime: wind.directionTime, speedTime: wind.speedTime, referenceLat: wind.lat, referenceLon: wind.lon } });
+        state.windEvidence = state.windEvidence.slice(-cfg.maxWindEvidencePoints);
+        state.lastWindHeadingTime = fix.headingTime;
+    }
+
+    evaluateStop(state, fix) {
+        const cfg = this.config;
+        // Longest recent suffix whose maximum pairwise distance is <= diameter.
+        // There is no privileged first/centre point and no arithmetic dispersion
+        // that could hide two distant ends of the observed cluster.
+        const recent = [];
+        for (let i=state.observations.length-1; i>=0; i--) {
+            const point = state.observations[i];
+            if (point.t < state.movingSince) break;
+            if (recent.some(other => distanceMeters(point.lat,point.lon,other.lat,other.lon) > cfg.settleDiameterMeters+1e-6)) break;
+            recent.unshift(point);
+        }
+        const first = recent[0];
+        if (recent.length < cfg.minimumSettleFixes || fix.t-first.t < cfg.settleSeconds*1000) return;
+        state.motionState = 'STATIONARY';
+        state.area = { lat: first.lat, lon: first.lon, since: first.t };
+        state.restConfirmed = true;
+        state.restObservationSince = first.t;
+        // Departure evidence starts at the confirmed stop, not before it.
+        state.recentFixes = state.recentFixes.slice(-1);
+        state.departureWindowSince = fix.t;
+        state.windEvidence = state.windEvidence.filter(p => p.t >= first.t);
+    }
+
+    updateAreaContext(state, fix) {
+        const read = (lat, lon) => {
+            const context = this.harborDetector?.getAreaAtPosition?.(lat, lon);
+            return context && ['PORT', 'ANCHORAGE', 'PROVISIONAL'].includes(context.kind)
+                ? { id: context.id, kind: context.kind, evaluatedAt: context.evaluatedAt } : null;
+        };
+        state.areaContext = read(fix.lat, fix.lon);
+        // The departure threshold belongs to the fixed rest location. Leaving the
+        // polygon must not silently turn a 50/150m threshold into 300m.
+        state.restAreaContext = state.area.lat === fix.lat && state.area.lon === fix.lon
+            ? state.areaContext && { ...state.areaContext } : read(state.area.lat, state.area.lon);
+        const kind = state.restAreaContext?.kind;
+        state.departureThresholdMeters = kind === 'PORT' ? this.config.departurePortMeters
+            : kind === 'ANCHORAGE' ? this.config.departureAnchorageMeters
+            // PROVISIONAL has not yet been assigned an agreed special distance.
+            : this.config.departureOutsideAreaMeters;
+    }
+
+    selectDepartureFixes(state, point) {
+        if (!state.isOwnShip) return state.recentFixes;
+        // Reuse real, time-stamped observations already held by this tracker.
+        // The full-rate GPS input and recent-fix buffer remain untouched.
+        const cutoff = Math.max(state.departureWindowSince,
+            point.t-this.config.ownDepartureHistorySeconds*1000);
+        const history = state.observations.filter(sample => sample.t >= cutoff);
+        if (history.length <= 3) return history;
+        const first = history[0], last = history.at(-1), midpoint = (first.t+last.t)/2;
+        let middle = history[1];
+        for (const sample of history.slice(2,-1)) {
+            if (Math.abs(sample.t-midpoint) < Math.abs(middle.t-midpoint)) middle = sample;
+        }
+        return [first, middle, last];
+    }
+
+    evaluateDeparture(state, point) {
+        // AIS uses its last three raw fixes. Own ship selects three real fixes
+        // across its recent five-minute history; neither accumulates path length.
+        const fixes = this.selectDepartureFixes(state, point);
+        if (fixes.length < this.config.departureFixes) return;
+        const first = fixes[0];
+        const net = distanceMeters(first.lat, first.lon, point.lat, point.lon);
+        if (net+1e-6 < state.departureThresholdMeters) return;
+        state.motionState = 'MOVING';
+        state.movingSince = point.t;
+        state.restConfirmed = false;
+        state.windEvidence = [];
+        state.restObservationSince = point.t;
+        state.prediction = new TargetPredictionStability();
+        state.prediction.update(state.lastFix);
     }
 
     get(id, now, historyMs) {
         const state = this.targets.get(id);
         if (!state) return null;
-        state.trail = compactAisTrail(state.trail, now, historyMs, this.config.maxTrailPoints);
+        state.trail = compactAisTrail(state.trail,now,historyMs,this.config.maxTrailPoints);
+        state.windEvidence = state.windEvidence.filter(p => p.t >= now-this.config.windEvidenceSeconds*1000);
         return {
             motionState: state.motionState,
             isMoving: state.motionState === 'MOVING',
+            areaContext: state.areaContext ? { ...state.areaContext } : null,
+            restAreaContext: state.restAreaContext ? { ...state.restAreaContext } : null,
+            departureThresholdMeters: state.departureThresholdMeters,
+            restConfirmed: state.restConfirmed,
             stationarySince: state.motionState === 'MOVING' ? null : state.area.since,
-            restPattern: state.restPattern ? { ...state.restPattern, windMooring:
-                now - (state.restPattern.windMooring.lastHeadingTime ?? -Infinity) > this.config.windMooringMaximumAgeSeconds * 1000
-                    ? { available: false, supported: false, strong: false, sampleCount: 0 }
-                    : state.restPattern.windMooring } : null,
+            restPattern: state.restPattern ? { ...state.restPattern,
+                windMooring: describeWindMooring(state,this.config,state.restConfirmed,now) } : null,
             lastFixTime: state.lastFix.t,
-            predictionStability: state.prediction.get(now, state.motionState === 'MOVING'),
-            trail: state.trail,
+            predictionStability: state.prediction.get(now,state.motionState === 'MOVING'),
+            trail: state.trail.map(p => ({ ...p })),
         };
     }
 
     remove(id) { this.targets.delete(id); }
-
-    prune(activeIds) {
-        for (const id of this.targets.keys()) if (!activeIds.has(id)) this.remove(id);
-    }
+    prune(activeIds) { for (const id of this.targets.keys()) if (!activeIds.has(id)) this.remove(id); }
 }
 
 // Riduce la densità senza accorciare deliberatamente la finestra temporale.
@@ -300,4 +359,4 @@ function compactAisTrail(points, now, maxAgeMs, maxPoints = 60) {
     return trail;
 }
 
-module.exports = { TargetMotionTracker, MOTION_TRACKER_CONFIG, compactAisTrail };
+module.exports = { TargetMotionTracker, MOTION_TRACKER_CONFIG, MOTION_STATES, compactAisTrail };

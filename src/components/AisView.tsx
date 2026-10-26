@@ -1,6 +1,6 @@
 import { getAisAgeVisual } from '../utils/aisAgeVisual.mjs';
 import { copyText } from '../utils/clipboard.mjs';
-import { formatAge, displayCpa } from '../utils/aisDetailData.mjs';
+import { formatAge, displayCpa, formatAisSpeed } from '../utils/aisDetailData.mjs';
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -83,10 +83,10 @@ const getVesselStatusLabel = (t: AisTarget): string => {
   if (t.areaKind === 'PROVISIONAL' && !t.isMoving) return 'REST AREA';
   if (t.isMoored || t.anchorState === 'MOORED') return 'IN PORT';
   if (t.isAnchored || t.anchorState === 'ANCHORED') return 'AT ANCHOR';
-  if (t.motionState === 'POSSIBLE_MOVEMENT') return 'POSSIBLE MOVEMENT';
   if (t.motionState === 'STATIONARY') return 'STOPPED';
+  if (!Number.isFinite(t.sog)) return 'SPEED UNAVAILABLE';
   if (t.sog < 0.5) return 'STOPPED';
-  return `${t.sog.toFixed(1)} kn`;
+  return `${formatAisSpeed(t.sog)} kn`;
 };
 
 const formatDist = (meters: number | null | undefined): string => {
@@ -1408,7 +1408,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         const isTargetMoving = t.isMoving !== undefined ? t.isMoving : (!t.isAnchored && !isMoored && t.sog >= 0.3);
         const placeLeft = isTargetMoving && t.cog >= 20 && t.cog <= 160;
         const offsetTransform = 'translate(0px, 0px)';
-        const statusLine = (isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : getVesselStatusLabel(t)) +
+        const statusLine = (isTargetMoving ? `${formatAisSpeed(t.sog)} kn • ${Math.round(t.cog)}°` : getVesselStatusLabel(t)) +
           (t.contactLost ? ` • AIS CONTACT LOST · ${formatAge(t.age)}` : ageVisual.stale ? ` • AIS ${formatAge(t.age)}` : '');
         const cpa = displayCpa(t);
         const hasTcpa = Number.isFinite(t.tcpa) && t.tcpa !== null && t.tcpa >= 0;
@@ -1592,7 +1592,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
     targets.forEach(t => {
       if (t.risk === 'RED') redCount++;
       else if (t.risk === 'ORANGE') orangeCount++;
-      if (t.isAnchored || t.sog < 0.5) anchoredCount++;
+      if (t.isAnchored || (Number.isFinite(t.sog) && t.sog < 0.5)) anchoredCount++;
     });
     return {
       total: targets.length,
@@ -1876,13 +1876,13 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                 /* KINEMATIC TELEMETRY */
                 <div className="ais-card-body-detail">
                   <div className="ais-detail-grid">
-                    {selectedTarget.effectiveThresholds && (
+                    {selectedTarget.effectiveThresholds && selectedTarget.alertPolicy?.mode !== 'BUBBLE_ONLY' && (
                       <div className="ais-detail-cell cell-wide">
                         <span className="ais-cell-label">APPLIED AIS LIMITS</span>
                         <span className="ais-cell-val" style={{ fontSize: '0.85rem' }}>
                           ALARM {formatDist(selectedTarget.effectiveThresholds.redCpa)} • WARNING {formatDist(selectedTarget.effectiveThresholds.orangeCpa)}
                           {' • '}{selectedTarget.effectiveThresholds.horizonTcpa.toFixed(1)} min
-                          {selectedTarget.effectiveThresholds.ownAtAnchor && (ownShipMotion?.status === 'IN PORT' ? ' • OWN SHIP IN PORT' : ' • OWN SHIP AT ANCHOR')}
+                          {selectedTarget.effectiveThresholds.reduced && (selectedTarget.effectiveThresholds.reductionReason === 'TARGET_IN_AREA' ? ' • TARGET IN MOORING AREA' : ' • OWN SHIP IN MOORING AREA')}
                         </span>
                       </div>
                     )}
@@ -1895,7 +1895,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                     <div className="ais-detail-cell">
                       <span className="ais-cell-label">SOG / COG</span>
                       <span className="ais-cell-val">
-                        {selectedTarget.sog.toFixed(1)} kn @ {selectedTarget.cog}°
+                        {formatAisSpeed(selectedTarget.sog)} kn @ {selectedTarget.cog}°
                       </span>
                     </div>
                     <div className="ais-detail-cell">
@@ -1930,7 +1930,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                     <div className="ais-detail-alert-box red">
                       <span className="alert-title">ANCHOR DRAG ALARM</span>
                       <span className="alert-desc">
-                        Target dragging ({selectedTarget.sog.toFixed(1)} kn cog {selectedTarget.cog}°)
+                        Target dragging ({formatAisSpeed(selectedTarget.sog)} kn cog {selectedTarget.cog}°)
                       </span>
                     </div>
                   )}

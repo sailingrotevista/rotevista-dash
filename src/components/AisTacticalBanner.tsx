@@ -1,4 +1,4 @@
-import { displayCpa } from '../utils/aisDetailData.mjs';
+import { displayCpa, formatAisSpeed } from '../utils/aisDetailData.mjs';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AisTarget } from '../types';
 
@@ -102,7 +102,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
                 <path d="m12 14 3.5-3.5" />
               </svg>
             </span>
-            <span className="metric-val">{threat.sog.toFixed(1)} kn</span>
+            <span className="metric-val">{formatAisSpeed(threat.sog)} kn</span>
           </div>
           <div className="banner-metric">
             <span className="metric-lbl" title="Distanza attuale" style={{ display: 'inline-flex', alignItems: 'center' }}>

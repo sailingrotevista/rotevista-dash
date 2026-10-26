@@ -1,5 +1,5 @@
 export function getAisAgeVisual(t, config, isSelected = false, preserveEmphasis = true) {
-  const slowOrMoored = t.sog <= config.movingSpeedKnots || t.isMoored ||
+  const slowOrMoored = (Number.isFinite(t.sog) && t.sog <= config.movingSpeedKnots) || t.isMoored ||
     t.isAnchored || t.inCluster || t.anchorState === 'MOORED' || t.anchorState === 'ANCHORED';
   const thresholds = slowOrMoored ? config.slowOrMoored : config.moving;
   const age = Number.isFinite(t.age) ? Math.max(0, t.age) : 0;

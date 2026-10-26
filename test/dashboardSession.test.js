@@ -106,3 +106,16 @@ test('restart clears acknowledgements but initial inside-bubble contacts remain 
  assert.equal(after.snapshot().sharedAlerts.banner,null);
  assert.equal(after.snapshot().targets[0].risk,'ORANGE');
 });
+
+test('standalone dev own tracker reads upstream area polygons without another detector or upstream writes',()=>{
+ const port={id:'p',kind:'PORT',lat:36,lon:14,hull:[[35.99,13.99],[35.99,14.01],[36.01,14.01],[36.01,13.99]]};
+ const live={raw:{'navigation.position':{latitude:36,longitude:14},'navigation.speedOverGround':0,'navigation.courseOverGroundTrue':0},
+  rawTimes:{'navigation.position':1000,'navigation.speedOverGround':1000,'navigation.courseOverGroundTrue':1000},harborClusters:[port],targets:[]};
+ const session=new DashboardSession({readLive:()=>live,environment:'dev',now:1000});
+ const tracker=session.ownMotionState.tracker;
+ assert.equal(tracker.get('self',1000,900000).departureThresholdMeters,50);
+ live.harborClusters=[{...port,kind:'ANCHORAGE'}];live.rawTimes['navigation.position']=2000;
+ session.tick(2000);
+ assert.equal(tracker.get('self',2000,900000).departureThresholdMeters,150);
+ assert.equal(port.kind,'PORT');assert.equal(session.mode,'live');
+});

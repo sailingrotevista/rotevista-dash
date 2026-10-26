@@ -5,7 +5,7 @@ const {applyHarborProximityPolicy}=require('../ais/collisionPipeline');
 const own={lat:36,lon:14,sog:0};
 const boat=(distance,seconds,motionState='STATIONARY',options={})=>({id:'a',lat:36+distance/111139,lon:14,
  currentHullClearanceMeters:distance,lastPositionTime:seconds*1000,motionState,isMoving:motionState==='MOVING',
- stationarySince:0,...options});
+ stationarySince:0,alertPolicy:{mode:'BUBBLE_ONLY'},...options});
 const update=(tracker,target,position=own)=>tracker.update(target,position,45,target.lastPositionTime);
 function entry(tracker) {
  update(tracker,boat(80,0,'MOVING'));

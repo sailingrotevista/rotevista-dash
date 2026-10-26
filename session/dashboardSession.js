@@ -6,6 +6,7 @@ const marina = require('../simulation/dashboardMarina.json');
 const createTools = require('../simulation/dashboardScenario');
 const {OwnMotionState}=require('../ais/ownMotionState');
 const {TargetMotionTracker}=require('../ais/targetMotionTracker');
+const {getAreaAtPositionFromAreas}=require('../ais/harborDetector');
 const {BubbleEntryTracker} = require('../ais/bubbleEntryTracker');
 const VALID_MODES = ['live','simulation','mixed'];
 const rad = degrees => degrees*Math.PI/180;
@@ -57,7 +58,10 @@ class DashboardSession {
         let targets=live.targets || [],clusters=live.harborClusters || [],outRaw={...raw};
         // Installed sessions consume the engine's state without a second tracker.
         // Only a standalone dev session lacking upstream state needs a local one.
-        if (!live.ownMotion && !this.ownMotionState) this.ownMotionState=new OwnMotionState(new TargetMotionTracker());
+        this.liveAreaContext = { areas:clusters, evaluatedAt:now };
+        if (!live.ownMotion && !this.ownMotionState) this.ownMotionState=new OwnMotionState(new TargetMotionTracker({}, {
+            harborDetector:{ getAreaAtPosition:(lat,lon)=>getAreaAtPositionFromAreas(lat,lon,this.liveAreaContext.areas,this.liveAreaContext.evaluatedAt) },
+        }));
         const liveMotion=live.ownMotion || this.ownMotionState.update(raw,live.rawTimes || {},clusters,now);
         let ownMotion=liveMotion;
         let own=liveOwn;
@@ -97,15 +101,17 @@ class DashboardSession {
                         return {...next,trail:trail.slice(-60),age:0,isProjected:false};
                     });
                 }
-                const synth=this.mode==='simulation' ? [...targets,...this.dynamic] : this.dynamic;
+                const synth=(this.mode==='simulation' ? [...targets,...this.dynamic] : this.dynamic).map(target=>({
+                    ...target,inRecognizedArea:Boolean(getAreaAtPositionFromAreas(target.lat,target.lon,clusters,now)),
+                }));
                 const result=this.tools.recalculateArpaForTargets(own,own.hdg,own.cog,own.sog,synth,'AUTO',live.config?.aisAlerter?.criticalProximity ?? 45,
-                    liveMotion.relaxedCollision && this.mode==='mixed');
+                    {motionState:ownMotion.motionState,inRecognizedArea:Boolean(getAreaAtPositionFromAreas(own.lat,own.lon,clusters,now))});
                 this.dynamic=result.targets.filter(t=>t.isMoving);
                 targets=this.mode==='mixed' ? [...targets,...result.targets] : result.targets;
                 for (const t of targets) if (t.isSimulated) {
                     const positionTime=this.mode==='simulation' ? now : live.rawTimes?.['navigation.position'];
                     t.proximityEntryObserved=this.bubbleEntries.update(t,{...own,positionTime},live.config?.aisAlerter?.criticalProximity,now);
-                    if (t.inCluster && !t.isMoving && t.motionState!=='MOVING') pipeline.applyHarborProximityPolicy(t,live.config?.aisAlerter?.criticalProximity);
+                    pipeline.applyProximityPolicy(t,live.config?.aisAlerter?.criticalProximity);
                 }
                 this.bubbleEntries.prune(new Set(targets.filter(t=>t.isSimulated).map(t=>t.id)));
                 this.simAlerts.update(targets,own,now);

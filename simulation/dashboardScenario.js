@@ -7,7 +7,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function createScenarioTools(pipeline, MARINA_DI_RAGUSA_SIM_DATA) {
 const degToRad = degrees => degrees * Math.PI / 180;
 
-const { CollisionPipeline, applyHarborProximityPolicy } = pipeline;
+const { CollisionPipeline, applyProximityPolicy } = pipeline;
 // Simulation deliberately keeps a shorter base window than the live plugin.
 const SIM_BASE_TCPA_MINUTES = 5;
 const DELAYED_WARNING_SECONDS = 120;
@@ -219,17 +219,28 @@ function recalculateArpaForTargets(
   targets             ,
   _myPropulsion                            = 'AUTO',
   safeBubbleMeters = 45,
-  ownAtAnchor = false
+  ownContext = {}
 )                                                        {
   const now = Date.now();
 
+  const context = ownContext && typeof ownContext === 'object' ? ownContext
+    : ownContext === true ? {motionState:'STATIONARY'} : {};
+  const inMarinaArea = (lat,lon) => MARINA_DI_RAGUSA_SIM_DATA.harborClusters.some(area => {
+    const polygon=area.hull || []; let inside=false;
+    for(let i=0,j=polygon.length-1;i<polygon.length;j=i++) {
+      const [yi,xi]=polygon[i],[yj,xj]=polygon[j];
+      if((yi>lat)!==(yj>lat)&&lon<(xj-xi)*(lat-yi)/(yj-yi)+xi) inside=!inside;
+    }
+    return inside;
+  });
   const ownShipInput = {
     lat: myGps.lat,
     lon: myGps.lon,
     sog: mySog,
     cog: myCog,
     hdg: myHdg,
-    isAnchored: ownAtAnchor,
+    ...context,
+    inRecognizedArea:typeof context.inRecognizedArea === 'boolean' ? context.inRecognizedArea : inMarinaArea(myGps.lat,myGps.lon),
   };
 
   const updatedTargets = targets.map(v => {
@@ -252,13 +263,15 @@ function recalculateArpaForTargets(
         beam: v.beam,
         isMoored: Boolean(v.isMoored || isStoppedOrMoored),
         inCluster: Boolean(v.inCluster),
+        motionState:v.motionState,
+        inRecognizedArea:typeof v.inRecognizedArea === 'boolean' ? v.inRecognizedArea : Boolean(v.inCluster) || inMarinaArea(v.lat,v.lon),
         anchorState: v.anchorState,
         predictionStability: v.predictionStability,
       },
       now
     );
 
-    const cpa = evalRes ? Math.round(evalRes.cpaNominalMeters) : null;
+    const cpa = Number.isFinite(evalRes?.cpaNominalMeters) ? Math.round(evalRes.cpaNominalMeters) : null;
     const tcpa = evalRes && evalRes.tcpaMinutes >= 0 ? evalRes.tcpaMinutes : -1;
     const trend = evalRes ? evalRes.trend : 'STABLE';
 
@@ -281,6 +294,7 @@ function recalculateArpaForTargets(
       risk,
       trend,
       riskMsg,
+      alertPolicy:evalRes?.alertPolicy,
       effectiveThresholds: evalRes?.effectiveThresholds,
       currentHullClearanceMeters: evalRes?.currentHullClearanceMeters,
       warningBasis: evalRes?.warningBasis,
@@ -291,14 +305,11 @@ function recalculateArpaForTargets(
       sightingTxt: evalRes ? evalRes.sightingTxt : '',
     };
 
-    if (updated.inCluster && !updated.isMoving) {
+    if (updated.alertPolicy?.mode === 'BUBBLE_ONLY') {
       const area = MARINA_DI_RAGUSA_SIM_DATA.harborClusters.find(h => h.id === updated.clusterId);
-      updated.proximityArea = area ? { id: area.id, lat: area.lat, lon: area.lon } : undefined;
-      applyHarborProximityPolicy(updated, safeBubbleMeters);
-      simCollisionPipeline.targetStates.delete(updated.id);
-    } else {
-      applyHarborProximityPolicy(updated, safeBubbleMeters);
+      updated.proximityArea = area ? { id:area.id, lat:area.lat, lon:area.lon } : undefined;
     }
+    applyProximityPolicy(updated,safeBubbleMeters);
     return updated;
   });
 

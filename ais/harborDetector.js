@@ -92,12 +92,34 @@ function polygonDistanceMeters(a, b) {
     return best;
 }
 
+// Shared read-only lookup for the detector and dev sessions consuming its polygons.
+function getAreaAtPositionFromAreas(lat, lon, areas = [], evaluatedAt = null) {
+    if (!Number.isFinite(lat) || Math.abs(lat) > 90 ||
+        !Number.isFinite(lon) || Math.abs(lon) > 180) return null;
+    const matches = areas.filter(area => Array.isArray(area?.hull) && area.hull.length >= 3 &&
+        area.hull.every(point => Array.isArray(point) && point.length >= 2 && point.every(Number.isFinite)) &&
+        (pointInPolygon(lat, lon, area.hull) || polygonDistanceMeters([[lat, lon]], area.hull) <= 1e-7));
+    // Overlap does not imply a preference for PORT: choose the nearest area
+    // centre, then its id for a deterministic tie. Edges count as inside.
+    matches.sort((a, b) => distanceMeters(lat, lon, a.lat, a.lon) - distanceMeters(lat, lon, b.lat, b.lon) ||
+        a.id.localeCompare(b.id));
+    const area = matches[0];
+    return area ? { id: area.id, kind: area.kind, evaluatedAt: area.evaluatedAt ?? evaluatedAt } : null;
+}
+
 class HarborDetector {
     constructor(config = {}) {
         this.config = { ...HARBOR_DETECTOR_CONFIG, ...config };
         this.knownHarbors = {};
         this.vesselStatTimes = {};
         this.nextAreaId = 1;
+        this.areaLookupSnapshot = [];
+    }
+
+    // Read only the polygons from the last completed detection pass. This query
+    // never learns, expands, prunes or changes a vessel's classification.
+    getAreaAtPosition(lat, lon) {
+        return getAreaAtPositionFromAreas(lat, lon, this.areaLookupSnapshot);
     }
 
     isStationary(v) {
@@ -343,13 +365,16 @@ class HarborDetector {
             }
             match.members.push(v);
         }
-        return geometries.filter(g => g.area.memberIds.size >= 2 && g.members.length).map(({ area, hull, members }) => {
+        const clusters = geometries.filter(g => g.area.memberIds.size >= 2 && g.members.length).map(({ area, hull, members }) => {
             const flags = {};
             for (const v of members) { const flag = v.flag ? v.flag.split(' ')[0] : '🏳️'; flags[flag] = (flags[flag] || 0) + 1; }
             return { id: area.id, kind: area.kind, lat: area.lat, lon: area.lon, center: [area.lat, area.lon],
                 dist: Math.round(distanceMeters(myGps.lat, myGps.lon, area.lat, area.lon)), count: members.length, hull, flags };
         });
+        this.areaLookupSnapshot = clusters.map(area => ({ id: area.id, kind: area.kind, lat: area.lat, lon: area.lon,
+            evaluatedAt: now, hull: area.hull.map(point => [...point]) }));
+        return clusters;
     }
 }
 
-module.exports = { HarborDetector, HARBOR_DETECTOR_CONFIG, computeConvexHull, pointInPolygon, polygonDistanceMeters };
+module.exports = { HarborDetector, HARBOR_DETECTOR_CONFIG, computeConvexHull, pointInPolygon, polygonDistanceMeters, getAreaAtPositionFromAreas };

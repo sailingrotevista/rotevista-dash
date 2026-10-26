@@ -1,5 +1,12 @@
 # Changes
 
+## Unreleased
+
+- Replace the motion tracker with the reviewed two-state model: initial rest up to 0.5 kn, five real fixes over five minutes within a 50 m diameter for stopping, and net displacement across three positions for restarting.
+- Use 50/150/300 m restart distances from the detected rest-area context; select own-ship positions across a five-minute history while AIS keeps its latest three reports.
+- Preserve missing AIS SOG as null through ingestion, cache and shared frames; display --.- instead of a measured zero and avoid projecting targets without valid speed.
+- Share the existing HarborDetector with the tracker and read upstream polygons in dev fallback sessions. Apply the geographic alert matrix in Module 4 and simulation: reduce distance/time limits once to 25% according to own/target area context; use bubble-only evaluation when both vessels are stationary. Preserve observed-entry, acknowledgement and snooze rules.
+
 ## 9.6.0-beta.1 — 2026-10-26
 
 - Introduce SignalKReceiver, category-specific GPS normalization and SensorDerivedData as the shared own-position pipeline at 1 Hz. Preserve source timestamps, reject invalid/stale fixes, score available source quality, and use a stable source lock with failover.

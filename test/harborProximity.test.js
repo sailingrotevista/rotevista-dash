@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { CollisionPipeline, applyHarborProximityPolicy } = require('../ais/collisionPipeline');
 const { AisEngine } = require('../ais/aisEngine');
 
-function fixture({ distance = 1000, clustered = false, speed = 0, large = false, bubble = 45 } = {}) {
+function fixture({ distance = 1000, clustered = false, speed = 0, large = false, bubble = 45, ownSpeed = 3 } = {}) {
     const now = Date.now();
     const length = large ? 200 : 12, width = large ? 40 : 4;
     const engine = new AisEngine({ getPath: () => ({ boat: {
@@ -15,7 +15,7 @@ function fixture({ distance = 1000, clustered = false, speed = 0, large = false,
         },
     } }), error: message => { throw Error(message); } },
     () => ({ aisAlerter: { baseTcpaMinutes: 10, criticalProximity: bubble } }),
-    { getRaw: () => ({ 'navigation.position': { latitude: 36, longitude: 14 }, 'navigation.speedOverGround': 3 / 1.94384, 'navigation.courseOverGroundTrue': 0 }) },
+    { getRaw: () => ({ 'navigation.position': { latitude: 36, longitude: 14 }, 'navigation.speedOverGround': ownSpeed / 1.94384, 'navigation.courseOverGroundTrue': 0 }) },
     { processHarbors: targets => {
         if (!clustered) return [];
         for (const t of targets) { t.inCluster = true; t.clusterId = 'port'; }
@@ -34,18 +34,16 @@ test('a 200m anchored ship outside recognized areas remains a collision obstacle
     assert.equal(target.areaProximityOnly, undefined);
 });
 
-test('a stationary member of an existing area does not warn for a future route intersection', () => {
-    const { target, top } = fixture({ clustered: true });
-    assert.equal(target.risk, 'GREY');
-    assert.equal(target.areaProximityOnly, true);
-    assert.equal(target.cpa, null);
-    assert.equal(target.tcpa, -1);
-    assert.ok(target.currentHullClearanceMeters > 45);
-    assert.equal(top, null);
+test('a stationary target inside an area uses reduced collision limits while own ship moves', () => {
+    const { target } = fixture({ clustered: true });
+    assert.equal(target.alertPolicy.mode, 'REDUCED');
+    assert.equal(target.effectiveThresholds.reduced, true);
+    assert.equal(target.areaProximityOnly, undefined);
+    assert.notEqual(target.cpa, null);
 });
 
 test('safe bubble uses present hull clearance, not antenna range or future CPA', () => {
-    const { target, top } = fixture({ clustered: true, distance: 50 });
+    const { target, top } = fixture({ ownSpeed: 0, clustered: true, distance: 50 });
     assert.equal(target.dist, 50);
     assert.ok(target.currentHullClearanceMeters < 45);
     assert.equal(target.risk, 'GREY');
@@ -55,13 +53,13 @@ test('safe bubble uses present hull clearance, not antenna range or future CPA',
     assert.equal(target.cpa, null);
     assert.equal(top, null, 'first discovery inside remains visible without a startup banner');
     assert.equal(target.proximityEntryObserved, false);
-    assert.equal(fixture({ clustered: true, distance: 50, bubble: 10 }).target.risk, 'GREY');
+    assert.equal(fixture({ ownSpeed: 0, clustered: true, distance: 50, bubble: 10 }).target.risk, 'GREY');
 });
 
-test('moving targets retain normal collision alarms even if marked inside an area', () => {
+test('moving targets inside an area retain collision evaluation with reduced limits', () => {
     const { target } = fixture({ clustered: true, speed: 1 });
     assert.equal(target.isMoving, true);
-    assert.equal(target.risk, 'RED');
+    assert.equal(target.alertPolicy.mode, 'REDUCED');
     assert.equal(target.alertKind, undefined);
     assert.notEqual(target.cpa, null);
     const inconsistent = { inCluster: true, isMoving: false, motionState: 'MOVING', risk: 'RED', alertKind: 'PROXIMITY', areaProximityOnly: true };
@@ -83,7 +81,7 @@ test('proximity acknowledgement has no timer and does not rearm after leaving th
 });
 
 test('the same entry state drives visual risk, tag and banner eligibility across hysteresis', () => {
-    const target = { inCluster: true, isMoving: false, motionState: 'STATIONARY', currentHullClearanceMeters: 50,
+    const target = { alertPolicy:{mode:'BUBBLE_ONLY'}, inCluster: true, isMoving: false, motionState: 'STATIONARY', currentHullClearanceMeters: 50,
         proximityEntryObserved: true };
     applyHarborProximityPolicy(target,45);
     assert.equal(target.withinSafeBubble,false);
@@ -96,7 +94,7 @@ test('the same entry state drives visual risk, tag and banner eligibility across
 });
 
 test('no entry state means no startup warning and never implies an automatic acknowledgement', () => {
-    const target = { inCluster: true, isMoving: false, currentHullClearanceMeters: 0 };
+    const target = { alertPolicy:{mode:'BUBBLE_ONLY'}, inCluster: true, isMoving: false, currentHullClearanceMeters: 0 };
     applyHarborProximityPolicy(target,45);
     assert.equal(target.risk,'GREY');
     assert.equal(target.withinSafeBubble,true);

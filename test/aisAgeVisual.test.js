@@ -21,3 +21,9 @@ test('slow/moored popup uses longer aging window and same opacity floor', async 
   assert.equal(visual({...target,age:1000},config,false,false).opacity,0.4);
  }
 });
+
+test('unknown speed does not silently select the slow-target aging window',async()=>{
+ const {getAisAgeVisual:visual}=await import('../src/utils/aisAgeVisual.mjs');
+ assert.equal(visual({sog:null,age:180,risk:'GREY'},config).opacity,.4);
+ assert.equal(visual({sog:null,isMoored:true,age:180,risk:'GREY'},config).opacity,1);
+});

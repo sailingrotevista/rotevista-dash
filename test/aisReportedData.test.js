@@ -72,3 +72,9 @@ test("display CPA requires a future or current closest approach", async () => {
  assert.equal(displayCpa({cpa:0,tcpa:0}),0);
  assert.equal(displayCpa({cpa:40,tcpa:3}),40);
 });
+
+test('speed presentation preserves actual zero and never renders missing speed as zero',async()=>{
+ const {formatAisSpeed}=await import('../src/utils/aisDetailData.mjs');
+ assert.equal(formatAisSpeed(0),'0.0');assert.equal(formatAisSpeed(.5),'0.5');
+ for(const missing of [null,undefined,NaN,Infinity,-1,'0'])assert.equal(formatAisSpeed(missing),'--.-');
+});

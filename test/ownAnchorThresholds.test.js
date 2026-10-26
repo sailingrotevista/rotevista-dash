@@ -9,13 +9,13 @@ test('confirmed own anchoring quarters effective distances and lookahead after s
     for (const category of ['sailing', 'commercial', 'work']) {
         for (const sog of [1, 5, 10, 20, 100]) {
             const normal = pipeline._resolveThresholds({ sog }, category, { sog: 0 });
-            const anchored = pipeline._resolveThresholds({ sog }, category, { sog: 0, isAnchored: true });
+            const anchored = pipeline._resolveThresholds({ sog }, category, { sog: 0, motionState:'STATIONARY', inRecognizedArea:true });
             assert.equal(anchored.redCpa, normal.redCpa * .25);
             assert.equal(anchored.orangeCpa, normal.orangeCpa * .25);
             assert.equal(anchored.horizonTcpa, normal.horizonTcpa * .25);
             assert.equal(anchored.baseTcpaMinutes, 10, 'existing recovery uses the configured base time');
             assert.equal(anchored.ownAtAnchor, true);
-            assert.equal(normal.ownAtAnchor, false, 'zero speed alone does not confirm anchoring');
+            assert.equal(normal.reduced, false, 'stationary outside an area retains full limits');
         }
     }
 });
@@ -26,15 +26,15 @@ test('anchoring reduces alerts while a 10kn target at 500m on a collision course
         lon: 14 + 104 / (111139 * Math.cos(Math.PI / 5)), cog: 180, sog: 5, isMoving: true };
     const evaluate = (ship, contact) => new CollisionPipeline({ baseTcpaMinutes: 10 }).evaluateTarget(ship, contact);
     const normal = evaluate(own, target);
-    const anchored = evaluate({ ...own, isAnchored: true }, target);
+    const anchored = evaluate({ ...own, motionState:'STATIONARY', inRecognizedArea:true }, target);
     assert.equal(normal.alertState, 'RED');
     assert.equal(anchored.alertState, 'ORANGE');
     assert.equal(anchored.cpaNominalMeters, normal.cpaNominalMeters);
     assert.equal(anchored.tcpaSeconds, normal.tcpaSeconds);
-    const fast = evaluate({ ...own, isAnchored: true }, { ...target, lat: 36 + 500 / 111139, lon: 14, sog: 10 });
+    const fast = evaluate({ ...own, motionState:'STATIONARY', inRecognizedArea:true }, { ...target, lat: 36 + 500 / 111139, lon: 14, sog: 10 });
     assert.equal(fast.alertState, 'RED');
     assert.ok(fast.tcpaMinutes < 1.7);
-    const proximity = { inCluster: true, isMoving: false, currentHullClearanceMeters: 40 };
+    const proximity = { alertPolicy:{mode:'BUBBLE_ONLY'}, inCluster: true, isMoving: false, currentHullClearanceMeters: 40 };
     applyHarborProximityPolicy(proximity, 45);
     assert.equal(proximity.safeBubbleMeters, 45);
     assert.equal(proximity.risk, 'GREY');
@@ -57,7 +57,7 @@ test('navigation state is categorical, updates live, and an explicit reset clear
     assert.equal(isAnchoredNavigationState(wind.getRaw()['navigation.state']), false);
 });
 
-test('AIS engine reads own status from Signal K and returns to normal limits when state changes', () => {
+test('AIS navigation status alone does not change geographic alert policy', () => {
     let state = 'anchored';
     const now = Date.now();
     const engine = new AisEngine({
@@ -75,6 +75,7 @@ test('AIS engine reads own status from Signal K and returns to normal limits whe
     state = 'under way using engine';
     engine.process();
     const underway = engine.getNearbyVessels()[0].effectiveThresholds;
-    assert.equal(underway.ownAtAnchor, false);
-    assert.equal(underway.redCpa, anchored.redCpa * 4);
+    assert.equal(underway.reduced, false);
+    assert.equal(underway.redCpa, anchored.redCpa);
+    assert.equal(anchored.reduced,false,'reported navigation status alone does not reduce thresholds');
 });

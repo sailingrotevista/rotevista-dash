@@ -3,6 +3,7 @@ const { extractReportedAis } = require('./aisReportedData');
 const { AisSharedAlerts } = require('../session/aisSharedAlerts');
 const { BubbleEntryTracker } = require('./bubbleEntryTracker');
 const { positionMaxAgeMs } = require('../shared/windDataPolicy.json');
+const { getAreaAtPositionFromAreas } = require('./harborDetector');
 /**
  * ==========================================================================
  * Rotevista Dash - Signal K AIS Ingestion & Threat Orchestrator Engine
@@ -15,7 +16,7 @@ const { positionMaxAgeMs } = require('../shared/windDataPolicy.json');
 
 const { TargetMotionTracker, compactAisTrail } = require('./targetMotionTracker');
 const { PLUGIN_BASE_TCPA_MINUTES } = require('./collisionConfig');
-const { COLLISION_THRESHOLD_DEFAULTS, applyHarborProximityPolicy } = require('./collisionPipeline');
+const { COLLISION_THRESHOLD_DEFAULTS, applyProximityPolicy } = require('./collisionPipeline');
 
 const OWN_GEOMETRY_RETRY_MS = 60000;
 const MOTION_DATA_MAX_SKEW_FRACTION = 0.2;
@@ -86,7 +87,7 @@ class AisEngine {
         this.collisionPipeline = collisionPipeline;
 
         this.aisPersistentCache = {};
-        this.motionTracker = new TargetMotionTracker();
+        this.motionTracker = new TargetMotionTracker({}, { harborDetector });
         this.ownMotionState = new OwnMotionState(this.motionTracker);
         this.bubbleEntryTracker = new BubbleEntryTracker();
         this.sharedAlerts = new AisSharedAlerts();
@@ -315,6 +316,7 @@ class AisEngine {
                 cog: myCog,
                 hdg: myHdg,
                 isAnchored: ownMotion.relaxedCollision,
+                ...(['MOVING','STATIONARY'].includes(ownMotion.motionState) ? {motionState:ownMotion.motionState} : {}),
             };
 
             const MAX_DISTANCE_METERS = 37040; // 20 NM
@@ -421,10 +423,10 @@ class AisEngine {
                         hdg = r2d(parseFloat(hdgVal));
                     }
 
-                    let sog = 0;
+                    let sog = null;
                     let sogNode = v.navigation.speedOverGround;
                     let sogVal = (sogNode && typeof sogNode === 'object' && sogNode.value !== undefined) ? sogNode.value : sogNode;
-                    if (sogVal !== undefined && sogVal !== null && !isNaN(sogVal)) {
+                    if (typeof sogVal === 'number' && Number.isFinite(sogVal) && sogVal >= 0) {
                         sog = parseFloat(sogVal) * 1.94384;
                     }
 
@@ -456,11 +458,9 @@ class AisEngine {
 
                     const cachedTarget = this.aisPersistentCache[key];
                     if (cachedTarget && realAisTime < cachedTarget.lastSeen) continue;
-                    const mooredHint = navStateRaw.includes('moored') || navStateRaw === '5' || Boolean(cachedTarget && cachedTarget.isMoored);
-                    const anchoredHint = navStateRaw.includes('anchor') || navStateRaw === '1';
                     const motion = this.motionTracker.update(key, {
-                        lat: vLat, lon: vLon, t: realAisTime, sourceTime: parsedTime, sog, cog, hdg, headingTime: motionTimestamp(hdgNode, hdgVal),
-                    }, { now, historyMs: maxTrailAgeMs, moored: mooredHint, anchored: anchoredHint,
+                        lat: vLat, lon: vLon, t: realAisTime, sourceTime: parsedTime, sog, sogTime:lastSogTime, cog, cogTime:lastCogTime, hdg, headingTime: motionTimestamp(hdgNode, hdgVal),
+                    }, { now, historyMs: maxTrailAgeMs,
                         wind: {
                             direction: Number.isFinite(this.windEvidence['environment.wind.directionTrue']?.value) ?
                                 (r2d(this.windEvidence['environment.wind.directionTrue'].value) + 360) % 360 : null,
@@ -470,6 +470,7 @@ class AisEngine {
                             speedTime: this.windEvidence['environment.wind.speedTrue']?.t,
                             lat: myGps.lat, lon: myGps.lon,
                         } });
+                    if (!motion) continue; // A rejected first fix must not abort other targets.
 
                     let shipType = 0;
                     if (v.design && v.design.aisShipType) {
@@ -544,7 +545,7 @@ class AisEngine {
                         lat: vLat,
                         lon: vLon,
                         cog: Math.round((cog + 360) % 360),
-                        sog: parseFloat(sog.toFixed(1)),
+                        sog: Number.isFinite(sog) ? parseFloat(sog.toFixed(1)) : null,
                         navStateRaw: navStateRaw || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].navStateRaw : ""),
                         callsign: callsign || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].callsign : ""),
                         length: length || (this.aisPersistentCache[key] ? this.aisPersistentCache[key].length : null),
@@ -595,6 +596,7 @@ class AisEngine {
 
             // 6. Elaborazione ARPA, Kinematica & COLREGs
             let nearbyVessels = [];
+            const evaluationInputs = new Map();
 
             for (let key in this.aisPersistentCache) {
                 let v = this.aisPersistentCache[key];
@@ -635,7 +637,7 @@ class AisEngine {
                 let tCode = parseInt(v.type) || 0;
 
                 // Valutazione tramite CollisionPipeline
-                let evalRes = this.collisionPipeline.evaluateTarget(ownShipInput, {
+                const evaluationInput = {
                     id: v.id,
                     mmsi: v.id,
                     name: v.name,
@@ -659,16 +661,9 @@ class AisEngine {
                         ? { antPort: v.beam / 2 - v.fromCenter, antStarboard: v.beam / 2 + v.fromCenter } : {}),
                     isMoored: isMoored,
                     anchorState: anchorState
-                }, now);
-
-                // Keep only the existing encounter after contact loss. Once its
-                // normal recovery completes, remove the expired contact entirely.
-                if (v.contactLost && (!evalRes || evalRes.alertState === 'NO_DANGER')) {
-                    delete this.aisPersistentCache[key];
-                    this.motionTracker.remove(key);
-                    this.collisionPipeline.targetStates.delete(key);
-                    continue;
-                }
+                };
+                evaluationInputs.set(v.id,evaluationInput);
+                const evalRes = null; // Evaluate once after current area geometry is available.
 
                 let cpa = evalRes ? Math.round(evalRes.cpaNominalMeters) : null;
                 let tcpa = (evalRes && evalRes.tcpaMinutes >= 0) ? evalRes.tcpaMinutes : -1;
@@ -737,8 +732,33 @@ class AisEngine {
 
             // 7. Auto-Apprendimento Cumulativo Porti (Geometria Permanente + Padding 18m)
             let harborClusters = this.harborDetector.processHarbors(nearbyVessels, myGps, raw, trueWindDir, now);
+            const ownArea = getAreaAtPositionFromAreas(myGps.lat,myGps.lon,harborClusters,now);
+            ownShipInput.inRecognizedArea = Boolean(ownArea);
             for (let i = 0; i < nearbyVessels.length; i++) {
                 let v = nearbyVessels[i];
+                const received = this.aisPersistentCache[v.id];
+                const targetArea = getAreaAtPositionFromAreas(received.lat,received.lon,harborClusters,now);
+                v.inRecognizedArea = Boolean(targetArea) || v.inCluster === true;
+                const evalRes = this.collisionPipeline.evaluateTarget(ownShipInput, {
+                    ...evaluationInputs.get(v.id), inRecognizedArea:v.inRecognizedArea,
+                },now);
+                if (v.contactLost && (!evalRes || evalRes.alertState === 'NO_DANGER')) {
+                    delete this.aisPersistentCache[v.id];this.motionTracker.remove(v.id);
+                    this.collisionPipeline.targetStates.delete(v.id);v.removeAfterEvaluation=true;continue;
+                }
+                Object.assign(v, {
+                    alertPolicy:evalRes?.alertPolicy, effectiveThresholds:evalRes?.effectiveThresholds,
+                    currentHullClearanceMeters:evalRes?.currentHullClearanceMeters,
+                    cpa:Number.isFinite(evalRes?.cpaNominalMeters) ? Math.round(evalRes.cpaNominalMeters) : null,
+                    tcpa:evalRes?.tcpaMinutes >= 0 ? evalRes.tcpaMinutes : -1,
+                    risk:evalRes && evalRes.alertState !== 'NO_DANGER' ? evalRes.alertState : 'GREY',
+                    riskMsg:evalRes && evalRes.alertState !== 'NO_DANGER' ? evalRes.reason || '' : '',
+                    trend:evalRes?.trend || 'STABLE', warningBasis:evalRes?.warningBasis,
+                    instabilityWarning:evalRes?.instabilityWarning, crossDir:evalRes?.crossDir || '',
+                    crossOutcome:evalRes?.crossOutcome || '', crossRule:evalRes?.crossRule || '',
+                    sightingTxt:evalRes?.sightingTxt || '',
+                    motionDataSync:evaluateMotionDataSync(received.positionSourceTime,v.lastCogTime,v.lastSogTime,evalRes?.effectiveThresholds?.horizonTcpa),
+                });
                 v.proximityEntryObserved = this.bubbleEntryTracker.update(v, {
                     ...myGps, sog: mySpeedKn,
                     positionTime: this.windEngine.getRawTimes?.()['navigation.position'],
@@ -746,14 +766,14 @@ class AisEngine {
                 if (this.aisPersistentCache[v.id]) {
                     this.aisPersistentCache[v.id].isMoored = Boolean(v.isMoored);
                 }
-                if (v.inCluster && !v.isMoving && v.motionState !== 'MOVING') {
-                    const area = harborClusters.find(h => h.id === v.clusterId);
-                    v.proximityArea = area ? { id: area.id, lat: area.lat, lon: area.lon } : undefined;
-                    applyHarborProximityPolicy(v, cfg.criticalProximity);
-                    this.collisionPipeline.targetStates.delete(v.id);
+                if (v.alertPolicy?.mode === 'BUBBLE_ONLY') {
+                    const area = targetArea || ownArea;
+                    v.proximityArea = area ? { id:area.id, lat:received.lat, lon:received.lon } : undefined;
                 }
+                applyProximityPolicy(v,cfg.criticalProximity);
             }
 
+            nearbyVessels = nearbyVessels.filter(v=>!v.removeAfterEvaluation);
             this.bubbleEntryTracker.prune(new Set(Object.keys(this.aisPersistentCache)));
 
             // 8. Ordinamento Bersagli per Pericolosità (RED > ORANGE > GREY) e Distanza

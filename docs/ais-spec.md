@@ -11,7 +11,7 @@ La versione installata sul Cerbo può essere diversa.
 - L'instabilità può aggiungere arancione, ma non trasformare arancione in rosso.
 - La presenza di una barca ferma non implica automaticamente assenza di pericolo.
 - Le navi ferme fuori dalle aree di sosta riconosciute restano ostacoli da valutare con CPA/TCPA.
-- Le aree portuali e di ancoraggio riconosciute usano una politica di prossimità per i target fermi; i target in movimento mantengono la normale valutazione collisione.
+- La matrice geografica distingue collisione normale, collisione con soglie ridotte e sola prossimità quando entrambe le barche sono ferme.
 - Non inserire suggerimenti COLREG nei banner. La guida COLREG è rinviata.
 - Non introdurre suoni AIS in questa fase.
 
@@ -24,7 +24,7 @@ La versione installata sul Cerbo può essere diversa.
 - Per una barca ferma si usa l'heading valido; in sua assenza si usa un inviluppo quadrato conservativo.
 - Un TCPA pari a zero è valido quando il minimo è nel presente. Non usare zero come sostituto di un dato mancante o di un incontro già passato.
 - I target divergenti non devono essere presentati come nuovi incroci futuri.
-- Il movimento lento confermato dal tracker deve essere considerato nel moto del target, anche sotto la soglia iniziale di 0,8 nodi.
+- Il movimento lento confermato dal tracker deve essere considerato nel moto del target, anche sotto 0,8 nodi.
 
 ## Soglie di distanza
 
@@ -63,20 +63,32 @@ finestra = min(max(base, limite massimo), base × fattore tempo)
 Il limite massimo predefinito è 30 minuti. Se viene configurata una base superiore, il limite non deve rendere la finestra inferiore alla base.
 Distanza e tempo si verificano insieme, sulla traiettoria nominale.
 
-## Nostra barca all'ancora
+## Matrice geografica degli avvisi
 
-Quando il motore riceve un’indicazione di nostra barca all’ancora, oppure il tracker conferma la nostra sosta (in porto o fuori):
+Il Modulo 4 usa lo stato MOVING/STATIONARY del tracker e l’appartenenza geometrica alle aree riconosciute (PORT, ANCHORAGE o PROVISIONAL).
 
-- moltiplicare entrambe le distanze per 0,25;
-- moltiplicare la finestra temporale per 0,25, dopo l'adattamento alla velocità e il limite massimo;
-- mantenere la valutazione dei pericoli ravvicinati, senza presumere che l'altra barca eviterà necessariamente l'urto.
+| Nostra barca | Target | Condizione | Politica |
+| --- | --- | --- | --- |
+| MOVING | Qualsiasi | Target dentro un’area | Soglie ridotte |
+| MOVING | Qualsiasi | Target fuori area | Soglie normali |
+| STATIONARY | MOVING | Nostra barca dentro un’area | Soglie ridotte |
+| STATIONARY | MOVING | Nostra barca fuori area | Soglie normali |
+| STATIONARY | STATIONARY | Ovunque | Solo safe bubble |
+
+La riduzione predefinita è 0,25 sulle distanze rossa e arancione e sulla finestra temporale, una sola volta dopo adattamento alla velocità e limite massimo. Il solo stato AIS anchored non attiva la riduzione geografica. La posizione ricevuta del target, anziché quella proiettata, determina l’appartenenza. Anche un target MOVING può essere dentro il poligono senza contribuire alla formazione del porto.
+
+Quando entrambi sono STATIONARY, CPA e TCPA non sono mostrati e il precedente stato collisione viene rimosso; l’ingresso osservato nella bubble, l’isteresi e gli acknowledge mantengono le proprie regole. Prima comparsa dentro la bubble: nessun warning.
+
+Verifiche: [matrice completa](../test/alertMatrix.test.js), [ingressi bubble](../test/bubbleEntryTracker.test.js).
+
+### Stato osservato della nostra barca
 
 Il riconoscimento automatico usa la stessa istanza di `TargetMotionTracker` usata per i target AIS, con la chiave riservata `self`, alimentata esclusivamente da fix propri ricevuti con timestamp crescente e recente. SOG nulla, riletture e appartenenza a un porto da sole non confermano la sosta.
 
-- All’avvio, stato STOPPED provvisorio. La conferma usa le soglie comuni del tracker: almeno 5 fix distribuiti su almeno 120 secondi nell’area di sosta.
+- All’avvio, SOG fra 0 e 0,5 kn inizializza STATIONARY/STOPPED; SOG superiore o mancante inizializza MOVING/UNDERWAY. La conferma dell’arresto usa almeno 5 fix su almeno 5 minuti con diametro massimo di 50 m.
 - Sosta confermata nel poligono di un’area PORT → IN PORT; fuori da un porto confermato → AT ANCHOR, come stato osservato compatibile con ancoraggio, senza aspettare di vedere oscillazioni.
 - La nostra barca non entra nell’elenco dei candidati del detector, non forma o estende aree e non incrementa i conteggi dei target.
-- Una partenza sospetta mantiene la riduzione; la partenza confermata dal tracker ripristina le soglie normali, anche sotto 0,8 kn. Un’eventuale indicazione `anchored` rimasta sul bus non prevale sul movimento confermato.
+- La partenza confermata aggiorna MOVING e ricalcola la politica secondo la matrice, anche sotto 0,8 kn. Un’eventuale indicazione `anchored` rimasta sul bus non prevale sul movimento confermato.
 - La scadenza del GPS sospende la conferma automatica utilizzabile; dopo una pausa fra fix superiore al massimo comune di 360 secondi ricominciare l’osservazione. Conservare timestamp originali; non alimentare il tracker con posizioni proiettate o sintetizzate dalla frequenza del ciclo.
 - Stato e fattore applicato sono calcolati sul server e distribuiti ai client; la simulazione mista usa lo stesso fattore per i target sintetici. La simulazione pura mantiene la propria barca in navigazione. Le isteresi di rientro degli allarmi e la politica bubble restano separate.
 

@@ -30,7 +30,7 @@ Il rilevatore non consulta cartografia terra/acqua: un rimessaggio con target fi
 - Indizio di ormeggio rispetto al vento e sua eventuale conferma forte.
 - Posizioni relative e densità dei gruppi di barche ferme.
 
-Con motion tracker disponibile, il codice considera candidati i target non `MOVING`, compresi quelli in `POSSIBLE_MOVEMENT`. Senza tracker usa la combinazione di movimento, velocità e stato disponibile.
+Con il nuovo motion tracker, i candidati sono i target STATIONARY; non esiste uno stato principale POSSIBLE_MOVEMENT. Senza tracker usa la combinazione di movimento, velocità e stato disponibile.
 Se il pattern è confermato, la posizione usata per apprendere l'area è il suo centro; altrimenti è la posizione ricevuta.
 
 L'appartenenza a un porto non deve diventare, da sola, nuova evidenza indipendente di ormeggio: evitare un'espansione circolare basata sulle nostre stesse etichette.
@@ -124,3 +124,16 @@ Il replay dei target reali di Marina di Ragusa distingue le posizioni catturate 
 - [Politica collisioni e prossimità](ais-spec.md)
 - [Test delle aree](../test/harborDetector.test.js)
 - [Test della prossimità portuale](../test/harborProximity.test.js)
+
+## Interrogazione di sola lettura delle aree — 26 ottobre 2026
+
+`getAreaAtPosition(lat, lon)` restituisce `{ id, kind, evaluatedAt }` per una posizione interna a un perimetro pubblicato nell'ultima elaborazione completata; restituisce `null` prima della prima elaborazione, fuori dai perimetri o per coordinate non valide. `kind` può essere PORT, ANCHORAGE o PROVISIONAL; `evaluatedAt` è il tempo dell'elaborazione, non una nuova osservazione del target.
+
+- Legge una copia dei poligoni già calcolati: nessun nuovo apprendimento, clustering, potatura o modifica dello stato dei target durante la query.
+- Include vertici e bordi; non usa la distanza estesa dai posti barca per attribuire appartenenza geometrica.
+- Se più perimetri si sovrappongono, sceglie il centro più vicino; a pari distanza usa l'id. Non assegna una precedenza automatica al porto.
+- Risultato e geometrie memorizzate sono separati dagli oggetti restituiti agli altri utilizzatori.
+- Il successivo processHarbors sostituisce lo snapshot, comprese aree rimosse o riclassificate.
+- Funzione collegata al nuovo tracker operativo per il contesto della ripartenza; nessuna modifica alle regole di clustering o alla matrice degli avvisi. La sessione dev riusa la funzione pura getAreaAtPositionFromAreas sui perimetri upstream.
+
+Verifiche: test automatici in `test/harborDetector.test.js` per tipi di area, bordi, coordinate invalide, assenza di mutazioni e aggiornamento dello snapshot.

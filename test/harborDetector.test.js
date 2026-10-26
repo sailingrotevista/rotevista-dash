@@ -181,3 +181,45 @@ test('polygon distance detects containment, crossing edges and segment gaps', ()
     assert.equal(polygonDistanceMeters(rect(0,0,.003,.003),rect(.001,.001,.001,.001)),0);
     assert.ok(Math.abs(polygonDistanceMeters(rect(0,0,.001,.001),rect(.002,0,.001,.001))-111.139)<.01);
 });
+
+test('area lookup is empty before detection and rejects invalid or outside positions', () => {
+    const detector = new HarborDetector();
+    assert.equal(detector.getAreaAtPosition(own.lat, own.lon), null);
+    process(detector, [vessel('a', 0, 0), vessel('b', 0, 70)]);
+    for (const [lat, lon] of [[NaN,14],[36,Infinity],[91,14],[36,181],['36',14],[37,15]]) {
+        assert.equal(detector.getAreaAtPosition(lat,lon), null);
+    }
+});
+
+test('area lookup reads PORT, PROVISIONAL and ANCHORAGE from completed polygons', () => {
+    for (const [kind, spacing, pattern, count] of [['PORT',70,'FIXED',2],['PROVISIONAL',140,'FIXED',3],['ANCHORAGE',140,'OSCILLATING',3]]) {
+        const detector = new HarborDetector();
+        const boats = Array.from({length:count},(_,i)=>vessel(String(i),0,i*spacing,pattern));
+        const area = process(detector,boats,200000)[0];
+        assert.equal(area.kind,kind);
+        assert.deepEqual(detector.getAreaAtPosition(boats[0].lat,boats[0].lon),{id:area.id,kind,evaluatedAt:200000});
+        // Vertices and edge midpoints count as inside, without expanding polygons.
+        const [a,b]=area.hull;
+        assert.equal(detector.getAreaAtPosition(...a).id,area.id);
+        assert.equal(detector.getAreaAtPosition((a[0]+b[0])/2,(a[1]+b[1])/2).id,area.id);
+    }
+});
+
+test('lookup neither mutates detector state nor shares mutable results with callers', () => {
+    const detector = new HarborDetector();
+    const areas=process(detector,[vessel('a',0,0),vessel('b',0,70)],200000);
+    const before=structuredClone(detector);
+    const result=detector.getAreaAtPosition(own.lat,own.lon);
+    result.kind='ANCHORAGE';result.id='changed';
+    assert.deepEqual(structuredClone(detector),before);
+    areas[0].hull.length=0;
+    assert.equal(detector.getAreaAtPosition(own.lat,own.lon).kind,'PORT');
+});
+
+test('lookup replaces its snapshot after detection prunes the area', () => {
+    const detector = new HarborDetector();
+    process(detector,[vessel('a',0,0),vessel('b',0,70)]);
+    assert.ok(detector.getAreaAtPosition(own.lat,own.lon));
+    detector.processHarbors([],{lat:40,lon:14},{},0,300000);
+    assert.equal(detector.getAreaAtPosition(own.lat,own.lon),null);
+});

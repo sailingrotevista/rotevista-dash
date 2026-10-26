@@ -150,3 +150,7 @@ Verifiche: [navigazione della propria barca](../test/ownShipNavigation.test.js).
 - La riga MY VESSEL usa lo stato `ownMotion` condiviso dal server: STOPPED prima della conferma, IN PORT per sosta confermata in un poligono PORT, AT ANCHOR per sosta confermata fuori, UNDERWAY per movimento confermato. AT ANCHOR è una classificazione osservata, non la dichiarazione ricevuta da uno strumento.
 - GPS STALE/UNAVAILABLE ha precedenza. In assenza del nuovo campo (compatibilità con server precedenti) mantenere l’indicazione di velocità già esistente.
 - Nei limiti applicati distinguere OWN SHIP IN PORT da OWN SHIP AT ANCHOR quando si applica il fattore di sosta. Il cambio di stato non dipende dal dispositivo che apre la scheda.
+
+## SOG dei target non disponibile
+
+La velocità assente è null nei frame e viene mostrata come --.- kn; non classificare automaticamente come STOPPED o contare come ancorato un target per il solo null. La velocità zero realmente ricevuta resta 0.0 kn. Il tracker emette soltanto MOVING/STATIONARY.

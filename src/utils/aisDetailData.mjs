@@ -58,3 +58,7 @@ export function displayCpa(target) {
   return Number.isFinite(target.tcpa) && target.tcpa >= 0 && Number.isFinite(target.cpa)
     ? target.cpa : null;
 }
+
+export function formatAisSpeed(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value.toFixed(1) : '--.-';
+}

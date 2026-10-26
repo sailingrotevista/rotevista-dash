@@ -131,6 +131,8 @@ export interface AisTarget {
   id: string;
   isSimulated?: boolean;
   areaProximityOnly?: boolean;
+  inRecognizedArea?: boolean;
+  alertPolicy?: { mode: 'NORMAL' | 'REDUCED' | 'BUBBLE_ONLY'; reason: string; ownMoving: boolean; targetMoving: boolean; ownInArea: boolean; targetInArea: boolean };
   proximityEntryObserved?: boolean;
   withinSafeBubble?: boolean;
   areaKind?: 'PORT' | 'ANCHORAGE' | 'PROVISIONAL';
@@ -146,7 +148,7 @@ export interface AisTarget {
   lat: number;
   lon: number;
   cog: number;
-  sog: number;
+  sog: number | null;
   dist: number;
   isAnchored: boolean;
   isMoored?: boolean;
@@ -154,7 +156,7 @@ export interface AisTarget {
   swingRadius?: number | null;
   anchorCenter?: { lat: number; lon: number; radius?: number } | null;
   isMoving: boolean;
-  motionState?: 'STATIONARY' | 'POSSIBLE_MOVEMENT' | 'MOVING';
+  motionState?: 'STATIONARY' | 'MOVING';
   stationarySince?: number | null;
   restPattern?: {
     kind: 'UNDETERMINED' | 'FIXED' | 'OSCILLATING';
@@ -206,6 +208,8 @@ export interface AisTarget {
     referenceKnots: number;
     distanceFactor: number;
     ownAtAnchor?: boolean;
+    reduced?: boolean;
+    reductionReason?: string;
     anchoredCpaFactor?: number;
     anchoredTcpaFactor?: number;
   };
@@ -272,6 +276,6 @@ export interface OwnShipMotion {
   confirmedRest: boolean;
   relaxedCollision: boolean;
   inPort: boolean;
-  motionState: 'UNKNOWN' | 'STATIONARY' | 'POSSIBLE_MOVEMENT' | 'MOVING';
+  motionState: 'UNKNOWN' | 'STATIONARY' | 'MOVING';
   lastFixTime: number | null;
 }
