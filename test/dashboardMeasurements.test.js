@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {DashboardSession}=require('../dashboardSession');
+const {DashboardSession}=require('../session/dashboardSession');
 const keys=['stw','sog','vmg','depth','tws','aws','twd'];
 const buffers=()=>Object.fromEntries(keys.map(k=>[k,[{val:99,time:1000}]]));
 function store() {return {raw:{'navigation.speedOverGround':99},timestamps:{old:1000},histories:buffers(),smoothBuf:buffers(),longBuf:buffers(),graphTempBuf:buffers(),lastUpdates:{stw:1000},curAwaRot:123,smoothedLeeway:12,lastGybeSide:'port',firstEmaRun:false};}

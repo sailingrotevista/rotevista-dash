@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateMotionDataSync, AisEngine } = require('../aisEngine');
-const { CollisionPipeline } = require('../collisionPipeline');
+const { evaluateMotionDataSync, AisEngine } = require('../ais/aisEngine');
+const { CollisionPipeline } = require('../ais/collisionPipeline');
 
 test('coherent reports remain in sync regardless of their absolute age', () => {
     const result = evaluateMotionDataSync(1000000 - 180000, 1000000 - 180000, 1000000 - 180000, 5);

@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const policy=require('../windDataPolicy.json');
+const policy=require('../shared/windDataPolicy.json');
 const H='navigation.headingTrue',C='navigation.courseOverGroundTrue',S='navigation.speedOverGround';
 test('leeway requires every recent input and never substitutes COG for heading',async()=>{
  const {resolveLeeway:r}=await import('../src/utils/windValidity.mjs');

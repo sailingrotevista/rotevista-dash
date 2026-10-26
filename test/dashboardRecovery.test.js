@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {DashboardSession}=require('../dashboardSession');
+const {DashboardSession}=require('../session/dashboardSession');
 
 test('a visible tablet requests immediate recovery on resume, focus and network reconnection',async()=>{
  const {subscribeDashboardRecovery}=await import('../src/utils/dashboardRecovery.mjs');

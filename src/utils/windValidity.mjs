@@ -1,5 +1,5 @@
 import geomagnetism from 'geomagnetism';
-import '../../magneticDeclination.js';
+import '../../shared/magneticDeclination.js';
 const resolveDeclination = globalThis.RotevistaDeclination(geomagnetism);
 
 // Zero is a measurement; an absent, invalid or expired sample is not.

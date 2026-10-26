@@ -134,3 +134,19 @@ Verifiche: [navigazione della propria barca](../test/ownShipNavigation.test.js).
 ## Copia MMSI
 
 - Il pulsante MMSI copia solo il numero, anche su HTTP locale senza Clipboard API: usare una selezione temporanea come ripiego. Mostrare la conferma solo dopo una copia riuscita e ripristinare il focus.
+
+## CPA senza incontro futuro
+
+- Se TCPA è negativo o assente, mostrare `--` anche per CPA in scheda e banner. Nei tag sulla mappa omettere CPA e TCPA non disponibili e rimuovere la riga se entrambi sono assenti; mantenere eventuale testo di allarme e le informazioni di prossimità. Conservare il valore numerico nel motore; la distanza attuale resta nel campo DISTANCE. TCPA zero valido mantiene il CPA numerico.
+
+## Età dei dati nel popup AIS
+
+- Applicare ai blocchi informativi e alla direzione di avvistamento la stessa attenuazione progressiva della mappa/lista: target in movimento 90–180 secondi, lenti/ormeggiati 240–360 secondi, opacità minima 40%. La stessa attenuazione moltiplica l’opacità di icone, vettori, scie e tag sulla mappa e delle righe in elenco; i target selezionati si attenuano anche se in allarme, inclusi tag esteso, icona, vettori e scia. La selezione non rinnova né nasconde l’età AIS. Gli allarmi non selezionati mantengono l’enfasi sulla mappa/lista.
+- Nel popup attenuare anche il target selezionato o in allarme: l’enfasi del rischio non deve far sembrare recenti i suoi dati. Ripristinare l’opacità quando arriva un fix recente.
+- Attenuare anche icona e nome, tipo, MMSI, età AIS, avvisi di prossimità/clearance e gli altri testi informativi, compresi i limiti mostrati nella scheda. Applicare l’opacità una sola volta per blocco, senza moltiplicarla sui figli. I comandi di navigazione, cambio scheda, snooze/acknowledge e il link foto restano opachi e utilizzabili. L’attenuazione usa l’età del fix comune, non la data dei singoli metadati; non implica che dimensioni o nominativo siano scaduti.
+
+## Stato osservato della nostra barca
+
+- La riga MY VESSEL usa lo stato `ownMotion` condiviso dal server: STOPPED prima della conferma, IN PORT per sosta confermata in un poligono PORT, AT ANCHOR per sosta confermata fuori, UNDERWAY per movimento confermato. AT ANCHOR è una classificazione osservata, non la dichiarazione ricevuta da uno strumento.
+- GPS STALE/UNAVAILABLE ha precedenza. In assenza del nuovo campo (compatibilità con server precedenti) mantenere l’indicazione di velocità già esistente.
+- Nei limiti applicati distinguere OWN SHIP IN PORT da OWN SHIP AT ANCHOR quando si applica il fattore di sosta. Il cambio di stato non dipende dal dispositivo che apre la scheda.

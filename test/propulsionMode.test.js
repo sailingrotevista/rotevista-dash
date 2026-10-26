@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {DashboardSession,registerDashboardRoutes}=require('../dashboardSession');
+const {DashboardSession,registerDashboardRoutes}=require('../session/dashboardSession');
 const make=()=>new DashboardSession({readLive:()=>({raw:{},targets:[]}),now:1000});
 test('propulsion shared in RAM, preserved on mode change, reset on restart and isolated from dev',()=>{
  const server=make(),dev=make();assert.equal(server.snapshot().propulsionMode,'AUTO');

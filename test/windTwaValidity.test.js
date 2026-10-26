@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const policy=require('../windDataPolicy.json');
-const {WindEngine}=require('../windEngine');
+const policy=require('../shared/windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');
 const TWA='environment.wind.angleTrueWater', AWS='environment.wind.speedApparent', AWA='environment.wind.angleApparent';
 
 test('native TWA is independent, zero valid, expiry falls back without overwriting it',async()=>{

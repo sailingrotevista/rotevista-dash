@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { HarborDetector, pointInPolygon } = require('../harborDetector');
+const { HarborDetector, pointInPolygon } = require('../ais/harborDetector');
 const own = { lat: 36, lon: 14 };
 
 function vessel(id, north, east, kind = 'FIXED', options = {}) {
@@ -175,7 +175,7 @@ test('nearby port and anchorage never merge solely because their polygons overla
 });
 
 test('polygon distance detects containment, crossing edges and segment gaps', () => {
-    const { polygonDistanceMeters } = require('../harborDetector');
+    const { polygonDistanceMeters } = require('../ais/harborDetector');
     const rect = (x,y,w,h) => [[y,x],[y,x+w],[y+h,x+w],[y+h,x]];
     assert.equal(polygonDistanceMeters(rect(0,0,.003,.001),rect(.001,-.001,.001,.003)),0);
     assert.equal(polygonDistanceMeters(rect(0,0,.003,.003),rect(.001,.001,.001,.001)),0);

@@ -1,8 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const create = require('../magneticDeclination');
+const create = require('../shared/magneticDeclination');
 const geomagnetism = require('geomagnetism');
-const policy = require('../windDataPolicy.json');
+const policy = require('../shared/windDataPolicy.json');
 const now = Date.UTC(2026, 9, 25);
 const position = { latitude: 36.78, longitude: 14.55 };
 test('offline model, cache distance/day, invalid inputs and validity end', () => {
@@ -26,7 +26,7 @@ test('GUI and server ignore instrument variation; magnetic leeway uses model, no
  const expected=1+create(geomagnetism)(raw,now);
  assert.ok(Math.abs(resolveHeading(raw,times,now,policy)-expected)<1e-12);
  assert.ok(Math.abs(resolveLeeway(raw,times,now,policy,1)-(1.2-expected)*180/Math.PI)<1e-10);
- const {WindEngine}=require('../windEngine');
+ const {WindEngine}=require('../wind/windEngine');
  const original=Date.now;Date.now=()=>now;
  try {
   const e=new WindEngine({debug(){}},()=>({}));e.fetchOpenMeteoForecast=()=>{};
@@ -58,7 +58,7 @@ test('installation variants: corrected compass, true-only, GPS-only and missing 
  assert.equal(h(raw,times,now+15000,policy),null);
 });
 test('server reconstructed TWD overrides received TWD without modifying raw data',()=>{
- const {WindEngine}=require('../windEngine'); const original=Date.now;Date.now=()=>now;
+ const {WindEngine}=require('../wind/windEngine'); const original=Date.now;Date.now=()=>now;
  try{
  const e=new WindEngine({debug(){}},()=>({}));e.fetchOpenMeteoForecast=()=>{};
  let last; e.manageHistory=(k,v)=>{if(k==='twd')last=v;};

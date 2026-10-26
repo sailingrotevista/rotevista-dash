@@ -1,8 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { CollisionPipeline, isAnchoredNavigationState, applyHarborProximityPolicy } = require('../collisionPipeline');
-const { AisEngine } = require('../aisEngine');
-const { WindEngine } = require('../windEngine');
+const { CollisionPipeline, isAnchoredNavigationState, applyHarborProximityPolicy } = require('../ais/collisionPipeline');
+const { AisEngine } = require('../ais/aisEngine');
+const { WindEngine } = require('../wind/windEngine');
 
 test('confirmed own anchoring quarters effective distances and lookahead after speed scaling and cap', () => {
     const pipeline = new CollisionPipeline({ baseTcpaMinutes: 10 });

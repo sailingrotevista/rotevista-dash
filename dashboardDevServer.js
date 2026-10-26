@@ -1,6 +1,6 @@
 'use strict';
 const http=require('http');
-const {DashboardSession,registerDashboardRoutes}=require('./dashboardSession');
+const {DashboardSession,registerDashboardRoutes}=require('./session/dashboardSession');
 
 function getJson(path) {
     return new Promise(resolve=>{

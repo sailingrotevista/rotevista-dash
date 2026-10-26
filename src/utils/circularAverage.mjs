@@ -1,4 +1,4 @@
-import policy from '../../windDataPolicy.json' with { type: 'json' };
+import policy from '../../shared/windDataPolicy.json' with { type: 'json' };
 // Missing samples never contribute a zero angle or increase the divisor.
 export function getCircularAverageFromBuffer(
   bufferArray,

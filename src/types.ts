@@ -265,3 +265,13 @@ export interface OwnShipCourse {
   cog: number | null;
   sog: number | null;
 }
+
+export interface OwnShipMotion {
+  status: 'UNKNOWN' | 'STOPPED' | 'UNDERWAY' | 'IN PORT' | 'AT ANCHOR';
+  valid: boolean;
+  confirmedRest: boolean;
+  relaxedCollision: boolean;
+  inPort: boolean;
+  motionState: 'UNKNOWN' | 'STATIONARY' | 'POSSIBLE_MOVEMENT' | 'MOVING';
+  lastFixTime: number | null;
+}

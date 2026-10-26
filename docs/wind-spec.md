@@ -12,12 +12,12 @@ Decisione concordata: scadenza dopo 5 secondi senza un nuovo dato valido.
 - Accettare solo numeri finiti fra 0 e 51,44 m/s; un valore invalido non rinnova l'età. Un reset esplicito null rende il dato indisponibile.
 - Usare il timestamp sorgente quando disponibile; in sua assenza il tempo di ricezione. Un pacchetto precedente non sostituisce un dato più recente.
 - Nuove misure uguali alla precedente rinnovano l'età; riletture con lo stesso timestamp non la rinnovano.
-- Soglia condivisa fra server e GUI in [windDataPolicy.json](../windDataPolicy.json): `awsMaxAgeMs = 5000`. A 5 secondi il dato è scaduto; la visualizzazione segue il normale ciclo di aggiornamento di un secondo.
+- Soglia condivisa fra server e GUI in [windDataPolicy.json](../shared/windDataPolicy.json): `awsMaxAgeMs = 5000`. A 5 secondi il dato è scaduto; la visualizzazione segue il normale ciclo di aggiornamento di un secondo.
 - Quando AWS è scaduto, interrompere nuovi calcoli di ripiego di TWS/TWA/TWD che lo richiedono. La validità autonoma dei dati reali ricevuti e la presentazione dei valori derivati saranno approfondite nei rispettivi passaggi della revisione.
 - Non aggiungere nuovi campioni allo storico AWS usando il valore scaduto. Conservare lo storico già acquisito.
 - Un nuovo AWS valido ripristina la visualizzazione e permette nuovamente i calcoli.
 
-Riferimenti: [motore Wind](../windEngine.js), [GUI](../src/hooks/useDashboard.ts), [test della validità AWS](../test/windAwsValidity.test.js).
+Riferimenti: [motore Wind](../wind/windEngine.js), [GUI](../src/hooks/useDashboard.ts), [test della validità AWS](../test/windAwsValidity.test.js).
 
 ## AWA: angolo del vento apparente
 
@@ -27,7 +27,7 @@ Riferimenti: [motore Wind](../windEngine.js), [GUI](../src/hooks/useDashboard.ts
 - Freccia con media circolare breve, valore MEAN con media lunga configurata; zero ricevuto è valido.
 - Scadenza dopo 5 secondi dal timestamp della misura valida: valore `---°` e freccia AWA nascosta. Reset null rende il dato indisponibile; dati invalidi o precedenti non rinnovano l'età.
 - AWA scaduto non deve alimentare il calcolo di ripiego del vento reale, anche con AWS recente.
-- La soglia `awaMaxAgeMs` risiede in [windDataPolicy.json](../windDataPolicy.json).
+- La soglia `awaMaxAgeMs` risiede in [windDataPolicy.json](../shared/windDataPolicy.json).
 
 Verifiche automatiche: [validità e indipendenza AWA](../test/windAwaValidity.test.js).
 
@@ -244,10 +244,10 @@ Verifiche: [medie e dati mancanti](../test/circularAverage.test.js).
 ## Ponderazione dello storico TWD
 
 - Acquisire il peso TWS in m/s al momento di ciascun campione TWD, con lo stesso risolutore usato per il valore corrente: nativo valido, altrimenti ricostruzione AWS/AWA e velocità disponibili. Non usare direttamente il TWS nativo grezzo.
-- Server e GUI condividono risolutore e aggregazione in `twdHistory.js`. La GUI aggrega anche i punti storici TWD, conservandone estremi e interruzioni, invece di salvare una direzione istantanea ogni 10 secondi. Medie dei riquadri e indicatori TWD mantengono il filtro angolare concordato.
+- Server e GUI condividono risolutore e aggregazione in `wind/twdHistory.js`. La GUI aggrega anche i punti storici TWD, conservandone estremi e interruzioni, invece di salvare una direzione istantanea ogni 10 secondi. Medie dei riquadri e indicatori TWD mantengono il filtro angolare concordato.
 - Se tutte le intensità dell'intervallo sono note: soglia 40% del picco o almeno 1,5 kn; se esistono campioni sopra soglia, usare quelli per media ed estremi. Media circolare pesata per TWS.
 - Se almeno un'intensità manca, usare una media circolare non ponderata dell'intero intervallo, senza esclusione per intensità. Null significa sconosciuto; uno zero misurato resta una misura. Non inventare un peso da un'intensità scaduta.
-- Parametri in `windDataPolicy.json`: `twdPressureFilterRatio` e `twdCalmThresholdKnots`.
+- Parametri in `shared/windDataPolicy.json`: `twdPressureFilterRatio` e `twdCalmThresholdKnots`.
 
 Verifiche: [TWS valido e ponderazione TWD](../test/twdHistory.test.js).
 
@@ -265,7 +265,7 @@ Verifiche: [campionamento indipendente dai delta](../test/windSampling.test.js).
 ## Conservazione dei dati per il Weather Radar
 
 - Condividere `historyRetentionMs` fra aggregazione server, potatura periodica e storico GUI. Conservare il massimo fra doppia finestra del grafico e minimo richiesto dal canale, più un minuto di margine.
-- Minimo TWD 120 minuti; minimo TWS 30 minuti. Con grafici da 5 minuti risultano quindi 121 minuti TWD, 31 minuti TWS e 11 minuti per gli altri canali. Finestre configurate più lunghe estendono la conservazione. Parametri in `windDataPolicy.json`.
+- Minimo TWD 120 minuti; minimo TWS 30 minuti. Con grafici da 5 minuti risultano quindi 121 minuti TWD, 31 minuti TWS e 11 minuti per gli altri canali. Finestre configurate più lunghe estendono la conservazione. Parametri in `shared/windDataPolicy.json`.
 - La conservazione in RAM non estende la finestra visibile dei grafici, che continua a scorrere secondo la configurazione e il movimento.
 - Il timer a 1 Hz chiude gli slot radar completati anche durante il silenzio dei sensori; chiudere gli intervalli prima della pulizia periodica. Non inventare misure per le parti mancanti. Al recupero dopo una lunga pausa limitare il consolidamento ai 12 slot conservati dal radar.
 - La potatura periodica del plugin resta ogni 60 secondi.

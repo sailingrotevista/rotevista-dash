@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { CollisionPipeline, evaluateInstabilityWarning, COLLISION_THRESHOLD_DEFAULTS } = require('../collisionPipeline');
+const { CollisionPipeline, evaluateInstabilityWarning, COLLISION_THRESHOLD_DEFAULTS } = require('../ais/collisionPipeline');
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} != ${b}`);
 
 function encounter(cpa, seconds, stability) {

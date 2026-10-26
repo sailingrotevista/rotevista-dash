@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { getHullBoundingRadius, computeHullCpa, computeCpaTcpa, resolveHullPose, CollisionPipeline } = require('../collisionPipeline');
+const { getHullBoundingRadius, computeHullCpa, computeCpaTcpa, resolveHullPose, CollisionPipeline } = require('../ais/collisionPipeline');
 const hull = (length, beam, bow = length / 2) => getHullBoundingRadius({
     length, beam, antBow: bow, antStern: length - bow, antPort: beam / 2, antStarboard: beam / 2,
 }, 'sailing');

@@ -100,8 +100,8 @@ L'URL normale apre la modalità corrente del server. Il menu speciale `?menu=1` 
 
 ## Riferimenti e verifiche
 
-- [Coordinatore della sessione](../dashboardSession.js)
-- [Stato degli avvisi e controlli](../aisSharedAlerts.js)
+- [Coordinatore della sessione](../session/dashboardSession.js)
+- [Stato degli avvisi e controlli](../session/aisSharedAlerts.js)
 - [Backend di sviluppo](../dashboardDevServer.js)
 - [Richieste dei comandi dal client](../src/utils/sharedAlertRequest.mjs)
 - [Test della sessione](../test/dashboardSession.test.js), [avvisi condivisi](../test/sharedAlerts.test.js), [errori delle richieste](../test/sharedAlertRequest.test.js) e [ripresa dei client](../test/dashboardRecovery.test.js).
@@ -131,3 +131,8 @@ Le prove automatiche non sostituiscono la verifica su dispositivi reali con sosp
 - Dashboard, comandi, endpoint AIS/storico e delta `environment.ais_shared_alerts` condividono identità di sessione, revisioni, banner, snooze e acknowledge Live. Il timer pubblica il medesimo stato senza una seconda valutazione dedicata al delta.
 - Simulation e Mixed usano una propria istanza; tornare in Live recupera quella originale. Gli endpoint precedenti continuano a rappresentare Live anche durante la simulazione.
 - Il dev crea e gestisce la propria istanza Live; non acquisisce né modifica l'istanza del Cerbo.
+
+## Sosta propria condivisa
+
+- I frame includono `ownMotion`, calcolato dal motore AIS sul server tramite la voce riservata della nostra barca nell’unico tracker condiviso con i target AIS. La sessione installata riusa questo stato senza istanziare altri tracker. La lettura dei frame può acquisire un nuovo fix sorgente ma non trasformare riletture o proiezioni in nuove osservazioni.
+- La modalità mista riusa la sosta Live per le soglie dei target simulati; la modalità di simulazione pura espone movimento simulato e non cambia il tracker Live. Il server dev usa l’informazione Live se disponibile, altrimenti osserva localmente i fix ricevuti senza scrivere sul Cerbo.

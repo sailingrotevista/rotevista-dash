@@ -29,7 +29,7 @@ test('history restore rejects null angles and server accumulation rejects missin
  const store={histories:Object.fromEntries(keys.map(k=>[k,[]])),smoothBuf:{},longBuf:{}};
  restoreDashboardHistory(store,{rollingAngles:{hdg:[null,{val:null,time:10000},{val:1,time:10000}]},twd:[null,{val:null,time:10000}]});
  assert.equal(store.longBuf.hdg.length,1);assert.equal(store.longBuf.twd.length,0);
- const {WindEngine}=require('../windEngine');const e=new WindEngine({debug(){}},()=>({}));
+ const {WindEngine}=require('../wind/windEngine');const e=new WindEngine({debug(){}},()=>({}));
  for(const value of [null,undefined,NaN,'0',false]) {e.manageHistory('stw',value);e.pushRollingAngle('hdg',value,10000);}
  assert.equal(e.getHistories().stw.length,0);assert.equal(e.getRollingAngles().hdg.length,0);
  e.manageHistory('stw',0);e.pushRollingAngle('hdg',0,10000);

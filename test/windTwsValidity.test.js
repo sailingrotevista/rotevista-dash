@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const policy=require('../windDataPolicy.json');
-const {WindEngine}=require('../windEngine');
+const policy=require('../shared/windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');
 const AWS='environment.wind.speedApparent',AWA='environment.wind.angleApparent',TWS='environment.wind.speedTrue';
 
 test('native TWS including zero is independent of missing apparent wind',async()=>{

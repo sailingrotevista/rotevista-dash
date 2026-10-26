@@ -1,7 +1,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {WindEngine} = require('../windEngine');
-const {DashboardSession} = require('../dashboardSession');
+const {WindEngine} = require('../wind/windEngine');
+const {DashboardSession} = require('../session/dashboardSession');
 const paths = [
  'navigation.speedThroughWater', 'navigation.speedOverGround', 'navigation.headingTrue',
  'navigation.headingMagnetic', 'navigation.courseOverGroundTrue', 'environment.depth.belowTransducer',

@@ -1,9 +1,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { TargetMotionTracker } = require('../targetMotionTracker');
-const { AisEngine } = require('../aisEngine');
-const { HarborDetector } = require('../harborDetector');
-const { CollisionPipeline } = require('../collisionPipeline');
+const { TargetMotionTracker } = require('../ais/targetMotionTracker');
+const { AisEngine } = require('../ais/aisEngine');
+const { HarborDetector } = require('../ais/harborDetector');
+const { CollisionPipeline } = require('../ais/collisionPipeline');
 
 function fix(seconds, meters, sog = 0, east = 0) {
     return { t: seconds * 1000, lat: 36 + meters / 111139, lon: 14 + east / (111139 * Math.cos(Math.PI / 5)), sog, cog: 0 };

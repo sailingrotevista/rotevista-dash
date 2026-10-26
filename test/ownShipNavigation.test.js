@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');const policy=require('../windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');const policy=require('../shared/windDataPolicy.json');
 const now=Date.UTC(2026,9,25,18);const P='navigation.position',H='navigation.headingTrue',M='navigation.headingMagnetic',C='navigation.courseOverGroundTrue',S='navigation.speedOverGround';
 const position={latitude:36.78,longitude:14.55};
 test('AIS uses the same magnetic/WMM heading as Wind; 0 degrees and 0 speed remain real values',async()=>{

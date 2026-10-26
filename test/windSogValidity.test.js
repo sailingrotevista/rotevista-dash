@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');
+const {WindEngine}=require('../wind/windEngine');
 test('SOG distinguishes zero from missing and expires exactly at 5 seconds',async()=>{
  const {freshBoatSpeed}=await import('../src/utils/windValidity.mjs');
  assert.equal(freshBoatSpeed(0,1000,5999,5000),0);

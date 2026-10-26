@@ -1,6 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {resolveTws,aggregateTwd}=require('../twdHistory');const policy=require('../windDataPolicy.json');
-const {WindEngine}=require('../windEngine');
+const {resolveTws,aggregateTwd}=require('../wind/twdHistory');const policy=require('../shared/windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');
 const N='environment.wind.speedTrue',AWS='environment.wind.speedApparent',AWA='environment.wind.angleApparent';
 test('TWD weight uses reconstructed strong wind and ignores expired native speed',()=>{
  const now=1000000,raw={[AWS]:25/1.94384,[AWA]:Math.PI/2,[N]:1};

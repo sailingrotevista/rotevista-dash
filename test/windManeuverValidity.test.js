@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const policy=require('../windDataPolicy.json');
+const policy=require('../shared/windDataPolicy.json');
 test('maneuver predictions require movement and fresh wind/heading; COG expires independently',async()=>{
  const {maneuverValidity:v}=await import('../src/utils/windValidity.mjs');
  const H='navigation.headingTrue',C='navigation.courseOverGroundTrue',S='navigation.speedOverGround',A='environment.wind.angleTrueWater',D='environment.wind.directionTrue';

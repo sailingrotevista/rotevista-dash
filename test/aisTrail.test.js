@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { compactAisTrail, AisEngine } = require('../aisEngine');
+const { compactAisTrail, AisEngine } = require('../ais/aisEngine');
 
 test('compression caps the count while preserving the full available time span', () => {
     const points = Array.from({ length: 241 }, (_, i) => ({ t: i * 15000, lat: 36 + i * 0.0001, lon: 14 }));

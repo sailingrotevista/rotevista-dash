@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { TargetMotionTracker } = require('../targetMotionTracker');
-const { HarborDetector } = require('../harborDetector');
+const { TargetMotionTracker } = require('../ais/targetMotionTracker');
+const { HarborDetector } = require('../ais/harborDetector');
 function replay(options = {}) {
     const tracker = new TargetMotionTracker();
     let result;

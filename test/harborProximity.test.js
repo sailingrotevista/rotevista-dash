@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { CollisionPipeline, applyHarborProximityPolicy } = require('../collisionPipeline');
-const { AisEngine } = require('../aisEngine');
+const { CollisionPipeline, applyHarborProximityPolicy } = require('../ais/collisionPipeline');
+const { AisEngine } = require('../ais/aisEngine');
 
 function fixture({ distance = 1000, clustered = false, speed = 0, large = false, bubble = 45 } = {}) {
     const now = Date.now();

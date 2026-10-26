@@ -1,6 +1,6 @@
 'use strict';
 const { randomUUID } = require('crypto');
-const { compareTargets } = require('./collisionPipeline');
+const { compareTargets } = require('../ais/collisionPipeline');
 const HOLD_MS = 10000, SNOOZE_MS = 600000, READY_MS = 3000, ABSENCE_MS = 86400000;
 const isBubble = t => t.alertKind === 'PROXIMITY' && t.areaProximityOnly && !t.isMoving && t.motionState !== 'MOVING';
 const key = t => t ? `${t.id}:${t.risk}:${t.alertKind || 'COLLISION'}` : null;

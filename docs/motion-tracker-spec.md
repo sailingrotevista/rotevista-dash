@@ -103,12 +103,22 @@ Usare posizione ferma e prua stabile rispetto a vento misurato per rafforzare l'
 
 - Il riconoscimento automatico della nostra barca all'ancora non è ancora collegato al tracker dei target.
 - Non trasformare questi pattern in un sistema di sorveglianza dell'ancoraggio con riarmi automatici: non è l'obiettivo concordato.
-- Le soglie sono parametri iniziali modificabili all'inizio di `targetMotionTracker.js`; nuovi valori richiedono verifica e aggiornamento della specifica.
+- Le soglie sono parametri iniziali modificabili all'inizio di `ais/targetMotionTracker.js`; nuovi valori richiedono verifica e aggiornamento della specifica.
 
 ## Riferimenti
 
-- [Tracker](../targetMotionTracker.js)
-- [Stabilità della previsione](../targetPredictionStability.js)
-- [Integrazione AIS](../aisEngine.js)
+- [Tracker](../ais/targetMotionTracker.js)
+- [Stabilità della previsione](../ais/targetPredictionStability.js)
+- [Integrazione AIS](../ais/aisEngine.js)
 - [Visualizzazione dei target e delle scie](../src/components/AisView.tsx)
 - [Specifiche AIS e collisioni](ais-spec.md)
+
+## Movimento della nostra barca
+
+- Riutilizzare `TargetMotionTracker` tramite [OwnMotionState](../ais/ownMotionState.js), con un’unica istanza condivisa: ogni identificativo mantiene il proprio storico. La chiave riservata `self` contiene la nostra barca; il modulo OwnMotionState interpreta soltanto il risultato, senza creare un altro tracker.
+- I fix provengono dalla posizione propria con timestamp sorgente originale; le letture duplicate nei cicli della sessione e del motore non aggiungono osservazioni. Richiedere coordinate valide e posizione recente secondo `positionMaxAgeMs`.
+- La sosta confermata abilita la politica collisione al 25%; la sola prima classificazione STATIONARY non basta. Mantenere la conferma durante POSSIBLE_MOVEMENT e revocarla con MOVING confermato. La distinzione FIXED/OSCILLATING non è un prerequisito della riduzione.
+- Il contesto PORT viene soltanto letto dai poligoni già appresi dagli altri target: la nostra barca non alimenta HarborDetector. Nessuna persistenza su disco.
+- Usare le soglie comuni, senza introdurre un nuovo algoritmo di classificazione. Per GPS scaduto non usare la sosta osservata come conferma attuale; dopo una lunga interruzione ripartire dall’osservazione iniziale.
+
+Verifiche: [tracker proprio](../test/ownMotionState.test.js).

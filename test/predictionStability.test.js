@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { TargetPredictionStability, predictionUncertaintyRadius } = require('../targetPredictionStability');
-const { CollisionPipeline } = require('../collisionPipeline');
+const { TargetPredictionStability, predictionUncertaintyRadius } = require('../ais/targetPredictionStability');
+const { CollisionPipeline } = require('../ais/collisionPipeline');
 
 function trajectory(courses, interval = 30, speed = 6, actualExtraMps = 0) {
     let lat = 36, lon = 14;

@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');
+const {WindEngine}=require('../wind/windEngine');
 test('depth expires at 5 seconds, preserves measured zero and rejects invalid inputs',async()=>{
  const {freshDepth:f}=await import('../src/utils/windValidity.mjs');
  assert.equal(f(0,1000,5999,5000),0);

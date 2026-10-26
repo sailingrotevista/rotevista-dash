@@ -1,4 +1,4 @@
-import '../../collisionPipeline.js';
+import '../../ais/collisionPipeline.js';
 
 export const compareAisTargets = globalThis.RotevistaCollisionPipeline.compareTargets;
 export const BANNER_PRIORITY_HOLD_MS = 10000;

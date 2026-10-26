@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const policy=require('../windDataPolicy.json');
-const {WindEngine}=require('../windEngine');
+const policy=require('../shared/windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');
 const H='navigation.speedThroughWater',G='navigation.speedOverGround',A='environment.wind.angleTrueWater';
 test('VMG uses native TWA and STW without AWS or SOG, positive downwind and real zero',async()=>{
  const {resolveVmg:r}=await import('../src/utils/windValidity.mjs');

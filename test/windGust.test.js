@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');
+const {WindEngine}=require('../wind/windEngine');
 
 test('gust filter continues across buckets and does not carry the old maximum',()=>{
  const original=Date.now;let now=1000000;Date.now=()=>now;

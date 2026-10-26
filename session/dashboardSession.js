@@ -1,10 +1,12 @@
 'use strict';
 const { randomUUID } = require('crypto');
 const { AisSharedAlerts, createDashboardAlertHandlers, readAlertAction } = require('./aisSharedAlerts');
-const pipeline = require('./collisionPipeline');
-const marina = require('./dashboardMarina.json');
-const createTools = require('./dashboardScenario');
-const {BubbleEntryTracker} = require('./bubbleEntryTracker');
+const pipeline = require('../ais/collisionPipeline');
+const marina = require('../simulation/dashboardMarina.json');
+const createTools = require('../simulation/dashboardScenario');
+const {OwnMotionState}=require('../ais/ownMotionState');
+const {TargetMotionTracker}=require('../ais/targetMotionTracker');
+const {BubbleEntryTracker} = require('../ais/bubbleEntryTracker');
 const VALID_MODES = ['live','simulation','mixed'];
 const rad = degrees => degrees*Math.PI/180;
 function advance(v, seconds) {
@@ -15,6 +17,7 @@ function advance(v, seconds) {
 class DashboardSession {
     constructor({ readLive, environment='signalk', now=Date.now(), liveAlerts }) {
         this.readLive=readLive;
+        this.ownMotionState=null;
         this.environment=environment;
         this.propulsionMode='AUTO';
         this.mode='live'; this.generation=randomUUID(); this.changedAt=now; this.revision=0;
@@ -52,6 +55,11 @@ class DashboardSession {
             hdg:(raw['navigation.headingTrue'] ?? raw['navigation.courseOverGroundTrue'] ?? 0)*180/Math.PI} : null);
         this.liveAlerts.update(live.targets || [],liveOwn,now);
         let targets=live.targets || [],clusters=live.harborClusters || [],outRaw={...raw};
+        // Installed sessions consume the engine's state without a second tracker.
+        // Only a standalone dev session lacking upstream state needs a local one.
+        if (!live.ownMotion && !this.ownMotionState) this.ownMotionState=new OwnMotionState(new TargetMotionTracker());
+        const liveMotion=live.ownMotion || this.ownMotionState.update(raw,live.rawTimes || {},clusters,now);
+        let ownMotion=liveMotion;
         let own=liveOwn;
         if (this.mode==='mixed' && Number.isFinite(live.rawTimes?.['navigation.position']) && now-live.rawTimes['navigation.position']>30000) own=null;
         const dt=Math.max(0,(now-this.lastTick)/1000); this.lastTick=now;
@@ -71,6 +79,7 @@ class DashboardSession {
                 };
                 targets=marina.targets.filter(t=>!t.isMoving).map(t=>({...t,id:`sim:${t.id}`,name:`SIM · ${t.name}`,isSimulated:true}));
                 clusters=marina.harborClusters;
+                ownMotion={status:'UNDERWAY',valid:true,confirmedRest:false,relaxedCollision:false,inPort:false,motionState:'MOVING',lastFixTime:now,restPattern:null};
             }
             if (own && Number.isFinite(own.lat) && Number.isFinite(own.lon)) {
                 if (!this.dynamic.length) {
@@ -90,7 +99,7 @@ class DashboardSession {
                 }
                 const synth=this.mode==='simulation' ? [...targets,...this.dynamic] : this.dynamic;
                 const result=this.tools.recalculateArpaForTargets(own,own.hdg,own.cog,own.sog,synth,'AUTO',live.config?.aisAlerter?.criticalProximity ?? 45,
-                    String(raw['navigation.state'] || '').includes('anchor') && this.mode==='mixed');
+                    liveMotion.relaxedCollision && this.mode==='mixed');
                 this.dynamic=result.targets.filter(t=>t.isMoving);
                 targets=this.mode==='mixed' ? [...targets,...result.targets] : result.targets;
                 for (const t of targets) if (t.isSimulated) {
@@ -108,7 +117,8 @@ class DashboardSession {
         }
         this.revision++;
         this.current={propulsionMode:this.propulsionMode,mode:this.mode,generation:this.generation,environment:this.environment,changedAt:this.changedAt,
-            revision:this.revision,serverNow:now,raw:outRaw,rawTimes:this.mode==='simulation' ? Object.fromEntries(Object.keys(outRaw).map(path=>[path,now])) : (live.rawTimes || {}),own,targets,harborClusters:clusters,
+            revision:this.revision,serverNow:now,normalizedPosition:live.normalizedPosition===true && this.mode!=='simulation',
+            positionMeasurement:this.mode==='simulation' ? null : live.positionMeasurement || null,raw:outRaw,rawTimes:this.mode==='simulation' ? Object.fromEntries(Object.keys(outRaw).map(path=>[path,now])) : (live.rawTimes || {}),own,ownMotion,targets,harborClusters:clusters,
             sharedAlerts:this.sharedAlerts.snapshot(now),waitingForLivePosition:this.mode==='mixed'&&!own};
         return this.current;
     }

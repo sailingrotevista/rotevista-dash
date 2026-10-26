@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');
-const {awsMaxAgeMs}=require('../windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');
+const {awsMaxAgeMs}=require('../shared/windDataPolicy.json');
 
 test('AWS distinguishes zero, missing data, invalid values and the 5-second boundary',async()=>{
  const {freshAws}=await import('../src/utils/windValidity.mjs');

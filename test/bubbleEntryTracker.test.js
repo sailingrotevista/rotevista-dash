@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {BubbleEntryTracker}=require('../bubbleEntryTracker');
-const {applyHarborProximityPolicy}=require('../collisionPipeline');
+const {BubbleEntryTracker}=require('../ais/bubbleEntryTracker');
+const {applyHarborProximityPolicy}=require('../ais/collisionPipeline');
 const own={lat:36,lon:14,sog:0};
 const boat=(distance,seconds,motionState='STATIONARY',options={})=>({id:'a',lat:36+distance/111139,lon:14,
  currentHullClearanceMeters:distance,lastPositionTime:seconds*1000,motionState,isMoving:motionState==='MOVING',

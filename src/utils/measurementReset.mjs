@@ -33,3 +33,13 @@ export function shouldApplySessionMeasurement(previous, value, sourceTime) {
     ? sourceTime > previous.time || (sourceTime === previous.time && explicitReset)
     : signature !== previous.value;
 }
+
+// Ordered server frames can select an older backup fix. Never apply the ordinary
+// single-source timestamp rejection or turn reception time into a GPS fix time.
+export function applyNormalizedSessionPosition(store, value, sourceTime, serverNow, localNow) {
+  const validTime = Number.isFinite(sourceTime) && sourceTime <= serverNow;
+  const valid = validTime && value && Number.isFinite(value.latitude) && Math.abs(value.latitude)<=90 &&
+    Number.isFinite(value.longitude) && Math.abs(value.longitude)<=180;
+  store.raw['navigation.position'] = valid ? {...value} : null;
+  store.timestamps['navigation.position'] = validTime ? localNow-Math.max(0,serverNow-sourceTime) : null;
+}

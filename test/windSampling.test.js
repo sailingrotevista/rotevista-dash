@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');
+const {WindEngine}=require('../wind/windEngine');
 const AWS='environment.wind.speedApparent',AWA='environment.wind.angleApparent';
 const H='navigation.headingTrue',SOG='navigation.speedOverGround';
 const start=1000000;

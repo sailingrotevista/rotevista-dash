@@ -1,3 +1,3 @@
-import '../../collisionPipeline.js';
+import '../../ais/collisionPipeline.js';
 
 export const isAnchoredNavigationState = globalThis.RotevistaCollisionPipeline.isAnchoredNavigationState;

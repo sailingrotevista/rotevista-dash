@@ -1,3 +1,4 @@
+import { displayCpa } from '../utils/aisDetailData.mjs';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AisTarget } from '../types';
 
@@ -55,7 +56,8 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
 
   const isCollisionDanger = threat.risk === 'RED';
   const isProximity = threat.alertKind === 'PROXIMITY';
-  const cpaText = threat.cpa !== null ? (threat.cpa < 1852 ? `${threat.cpa} m` : `${(threat.cpa / 1852).toFixed(2)} NM`) : '--';
+  const cpa = displayCpa(threat);
+  const cpaText = cpa !== null ? (cpa < 1852 ? `${cpa} m` : `${(cpa / 1852).toFixed(2)} NM`) : '--';
   const tcpaText = threat.tcpa !== null && threat.tcpa >= 0 ? `${threat.tcpa.toFixed(1)} min` : '--';
   const horizonMinutes = threat.effectiveThresholds?.horizonTcpa;
   const showAgeNotice = Number.isFinite(threat.age) && Number.isFinite(horizonMinutes) &&

@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {DashboardSession,registerDashboardRoutes}=require('../dashboardSession');
+const {DashboardSession,registerDashboardRoutes}=require('../session/dashboardSession');
 const input=()=>({raw:{'navigation.position':{latitude:36,longitude:14},'navigation.speedOverGround':2,'navigation.courseOverGroundTrue':1,'navigation.headingTrue':1},
  targets:[{id:'real',name:'REAL',risk:'GREY',lat:36.01,lon:14,dist:1000}],harborClusters:[],config:{}});
 

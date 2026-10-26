@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');
-const policy=require('../windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');
+const policy=require('../shared/windDataPolicy.json');
 const STW='navigation.speedThroughWater',SOG='navigation.speedOverGround';
 test('wind speed expires at 5 seconds, keeps STW priority and existing near-zero override',async()=>{
  const {resolveWindBoatSpeed:r}=await import('../src/utils/windValidity.mjs');

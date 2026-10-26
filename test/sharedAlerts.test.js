@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {AisSharedAlerts}=require('../aisSharedAlerts');
+const {AisSharedAlerts}=require('../session/aisSharedAlerts');
 const own={lat:36,lon:14};
 const collision=(id,cpa=100,tcpa=1,risk='RED')=>({id,cpa,tcpa,risk,dist:1000});
 const bubble=(id,clearance)=>({id,risk:'ORANGE',alertKind:'PROXIMITY',areaProximityOnly:true,isMoving:false,proximityEntryObserved:true,currentHullClearanceMeters:clearance,dist:clearance+20,lat:36,lon:14});
@@ -77,7 +77,7 @@ test('orange escalation breaks snooze and repeated state reads never mutate or r
 });
 
 test('alert writes require bounded JSON and malformed payloads never reach the action',()=>{
- const {EventEmitter}=require('events');const {readAlertAction}=require('../aisSharedAlerts');
+ const {EventEmitter}=require('events');const {readAlertAction}=require('../session/aisSharedAlerts');
  const exercise=(contentType,body)=>{
   const req=new EventEmitter();req.headers={'content-type':contentType};let status=200,called=false;
   const res={status(n){status=n;return this;},json(){return this;}};
@@ -98,7 +98,7 @@ test('simultaneous snooze clicks are idempotent and do not extend the shared tim
 });
 
 test('dashboard actions need no admin identity but require the dashboard capability and matching origin',()=>{
- const {createDashboardAlertHandlers}=require('../aisSharedAlerts');
+ const {createDashboardAlertHandlers}=require('../session/aisSharedAlerts');
  const sharedAlerts=new AisSharedAlerts({now:0}); const a=collision('a'); sharedAlerts.update([a],own,0);
  const handlers=createDashboardAlertHandlers({sharedAlerts,publishSharedAlerts(){}});
  const response=()=>({code:200,body:null,headers:{},header(k,v){this.headers[k]=v;return this;},removeHeader(){},status(n){this.code=n;return this;},json(v){this.body=v;return this;}});

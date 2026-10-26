@@ -1,6 +1,6 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {AisSharedAlerts}=require('../aisSharedAlerts');
+const {AisSharedAlerts}=require('../session/aisSharedAlerts');
 const target={id:'a',risk:'RED',cpa:10,tcpa:1,dist:100};
 const response=(body,ok=true)=>({ok,json:async()=>body});
 const access=()=>response({sessionId:'s',token:'key'});

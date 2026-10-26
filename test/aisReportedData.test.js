@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {extractReportedAis}=require('../aisReportedData');
+const {extractReportedAis}=require('../ais/aisReportedData');
 const timestamp='2026-10-25T10:00:00Z';
 const node=value=>({value,timestamp,$source:'receiver.AI'});
 test('received data preserves zeros, source times and reported position without motion fallbacks',()=>{
@@ -62,4 +62,13 @@ test('AIS age changes from minutes to hours at 3600 seconds',async()=>{
  assert.equal(formatAge(3600),'1H AGO');
  assert.equal(formatAge(7200),'2H AGO');
  assert.equal(formatAge(24*3600),'24H AGO');
+});
+
+test("display CPA requires a future or current closest approach", async () => {
+ const {displayCpa}=await import("../src/utils/aisDetailData.mjs");
+ assert.equal(displayCpa({cpa:400,tcpa:-1}),null);
+ assert.equal(displayCpa({cpa:400,tcpa:null}),null);
+ assert.equal(displayCpa({cpa:400,tcpa:undefined}),null);
+ assert.equal(displayCpa({cpa:0,tcpa:0}),0);
+ assert.equal(displayCpa({cpa:40,tcpa:3}),40);
 });

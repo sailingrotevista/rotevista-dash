@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');
-const {awaMaxAgeMs}=require('../windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');
+const {awaMaxAgeMs}=require('../shared/windDataPolicy.json');
 
 test('AWA is valid at zero and both sides of the bow, and expires at 5 seconds',async()=>{
  const {freshAwa}=await import('../src/utils/windValidity.mjs');

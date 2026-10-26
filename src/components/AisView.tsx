@@ -1,9 +1,10 @@
+import { getAisAgeVisual } from '../utils/aisAgeVisual.mjs';
 import { copyText } from '../utils/clipboard.mjs';
-import { formatAge } from '../utils/aisDetailData.mjs';
+import { formatAge, displayCpa } from '../utils/aisDetailData.mjs';
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AisTarget, HarborCluster, PropulsionMode, OwnShipPosition, OwnShipCourse } from '../types';
+import { AisTarget, HarborCluster, PropulsionMode, OwnShipPosition, OwnShipCourse, OwnShipMotion } from '../types';
 import { getAvailableMapArea, getMapCenterOffset } from '../utils/mapViewport.mjs';
 import { chooseAisLabelPlacement, escapeAisLabelText } from '../utils/aisLabelPlacement.mjs';
 import { AisStatusInfo } from './AisStatusInfo';
@@ -18,27 +19,12 @@ const AIS_AGE_VISUAL_CONFIG = {
   movingSpeedKnots: 2,
   moving: { fadeStartSeconds: 90, fadeEndSeconds: 180 },
   slowOrMoored: { fadeStartSeconds: 240, fadeEndSeconds: 360 },
-  minimumOpacity: 0.5,
-  preserveSelected: true,
+  minimumOpacity: 0.4,
   preserveAlerts: true,
 };
 
-function getTargetAgeVisual(t: AisTarget, isSelected = false) {
-  const config = AIS_AGE_VISUAL_CONFIG;
-  const slowOrMoored = t.sog <= config.movingSpeedKnots || t.isMoored ||
-    t.isAnchored || t.inCluster || t.anchorState === 'MOORED' || t.anchorState === 'ANCHORED';
-  const thresholds = slowOrMoored ? config.slowOrMoored : config.moving;
-  const age = Number.isFinite(t.age) ? Math.max(0, t.age) : 0;
-  const stale = config.enabled && age > thresholds.fadeStartSeconds;
-  const protectedTarget = (config.preserveSelected && isSelected) ||
-    (config.preserveAlerts && (t.risk === 'RED' || t.risk === 'ORANGE' || t.anchorState === 'ANCHOR_DRAGGING'));
-  const duration = Math.max(1, thresholds.fadeEndSeconds - thresholds.fadeStartSeconds);
-  const progress = Math.min(1, Math.max(0, (age - thresholds.fadeStartSeconds) / duration));
-  const minimum = Math.min(1, Math.max(0, config.minimumOpacity));
-  return {
-    stale,
-    opacity: !config.enabled || protectedTarget ? 1 : 1 - progress * (1 - minimum),
-  };
+function getTargetAgeVisual(t: AisTarget, isSelected = false, preserveEmphasis = true) {
+  return getAisAgeVisual(t, AIS_AGE_VISUAL_CONFIG, isSelected, preserveEmphasis);
 }
 
 interface AisViewProps {
@@ -47,6 +33,7 @@ interface AisViewProps {
   harborClusters: HarborCluster[];
   ownShipPosition: OwnShipPosition;
   ownShipCourse: OwnShipCourse;
+  ownShipMotion?: OwnShipMotion | null;
   isNightMode: boolean;
   onSwitchToWind: () => void;
   onSnoozeThreat: (targetId: string) => Promise<boolean>;
@@ -129,6 +116,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   onReopenTopThreat,
   selectedTargetId,
   onSelectTarget,
+  ownShipMotion,
   ownShipName = 'MY VESSEL',
   propulsionMode = 'SAIL',
   onSetPropulsionMode,
@@ -1422,13 +1410,18 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
         const offsetTransform = 'translate(0px, 0px)';
         const statusLine = (isTargetMoving ? `${t.sog.toFixed(1)} kn • ${Math.round(t.cog)}°` : getVesselStatusLabel(t)) +
           (t.contactLost ? ` • AIS CONTACT LOST · ${formatAge(t.age)}` : ageVisual.stale ? ` • AIS ${formatAge(t.age)}` : '');
-        const tcpaTxt = t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` in ${Math.round(t.tcpa)} min` : '';
+        const cpa = displayCpa(t);
+        const hasTcpa = Number.isFinite(t.tcpa) && t.tcpa !== null && t.tcpa >= 0;
+        const cpaText = cpa !== null ? `CPA: ${formatDist(cpa)}` : '';
+        const tcpaText = hasTcpa ? `${Math.round(t.tcpa!)} min` : '';
+        const encounterText = cpaText ? `${cpaText}${tcpaText ? ` in ${tcpaText}` : ''}` : tcpaText ? `TCPA: ${tcpaText}` : '';
         const cpaOrDistLine = t.alertKind === 'PROXIMITY' ? `⚠️ SAFE BUBBLE · CLEARANCE ${formatDist(t.currentHullClearanceMeters ?? null)}` : isRed
-          ? `🚨 ${t.riskMsg || 'COLLISION!'}${t.cpa !== null && t.cpa !== undefined ? ` • CPA: ${formatDist(t.cpa)}` : ''}${tcpaTxt}`
-          : `${isOrange ? '⚠️ ' : ''}${t.cpa !== null && t.cpa !== undefined ? `CPA: ${formatDist(t.cpa)}` : `Dist: ${formatDist(t.dist)}`}${tcpaTxt}`;
-        const compactMetrics = t.alertKind === 'PROXIMITY' ? `PROXIMITY ${formatDist(t.currentHullClearanceMeters ?? null)}` : `${t.cpa !== null && t.cpa !== undefined ? `CPA ${formatDist(t.cpa)}` : formatDist(t.dist)}${t.tcpa !== null && t.tcpa !== undefined && t.tcpa >= 0 ? ` • ${Math.round(t.tcpa)}m` : ''}`;
+          ? `🚨 ${t.riskMsg || 'COLLISION!'}${encounterText ? ` • ${encounterText}` : ''}`
+          : encounterText ? `${isOrange ? '⚠️ ' : ''}${encounterText}` : '';
+        const compactEncounter = [cpa !== null ? `CPA ${formatDist(cpa)}` : '', hasTcpa ? `${Math.round(t.tcpa!)}m` : ''].filter(Boolean).join(' • ');
+        const compactMetrics = t.alertKind === 'PROXIMITY' ? `PROXIMITY ${formatDist(t.currentHullClearanceMeters ?? null)}` : compactEncounter || t.riskMsg || (isRed ? 'COLLISION!' : 'WARNING');
         let labelHtml = isExtendedLabel
-          ? `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to inspect target"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${escapeAisLabelText(t.name || 'Unknown')}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span><span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${escapeAisLabelText(cpaOrDistLine)}</span></div></div>`
+          ? `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:6px;background:rgba(255,255,255,0.96);border:1.5px solid ${borderColor};border-radius:10px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.22);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to inspect target"><span style="font-size:18px;line-height:1;">${getVesselTypeIcon(t.type, t.name)}</span><div style="display:flex;flex-direction:column;align-items:flex-start;line-height:1.2;"><span style="font-size:13.5px;font-weight:900;color:${titleColor};text-transform:uppercase;letter-spacing:-0.2px;">${escapeAisLabelText(t.name || 'Unknown')}</span><span style="font-size:10px;font-weight:700;color:#475569;margin-top:1px;">${statusLine}</span>${cpaOrDistLine ? `<span style="font-size:11px;font-weight:900;color:${metricColor};margin-top:1px;">${escapeAisLabelText(cpaOrDistLine)}</span>` : ''}</div></div>`
           : `<div style="transform:${offsetTransform};display:inline-flex;flex-direction:row;align-items:center;gap:4px;background:rgba(255,255,255,0.78);border:1.5px solid ${borderColor};border-radius:8px;padding:2px 6px;box-shadow:0 2px 6px rgba(0,0,0,0.14);white-space:nowrap;font-family:monospace;pointer-events:auto;cursor:pointer;" title="Tap to select target"><span style="font-size:12px;line-height:1;">${isRed ? '🚨' : '⚠️'}</span><span style="font-size:11px;font-weight:900;color:${metricColor};letter-spacing:-0.3px;">${compactMetrics}</span></div>`;
 
         // Measure actual HTML dimensions (cached), so font size and long names count.
@@ -1742,6 +1735,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
           {selectedTarget && (
             /* TARGET DETAIL VIEW */
             <div
+              style={{ '--detail-data-opacity': getTargetAgeVisual(selectedTarget, false, false).opacity } as React.CSSProperties}
               className={`ais-card-detail ${
                 selectedTarget.risk === 'RED'
                   ? 'risk-red'
@@ -1888,7 +1882,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                         <span className="ais-cell-val" style={{ fontSize: '0.85rem' }}>
                           ALARM {formatDist(selectedTarget.effectiveThresholds.redCpa)} • WARNING {formatDist(selectedTarget.effectiveThresholds.orangeCpa)}
                           {' • '}{selectedTarget.effectiveThresholds.horizonTcpa.toFixed(1)} min
-                          {selectedTarget.effectiveThresholds.ownAtAnchor && ' • OWN SHIP AT ANCHOR'}
+                          {selectedTarget.effectiveThresholds.ownAtAnchor && (ownShipMotion?.status === 'IN PORT' ? ' • OWN SHIP IN PORT' : ' • OWN SHIP AT ANCHOR')}
                         </span>
                       </div>
                     )}
@@ -1913,7 +1907,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                     <div className="ais-detail-cell">
                       <span className="ais-cell-label">MINIMUM CPA</span>
                       <span className="ais-cell-val cyan">
-                        {formatDist(selectedTarget.cpa)}
+                        {formatDist(displayCpa(selectedTarget))}
                       </span>
                     </div>
                     <div className="ais-detail-cell">
@@ -2023,7 +2017,7 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
                     <div className="target-text-col">
                       <span className="target-item-name">{ownShipName}</span>
                       <span className="target-item-sub">
-                        {!ownShipPosition.valid ? (ownShipPosition.hasFix ? 'GPS STALE' : 'GPS UNAVAILABLE') : ownShipCourse.sog === null ? 'SPEED UNAVAILABLE' : ownShipCourse.sog < 0.5 ? 'STOPPED' : 'UNDERWAY'} • HDG: {ownShipCourse.hdg === null ? '---°' : `${Math.round(ownShipCourse.hdg)}°`}
+                        {!ownShipPosition.valid ? (ownShipPosition.hasFix ? 'GPS STALE' : 'GPS UNAVAILABLE') : ownShipMotion?.valid && ownShipMotion.status !== 'UNKNOWN' ? ownShipMotion.status : ownShipCourse.sog === null ? 'SPEED UNAVAILABLE' : ownShipCourse.sog < 0.5 ? 'STOPPED' : 'UNDERWAY'} • HDG: {ownShipCourse.hdg === null ? '---°' : `${Math.round(ownShipCourse.hdg)}°`}
                       </span>
                     </div>
                   </div>

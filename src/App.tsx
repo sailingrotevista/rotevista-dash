@@ -67,6 +67,7 @@ export const App: React.FC = () => {
     setSelectedAisTargetId,
     ownShipPosition,
     ownShipCourse,
+    ownShipMotion,
     propulsionMode,
     setPropulsionMode,
   } = useDashboard();
@@ -550,6 +551,7 @@ export const App: React.FC = () => {
             harborClusters={harborClusters}
             ownShipPosition={ownShipPosition}
             ownShipCourse={ownShipCourse}
+            ownShipMotion={ownShipMotion}
             isNightMode={isNightMode}
             onSwitchToWind={handleSwitchToWind}
             onSnoozeThreat={handleSnoozeThreat}

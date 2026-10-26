@@ -1,6 +1,8 @@
+const { OwnMotionState, OWN_MOTION_ID } = require('./ownMotionState');
 const { extractReportedAis } = require('./aisReportedData');
-const { AisSharedAlerts } = require('./aisSharedAlerts');
+const { AisSharedAlerts } = require('../session/aisSharedAlerts');
 const { BubbleEntryTracker } = require('./bubbleEntryTracker');
+const { positionMaxAgeMs } = require('../shared/windDataPolicy.json');
 /**
  * ==========================================================================
  * Rotevista Dash - Signal K AIS Ingestion & Threat Orchestrator Engine
@@ -13,7 +15,7 @@ const { BubbleEntryTracker } = require('./bubbleEntryTracker');
 
 const { TargetMotionTracker, compactAisTrail } = require('./targetMotionTracker');
 const { PLUGIN_BASE_TCPA_MINUTES } = require('./collisionConfig');
-const { COLLISION_THRESHOLD_DEFAULTS, applyHarborProximityPolicy, isAnchoredNavigationState } = require('./collisionPipeline');
+const { COLLISION_THRESHOLD_DEFAULTS, applyHarborProximityPolicy } = require('./collisionPipeline');
 
 const OWN_GEOMETRY_RETRY_MS = 60000;
 const MOTION_DATA_MAX_SKEW_FRACTION = 0.2;
@@ -85,6 +87,7 @@ class AisEngine {
 
         this.aisPersistentCache = {};
         this.motionTracker = new TargetMotionTracker();
+        this.ownMotionState = new OwnMotionState(this.motionTracker);
         this.bubbleEntryTracker = new BubbleEntryTracker();
         this.sharedAlerts = new AisSharedAlerts();
         this.lastNearbyVessels = [];
@@ -111,6 +114,14 @@ class AisEngine {
         return this.lastHarborClusters;
     }
 
+    getOwnMotion(now = Date.now()) {
+        const raw = this.windEngine.getRaw();
+        const navigationState = raw['navigation.state'] !== undefined ? raw['navigation.state']
+            : typeof this.app.getSelfPath === 'function' ? this.app.getSelfPath('navigation.state') : null;
+        return this.ownMotionState.update({ ...raw, 'navigation.state': navigationState },
+            this.windEngine.getRawTimes?.() || {}, this.lastHarborClusters, now);
+    }
+
     getTopThreat() {
         return this.topThreat;
     }
@@ -132,6 +143,7 @@ class AisEngine {
         return {
             ...this.aisDiagnostics,
             ownShipGeometry: this.getOwnGeometry(),
+            ownMotion: this.getOwnMotion(),
             cacheCount: Object.keys(this.aisPersistentCache).length,
             nearbyCount: this.lastNearbyVessels.length,
             serverTime: new Date().toISOString()
@@ -218,7 +230,7 @@ class AisEngine {
                     myGps = { lat: parseFloat(p.latitude), lon: parseFloat(p.longitude) };
                 }
             }
-            if (!myGps && typeof app.getSelfPath === 'function') {
+            if (!this.windEngine.normalizedPositionManaged && !myGps && typeof app.getSelfPath === 'function') {
                 let pos = app.getSelfPath('navigation.position');
                 if (!pos) pos = app.getSelfPath('navigation.position.value');
                 let p = (pos && pos.value) ? pos.value : pos;
@@ -226,16 +238,20 @@ class AisEngine {
                     myGps = { lat: parseFloat(p.latitude), lon: parseFloat(p.longitude) };
                 }
             }
-            if (!myGps && typeof app.getPath === 'function') {
+            if (!this.windEngine.normalizedPositionManaged && !myGps && typeof app.getPath === 'function') {
                 let pos = app.getPath('vessels.self.navigation.position');
                 let p = (pos && pos.value) ? pos.value : pos;
                 if (p && p.latitude != null && p.longitude != null) {
                     myGps = { lat: parseFloat(p.latitude), lon: parseFloat(p.longitude) };
                 }
             }
+            if (this.windEngine.normalizedPositionManaged) {
+                const time = this.windEngine.getRawTimes()['navigation.position'];
+                if (!Number.isFinite(time) || now-time < 0 || now-time >= positionMaxAgeMs) myGps = null;
+            }
             if (myGps && !isNaN(myGps.lat) && !isNaN(myGps.lon)) {
                 this.lastOwnGps = { lat: myGps.lat, lon: myGps.lon, t: now };
-            } else if (this.lastOwnGps.lat !== null && this.lastOwnGps.lon !== null) {
+            } else if (!this.windEngine.normalizedPositionManaged && this.lastOwnGps.lat !== null && this.lastOwnGps.lon !== null) {
                 myGps = { lat: this.lastOwnGps.lat, lon: this.lastOwnGps.lon };
             }
 
@@ -290,8 +306,7 @@ class AisEngine {
                 baseTcpaMinutes: cfg.baseTcpaMinutes ?? PLUGIN_BASE_TCPA_MINUTES,
             });
 
-            const ownNavigationState = raw['navigation.state'] !== undefined ? raw['navigation.state']
-                : typeof app.getSelfPath === 'function' ? app.getSelfPath('navigation.state') : null;
+            const ownMotion = this.getOwnMotion(now);
             const ownShipInput = {
                 ...this.getOwnGeometry(),
                 lat: myGps.lat,
@@ -299,7 +314,7 @@ class AisEngine {
                 sog: mySpeedKn,
                 cog: myCog,
                 hdg: myHdg,
-                isAnchored: isAnchoredNavigationState(ownNavigationState),
+                isAnchored: ownMotion.relaxedCollision,
             };
 
             const MAX_DISTANCE_METERS = 37040; // 20 NM
@@ -575,7 +590,8 @@ class AisEngine {
                 }
             }
 
-            this.motionTracker.prune(new Set(Object.keys(this.aisPersistentCache)));
+            // Keep the reserved own-ship entry while pruning obsolete AIS targets.
+            this.motionTracker.prune(new Set([OWN_MOTION_ID, ...Object.keys(this.aisPersistentCache)]));
 
             // 6. Elaborazione ARPA, Kinematica & COLREGs
             let nearbyVessels = [];
@@ -725,7 +741,7 @@ class AisEngine {
                 let v = nearbyVessels[i];
                 v.proximityEntryObserved = this.bubbleEntryTracker.update(v, {
                     ...myGps, sog: mySpeedKn,
-                    positionTime: this.windEngine.lastPathProcessTimes?.['navigation.position'],
+                    positionTime: this.windEngine.getRawTimes?.()['navigation.position'],
                 }, cfg.criticalProximity, now);
                 if (this.aisPersistentCache[v.id]) {
                     this.aisPersistentCache[v.id].isMoored = Boolean(v.isMoored);

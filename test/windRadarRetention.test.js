@@ -1,5 +1,5 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');const {historyRetentionMs}=require('../twdHistory');const policy=require('../windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');const {historyRetentionMs}=require('../wind/twdHistory');const policy=require('../shared/windDataPolicy.json');
 const start=Date.UTC(2026,9,25,18);const MINUTE=60000;
 test('short 5/10 minute graphs retain the whole radar interval through periodic pruning and sensor silence',async()=>{
  const {graphViewport}=await import('../src/utils/graphViewport.mjs');

@@ -1,2 +1,2 @@
-import '../../twdHistory.js';
+import '../../wind/twdHistory.js';
 export const { resolveTws, aggregateTwd, historyRetentionMs } = globalThis.RotevistaTwdHistory;

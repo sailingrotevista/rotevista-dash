@@ -1,8 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { prepareCollisionConfig, THRESHOLD_POLICY_VERSION } = require('../collisionConfig');
-const { CollisionPipeline } = require('../collisionPipeline');
-const { AisEngine } = require('../aisEngine');
+const { prepareCollisionConfig, THRESHOLD_POLICY_VERSION } = require('../ais/collisionConfig');
+const { CollisionPipeline } = require('../ais/collisionPipeline');
+const { AisEngine } = require('../ais/aisEngine');
 
 test('legacy migration resets all red limits and live time once without changing unrelated settings', () => {
     const old = { graphs: { historyMinutes: 30 }, aisAlerter: {

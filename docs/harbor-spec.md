@@ -119,7 +119,7 @@ Il replay dei target reali di Marina di Ragusa distingue le posizioni catturate 
 
 ## Riferimenti
 
-- [HarborDetector e parametri](../harborDetector.js)
+- [HarborDetector e parametri](../ais/harborDetector.js)
 - [Motion tracker](motion-tracker-spec.md)
 - [Politica collisioni e prossimità](ais-spec.md)
 - [Test delle aree](../test/harborDetector.test.js)

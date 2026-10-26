@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');
-const policy=require('../windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');
+const policy=require('../shared/windDataPolicy.json');
 const D='environment.wind.directionTrue',A='environment.wind.angleTrueWater',H='navigation.headingTrue';
 test('TWD native fallback, reconstruction without AWS, expiry and normalization',async()=>{
  const {resolveTwd}=await import('../src/utils/windValidity.mjs');

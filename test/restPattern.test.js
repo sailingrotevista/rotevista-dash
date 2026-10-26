@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { TargetMotionTracker } = require('../targetMotionTracker');
+const { TargetMotionTracker } = require('../ais/targetMotionTracker');
 
 function fix(seconds, north, east = 0) {
     return { t: seconds * 1000, lat: 36 + north / 111139, lon: 14 + east / (111139 * Math.cos(Math.PI / 5)), sog: 0, cog: 0 };

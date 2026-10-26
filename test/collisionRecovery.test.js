@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { CollisionPipeline, compareTargets } = require('../collisionPipeline');
+const { CollisionPipeline, compareTargets } = require('../ais/collisionPipeline');
 
 function fixture(base = 10, targetSpeed = 5) {
     const pipeline = new CollisionPipeline({ baseTcpaMinutes: base });

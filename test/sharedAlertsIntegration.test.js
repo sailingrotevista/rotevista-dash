@@ -1,6 +1,6 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const {AisEngine}=require('../aisEngine');
-const {DashboardSession,registerDashboardRoutes}=require('../dashboardSession');
+const {AisEngine}=require('../ais/aisEngine');
+const {DashboardSession,registerDashboardRoutes}=require('../session/dashboardSession');
 const own={lat:36,lon:14};
 const target={id:'danger',risk:'RED',cpa:10,tcpa:1,dist:300};
 const neighbour={id:'neighbour',risk:'ORANGE',alertKind:'PROXIMITY',areaProximityOnly:true,isMoving:false,proximityEntryObserved:true,lat:36,lon:14,dist:10,currentHullClearanceMeters:0};

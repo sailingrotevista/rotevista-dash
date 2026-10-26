@@ -10,11 +10,14 @@ const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { CollisionPipeline } = require('./collisionPipeline');
-const { HarborDetector } = require('./harborDetector');
-const { WindEngine } = require('./windEngine');
-const { AisEngine } = require('./aisEngine');
-const { prepareCollisionConfig, PLUGIN_BASE_TCPA_MINUTES } = require('./collisionConfig');
+const { CollisionPipeline } = require('./ais/collisionPipeline');
+const { HarborDetector } = require('./ais/harborDetector');
+const { WindEngine } = require('./wind/windEngine');
+const { AisEngine } = require('./ais/aisEngine');
+const { SignalKReceiver } = require('./sensors/SignalKReceiver');
+const { SensorNormalizer } = require('./sensors/SensorNormalizer');
+const { SensorDerivedData } = require('./sensors/SensorDerivedData');
+const { prepareCollisionConfig, PLUGIN_BASE_TCPA_MINUTES } = require('./ais/collisionConfig');
 
 // ==========================================================================
 // CONFIGURAZIONE PARAMETRICA CACHE TILE CARTOGRAFICHE (Cerbo GX / Venus OS)
@@ -54,11 +57,21 @@ module.exports = function (app) {
     const collisionPipeline = new CollisionPipeline();
     const harborDetector = new HarborDetector();
     const windEngine = new WindEngine(app, () => currentConfig);
+    windEngine.normalizedPositionManaged = true;
     const aisEngine = new AisEngine(app, () => currentConfig, windEngine, harborDetector, collisionPipeline);
 
-    const { DashboardSession, registerDashboardRoutes } = require('./dashboardSession');
+    // Own GPS is selected once and distributed through DerivedData to all consumers.
+    const sensorNormalizer = new SensorNormalizer();
+    const sensorDerivedData = new SensorDerivedData();
+    const signalKReceiver = new SignalKReceiver({
+        onMeasurement: measurement => sensorNormalizer.ingest(measurement),
+        onError: error => app.debug(`GPS receiver: ${error.message || error}`),
+    });
+
+    const { DashboardSession, registerDashboardRoutes } = require('./session/dashboardSession');
     const readDashboardLive = () => ({raw:windEngine.getRaw(),rawTimes:windEngine.getRawTimes(),targets:aisEngine.getNearbyVessels(),
-        harborClusters:aisEngine.getHarborClusters(),config:currentConfig});
+        harborClusters:aisEngine.getHarborClusters(),ownMotion:aisEngine.getOwnMotion(),
+        normalizedPosition:true,positionMeasurement:sensorDerivedData.getSnapshot()?.measurements['navigation.position'] || null,config:currentConfig});
     const dashboardSession = new DashboardSession({readLive:readDashboardLive,liveAlerts:aisEngine.sharedAlerts});
 
     /**
@@ -163,7 +176,6 @@ module.exports = function (app) {
                 { path: 'design.beam', minPeriod: 1000 },
                 { path: 'sensors.gps.fromBow', minPeriod: 1000 },
                 { path: 'sensors.gps.fromCenter', minPeriod: 1000 },
-                { path: 'navigation.position', minPeriod: 1000 },
                 { path: 'navigation.state', minPeriod: 1000 },
                 { path: 'navigation.speedThroughWater', minPeriod: 1000 },
                 { path: 'navigation.speedOverGround', minPeriod: 1000 },
@@ -191,6 +203,7 @@ module.exports = function (app) {
                     delta.updates.forEach(update => {
                         if (update.values) {
                             update.values.forEach(v => {
+                                if (v.path === 'navigation.position') return; // Receiver/Normalizer is the only GPS input.
                                 aisEngine.updateWindEvidence(v.path, v.value, update.timestamp);
                                 if (!aisEngine.updateOwnGeometry(v.path, v.value)) {
                                     windEngine.processIncomingDelta(v.path, v.value, update.timestamp);
@@ -201,6 +214,9 @@ module.exports = function (app) {
                 }
             }
         );
+
+        try { signalKReceiver.start(app); }
+        catch (error) { app.debug(`GPS receiver unavailable: ${error.message || error}`); }
 
         // Avvia il timer di background per la potatura della RAM ogni 60 secondi
         if (pruneInterval) {
@@ -217,6 +233,16 @@ module.exports = function (app) {
         if (sharedAlertInterval) clearInterval(sharedAlertInterval);
         sharedAlertInterval = setInterval(() => {
             const now = Date.now();
+            try {
+                const snapshot = sensorNormalizer.tick(now);
+                if (snapshot) {
+                    const derived = sensorDerivedData.process(snapshot);
+                    windEngine.applyNormalizedPosition(derived.measurements['navigation.position'], now);
+                }
+            } catch (error) {
+                windEngine.applyNormalizedPosition(null, now);
+                app.debug(`GPS normalization: ${error.message || error}`);
+            }
             windEngine.sampleHistory(now);
             dashboardSession.tick(now);
             // Publish the same Live state to legacy clients without evaluating it again.
@@ -232,6 +258,7 @@ module.exports = function (app) {
         * plugin.stop: Chiamato quando il plugin viene disattivato.
         */
     plugin.stop = function () {
+        signalKReceiver.stop();
         if (sharedAlertInterval) clearInterval(sharedAlertInterval);
         sharedAlertInterval = null;
         unsubscribes.forEach(f => f());

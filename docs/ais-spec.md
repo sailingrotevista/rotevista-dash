@@ -65,13 +65,22 @@ Distanza e tempo si verificano insieme, sulla traiettoria nominale.
 
 ## Nostra barca all'ancora
 
-Quando il motore riceve un'indicazione valida di nostra barca all'ancora:
+Quando il motore riceve un’indicazione di nostra barca all’ancora, oppure il tracker conferma la nostra sosta (in porto o fuori):
 
 - moltiplicare entrambe le distanze per 0,25;
 - moltiplicare la finestra temporale per 0,25, dopo l'adattamento alla velocità e il limite massimo;
 - mantenere la valutazione dei pericoli ravvicinati, senza presumere che l'altra barca eviterà necessariamente l'urto.
 
-Limite attuale: il riconoscimento automatico della nostra sosta tramite motion tracker non è ancora collegato a questa riduzione. La sola velocità nulla non dimostra ancoraggio o presenza in porto.
+Il riconoscimento automatico usa la stessa istanza di `TargetMotionTracker` usata per i target AIS, con la chiave riservata `self`, alimentata esclusivamente da fix propri ricevuti con timestamp crescente e recente. SOG nulla, riletture e appartenenza a un porto da sole non confermano la sosta.
+
+- All’avvio, stato STOPPED provvisorio. La conferma usa le soglie comuni del tracker: almeno 5 fix distribuiti su almeno 120 secondi nell’area di sosta.
+- Sosta confermata nel poligono di un’area PORT → IN PORT; fuori da un porto confermato → AT ANCHOR, come stato osservato compatibile con ancoraggio, senza aspettare di vedere oscillazioni.
+- La nostra barca non entra nell’elenco dei candidati del detector, non forma o estende aree e non incrementa i conteggi dei target.
+- Una partenza sospetta mantiene la riduzione; la partenza confermata dal tracker ripristina le soglie normali, anche sotto 0,8 kn. Un’eventuale indicazione `anchored` rimasta sul bus non prevale sul movimento confermato.
+- La scadenza del GPS sospende la conferma automatica utilizzabile; dopo una pausa fra fix superiore al massimo comune di 360 secondi ricominciare l’osservazione. Conservare timestamp originali; non alimentare il tracker con posizioni proiettate o sintetizzate dalla frequenza del ciclo.
+- Stato e fattore applicato sono calcolati sul server e distribuiti ai client; la simulazione mista usa lo stesso fattore per i target sintetici. La simulazione pura mantiene la propria barca in navigazione. Le isteresi di rientro degli allarmi e la politica bubble restano separate.
+
+Verifiche: [sosta propria e collegamento alle soglie](../test/ownMotionState.test.js).
 
 ## Avviso aggiuntivo da instabilità
 
@@ -113,7 +122,7 @@ Regola aggiornata con l'utente il 25 ottobre 2026 dopo il monitoraggio del riavv
 - L'acknowledge condiviso resta valido per le presenze riconosciute senza riarmo dovuto alla sola uscita/rientro nella bubble; restano le regole di movimento, contesto e pulizia già definite.
 - Queste regole riguardano la prossimità dei target fermi nelle aree riconosciute. Gli allarmi nominali dei target mobili e degli ostacoli fuori area rimangono indipendenti.
 
-Riferimenti: [tracker degli ingressi](../bubbleEntryTracker.js), [politica di prossimità](../collisionPipeline.js), [test degli ingressi e del jitter](../test/bubbleEntryTracker.test.js).
+Riferimenti: [tracker degli ingressi](../ais/bubbleEntryTracker.js), [politica di prossimità](../ais/collisionPipeline.js), [test degli ingressi e del jitter](../test/bubbleEntryTracker.test.js).
 
 ## Dati vecchi e contatti persi
 
@@ -140,11 +149,11 @@ Riferimenti: [tracker degli ingressi](../bubbleEntryTracker.js), [politica di pr
 
 ## Riferimenti di implementazione
 
-- [Motore di collisione](../collisionPipeline.js)
-- [Default e migrazione configurazione](../collisionConfig.js)
-- [Ingestione e gestione età AIS](../aisEngine.js)
-- [Stabilità della previsione](../targetPredictionStability.js)
-- [Banner condiviso](../aisSharedAlerts.js)
+- [Motore di collisione](../ais/collisionPipeline.js)
+- [Default e migrazione configurazione](../ais/collisionConfig.js)
+- [Ingestione e gestione età AIS](../ais/aisEngine.js)
+- [Stabilità della previsione](../ais/targetPredictionStability.js)
+- [Banner condiviso](../session/aisSharedAlerts.js)
 
 ## Verifiche e limiti aperti
 

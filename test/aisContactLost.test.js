@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { AisEngine } = require('../aisEngine');
-const { CollisionPipeline } = require('../collisionPipeline');
+const { AisEngine } = require('../ais/aisEngine');
+const { CollisionPipeline } = require('../ais/collisionPipeline');
 
 function encounter(run, cpa = 0) {
     const originalNow = Date.now;

@@ -1,8 +1,8 @@
-import { handleMeasurementReset, shouldApplySessionMeasurement } from '../utils/measurementReset.mjs';
+import { applyNormalizedSessionPosition, handleMeasurementReset, shouldApplySessionMeasurement } from '../utils/measurementReset.mjs';
 import { aggregateTwd, historyRetentionMs } from '../utils/twdHistory.mjs';
 import { resolveOwnShipNavigation, validOwnPosition } from '../utils/ownShipNavigation.mjs';
 import { gybeSoundAllowed } from '../utils/gybeSound.mjs';
-import windDataPolicy from '../../windDataPolicy.json';
+import windDataPolicy from '../../shared/windDataPolicy.json';
 import { freshAws, freshAwa, resolveTws, resolveTwa, resolveTwd, resolveWindBoatSpeed, resolveHeading, resolveVmg, freshBoatSpeed, freshDepth, resolveLeeway, maneuverValidity } from '../utils/windValidity.mjs';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -22,6 +22,7 @@ import {
   PropulsionMode,
   OwnShipPosition,
   OwnShipCourse,
+  OwnShipMotion,
 } from '../types';
 import {
   radToDeg,
@@ -251,6 +252,7 @@ export function useDashboard() {
   const [snoozedThreats, setSnoozedThreats] = useState<Record<string, { until: number; initialRisk: string; lostPositionTime?: number }>>({});
   const [proximityAcknowledgements, setProximityAcknowledgements] = useState<Record<string, { id: string; lat: number; lon: number }>>({});
   const [ownShipPosition, setOwnShipPosition] = useState<OwnShipPosition>({ lat: 36.780956, lon: 14.545439, valid:false, hasFix:false });
+  const [ownShipMotion, setOwnShipMotion] = useState<OwnShipMotion | null>(null);
   const [ownShipCourse, setOwnShipCourse] = useState<OwnShipCourse>({ hdg:null, cog:null, sog:null });
 
   const latestAisRef = useRef<{
@@ -605,7 +607,7 @@ export function useDashboard() {
   const simulatedAisTargetsRef = useRef<AisTarget[]>([]);
   const processIncomingData = useCallback((path: string, val: any, timeMs?: number) => {
     if (sharedSessionManagedRef.current && !applyingSessionRef.current) {
-      if (path.startsWith('environment.ais_') || path === 'environment.harbor_clusters') return;
+      if (path.startsWith('environment.ais_') || path === 'environment.harbor_clusters' || path === 'navigation.position') return;
       if (sharedSessionModeRef.current === 'simulation' && (path.startsWith('navigation.') || path.startsWith('environment.wind.') || path.startsWith('environment.depth.'))) return;
     }
     if (handleMeasurementReset(storeRef.current, path, val, timeMs, Date.now())) return;
@@ -1011,11 +1013,16 @@ export function useDashboard() {
         sharedSessionModeRef.current = frame.mode;
         sessionConnectedRef.current = true;
         setDashboardMode(frame.mode); setDashboardEnvironment(frame.environment);
+        setOwnShipMotion(frame.ownMotion || null);
         sharedEnvironmentRef.current = frame.environment;
         applyingSessionRef.current = true;
         try {
           for (const [path, value] of Object.entries(frame.raw || {})) {
             const sourceTime = frame.rawTimes?.[path];
+            if (path === 'navigation.position' && frame.normalizedPosition === true) {
+              applyNormalizedSessionPosition(storeRef.current, value, sourceTime, frame.serverNow, Date.now());
+              continue;
+            }
             const signature = JSON.stringify(value);
             const previousValue = sessionRawTimesRef.current[path];
             if (!shouldApplySessionMeasurement(previousValue, value, sourceTime)) continue;
@@ -2169,6 +2176,7 @@ export function useDashboard() {
     setSelectedAisTargetId,
     ownShipPosition,
     ownShipCourse,
+    ownShipMotion,
     propulsionMode,
     setPropulsionMode,
   };

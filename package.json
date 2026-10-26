@@ -1,6 +1,6 @@
 {
   "name": "@sailingrotevista/rotevista-dash",
-  "version": "9.5.0",
+  "version": "9.6.0-beta.1",
   "description": "Wind Dashboard with navigation and course aids",
   "main": "index.js",
   "publishConfig": {
@@ -26,27 +26,17 @@
   },
   "files": [
     "index.js",
-    "collisionPipeline.js",
-    "collisionConfig.js",
-    "harborDetector.js",
-    "windEngine.js",
-    "windDataPolicy.json",
-    "aisEngine.js",
-    "aisReportedData.js",
-    "targetMotionTracker.js",
-    "bubbleEntryTracker.js",
-    "aisSharedAlerts.js",
-    "dashboardSession.js",
-    "dashboardScenario.js",
-    "dashboardMarina.json",
-    "targetPredictionStability.js",
+    "ais",
+    "wind",
+    "session",
+    "simulation",
+    "shared",
+    "sensors",
     "public",
     "icons",
     "apple-touch-icon.png",
     "manifest.json",
-    "settings.json",
-    "magneticDeclination.js",
-    "twdHistory.js"
+    "settings.json"
   ],
   "dependencies": {
     "geomagnetism": "0.2.0",

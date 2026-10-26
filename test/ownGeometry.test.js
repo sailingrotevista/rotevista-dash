@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { AisEngine } = require('../aisEngine');
-const { getHullBoundingRadius } = require('../collisionPipeline');
+const { AisEngine } = require('../ais/aisEngine');
+const { getHullBoundingRadius } = require('../ais/collisionPipeline');
 
 function engine(app = {}, pipeline = {}) {
     return new AisEngine(app, () => ({}), { getRaw: () => ({ 'navigation.position': { latitude: 36, longitude: 14 } }) },

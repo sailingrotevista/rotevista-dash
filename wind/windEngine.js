@@ -8,10 +8,10 @@
  * file windEngine.js
  */
 const https = require('https');
-const windDataPolicy = require('./windDataPolicy.json');
+const windDataPolicy = require('../shared/windDataPolicy.json');
 const {resolveTws, aggregateTwd, historyRetentionMs} = require('./twdHistory');
-const resolveDeclination = require('./magneticDeclination')(require('geomagnetism'));
-const { awsMaxAgeMs, awaMaxAgeMs, twsNativeMaxAgeMs, twaNativeMaxAgeMs, trueWindDirectionMinSpeedMps, twdNativeMaxAgeMs, headingMaxAgeMs, boatSpeedMaxAgeMs, gustSmoothingMs, gustResetGapMs, depthMaxAgeMs, historyGapMs } = require('./windDataPolicy.json');
+const resolveDeclination = require('../shared/magneticDeclination')(require('geomagnetism'));
+const { awsMaxAgeMs, awaMaxAgeMs, twsNativeMaxAgeMs, twaNativeMaxAgeMs, trueWindDirectionMinSpeedMps, twdNativeMaxAgeMs, headingMaxAgeMs, boatSpeedMaxAgeMs, gustSmoothingMs, gustResetGapMs, depthMaxAgeMs, historyGapMs } = require('../shared/windDataPolicy.json');
 
 // ==========================================================================
 // COSTANTI DI SVILUPPO (DEVELOPER CONFIG)
@@ -77,6 +77,29 @@ class WindEngine {
         // Variabili dedicate al recupero e calcolo previsioni meteo future
         this.futureForecast = null;       // Memorizza la previsione futura { timestamp, tws, twd }
         this.lastForecast30mSlot = 0;     // Orario dell'ultimo blocco orologio scaricato con successo (es. 15:30)
+    }
+
+    // The normalizer owns source ordering; a valid backup may have an older fix.
+    // TODO: antenna offsets remain uncompensated when the selected source changes.
+    applyNormalizedPosition(measurement, now = Date.now()) {
+        this.normalizedPositionManaged = true;
+        const value = measurement?.value, time = measurement?.timestamp;
+        const valid = measurement?.valid === true && Number.isFinite(time) && time <= now &&
+            now-time < windDataPolicy.positionMaxAgeMs && value &&
+            Number.isFinite(value.latitude) && Math.abs(value.latitude) <= 90 &&
+            Number.isFinite(value.longitude) && Math.abs(value.longitude) <= 180;
+        this.raw['navigation.position'] = valid ? { ...value } : null;
+        this.positionSourceTime = Number.isFinite(time) ? time : null;
+        if (valid) this.updatePositionForecast(value, now);
+    }
+
+    updatePositionForecast(value, now) {
+        const current30mSlot = Math.floor(now / 1800000) * 1800000;
+        if (current30mSlot > this.lastForecast30mSlot &&
+            (this.lastForecastAttemptTime == null || now-this.lastForecastAttemptTime >= 4000)) {
+            this.lastForecastAttemptTime = now;
+            this.fetchOpenMeteoForecast(value, current30mSlot);
+        }
     }
 
     getRaw() {
@@ -166,13 +189,7 @@ class WindEngine {
         this.lastPathProcessTimes[path] = now;
         if (path === 'navigation.position') {
             raw[path] = val;
-            // Keep forecast throttling independent of measurement acquisition.
-            const current30mSlot = Math.floor(now / 1800000) * 1800000;
-            if (current30mSlot > this.lastForecast30mSlot &&
-                (this.lastForecastAttemptTime == null || now-this.lastForecastAttemptTime >= 4000)) {
-                this.lastForecastAttemptTime = now;
-                this.fetchOpenMeteoForecast(val, current30mSlot);
-            }
+            this.updatePositionForecast(val, now);
             return;
         }
         if (typeof val === 'number' && (path.includes('angle') || path.includes('heading') ||

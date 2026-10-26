@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { compareTargets } = require('../collisionPipeline');
+const { compareTargets } = require('../ais/collisionPipeline');
 const target = (id, cpa, tcpa, risk = 'RED') => ({ id, cpa, tcpa, risk, dist: 1000 });
 
 test('shared scoring follows the reviewed encounter examples and treats zero TCPA as valid', () => {

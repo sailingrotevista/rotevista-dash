@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {WindEngine}=require('../windEngine');
-const policy=require('../windDataPolicy.json');
+const {WindEngine}=require('../wind/windEngine');
+const policy=require('../shared/windDataPolicy.json');
 const H='navigation.headingTrue',M='navigation.headingMagnetic',C='navigation.courseOverGroundTrue',S='navigation.speedOverGround';
 test('COG fallback updates repeatedly, expires with either input and yields to compass',async()=>{
  const {resolveHeading:r}=await import('../src/utils/windValidity.mjs');

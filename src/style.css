@@ -2838,3 +2838,14 @@ body.night-mode .ais-support-email-btn,
   color: white;
   font: bold 11px sans-serif;
 }
+
+/* Apply aging once per data block; navigation and alert action buttons stay opaque. */
+.ais-card-detail .detail-vessel-icon,
+.ais-card-detail .detail-vessel-name,
+.ais-card-detail .ais-detail-sub,
+.ais-card-detail .ais-detail-alert-box,
+.ais-card-detail .ais-detail-cell,
+.ais-card-detail .ais-sight-box {
+    opacity: var(--detail-data-opacity, 1);
+    transition: opacity 0.3s ease;
+}

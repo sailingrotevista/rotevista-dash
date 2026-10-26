@@ -3,9 +3,9 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
-const source=fs.readFileSync(path.join(__dirname,'../dashboardScenario.js'),'utf8');
-const pipeline=require('../collisionPipeline');
-const marina=require('../dashboardMarina.json');
+const source=fs.readFileSync(path.join(__dirname,'../simulation/dashboardScenario.js'),'utf8');
+const pipeline=require('../ais/collisionPipeline');
+const marina=require('../simulation/dashboardMarina.json');
 
 for(const commonJs of [false,true]) test(`scenario factory is available to the GUI with CommonJS wrapping ${commonJs}`,()=>{
  const context={};if(commonJs)context.module={exports:{}};

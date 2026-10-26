@@ -52,3 +52,9 @@ export function formatAge(seconds) {
   const hours = Math.floor(mins / 60);
   return `${hours}H AGO`;
 }
+
+// A negative/missing TCPA has no future closest approach to display.
+export function displayCpa(target) {
+  return Number.isFinite(target.tcpa) && target.tcpa >= 0 && Number.isFinite(target.cpa)
+    ? target.cpa : null;
+}
