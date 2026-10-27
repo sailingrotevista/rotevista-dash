@@ -56,6 +56,7 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
 
   const isCollisionDanger = threat.risk === 'RED';
   const isProximity = threat.alertKind === 'PROXIMITY';
+  const stationary = threat.motionState === 'STATIONARY' || (!threat.motionState && threat.isMoving === false);
   const cpa = displayCpa(threat);
   const cpaText = cpa !== null ? (cpa < 1852 ? `${cpa} m` : `${(cpa / 1852).toFixed(2)} NM`) : '--';
   const tcpaText = threat.tcpa !== null && threat.tcpa >= 0 ? `${threat.tcpa.toFixed(1)} min` : '--';
@@ -96,13 +97,13 @@ export const AisTacticalBanner: React.FC<AisTacticalBannerProps> = ({
             <span className="metric-val">{isProximity ? `${threat.safeBubbleMeters} m` : tcpaText}</span>
           </div>
           <div className="banner-metric">
-            <span className="metric-lbl" title="Velocità (SOG)" style={{ display: 'inline-flex', alignItems: 'center' }}>
+            {!stationary && <span className="metric-lbl" title="Speed over ground" style={{ display: 'inline-flex', alignItems: 'center' }}>
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="SOG">
                 <path d="M3.34 17a10 10 0 1 1 17.32 0" />
                 <path d="m12 14 3.5-3.5" />
               </svg>
-            </span>
-            <span className="metric-val">{formatAisSpeed(threat.sog)} kn</span>
+            </span>}
+            <span className="metric-val">{stationary ? 'STATIONARY' : `${formatAisSpeed(threat.sog)} kn`}</span>
           </div>
           <div className="banner-metric">
             <span className="metric-lbl" title="Distanza attuale" style={{ display: 'inline-flex', alignItems: 'center' }}>

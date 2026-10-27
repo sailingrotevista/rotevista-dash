@@ -1612,11 +1612,11 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
 
       {/* TOP TACTICAL CONTROL BAR */}
       <div className="ais-top-bar">
-        {/* TOP LEFT GROUP: BETA TAG & STATUS COUNTERS */}
+        {/* TOP LEFT GROUP: MODE INDICATOR & STATUS COUNTERS */}
         <div className="ais-top-left-group">
-          <button type="button" className="ais-beta-tag" title="Open dashboard menu" aria-label="Open dashboard menu" onClick={openDashboardMenu}>
-            {dashboardEnvironment === 'dev' ? 'DEV · ' : ''}{dashboardMode === 'simulation' ? 'SIMULATION' : mixedSimulation ? 'LIVE + SIM' : 'Beta 2'}
-          </button>
+          {(dashboardEnvironment === 'dev' || dashboardMode === 'simulation' || mixedSimulation) && <button type="button" className="ais-beta-tag" title="Open dashboard menu" aria-label="Open dashboard menu" onClick={openDashboardMenu}>
+            {dashboardEnvironment === 'dev' ? 'DEV' : ''}{dashboardEnvironment === 'dev' && (dashboardMode === 'simulation' || mixedSimulation) ? ' · ' : ''}{dashboardMode === 'simulation' ? 'SIMULATION' : mixedSimulation ? 'LIVE + SIM' : ''}
+          </button>}
           <div
             className="ais-status-counters"
             onClick={onReopenTopThreat}

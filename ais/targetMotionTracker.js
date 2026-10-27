@@ -125,6 +125,7 @@ function describeRest(state, config) {
         kind, confirmed, since: state.area.since,
         observedDurationSeconds: Math.max(0, (state.lastFix.t - since) / 1000),
         observedSpanSeconds, sampleCount: points.length,
+        requiredFixes: config.restMinimumFixes, requiredSpanSeconds: config.restMinimumSpanSeconds,
         center, radiusMeters, dispersionMeters, returnCount,
         excludedSamples: observations.length - points.length,
         lastFixTime: state.lastFix.t,

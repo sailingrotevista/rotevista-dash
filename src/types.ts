@@ -164,6 +164,8 @@ export interface AisTarget {
     since: number;
     observedDurationSeconds: number;
     observedSpanSeconds: number;
+    requiredFixes?: number;
+    requiredSpanSeconds?: number;
     sampleCount: number;
     center: { lat: number; lon: number } | null;
     radiusMeters: number | null;

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Clarify AIS rest diagnostics with fix/time progress, position spread and nonzero excluded-fix counts; simplify prediction descriptions and display moving prediction rates in metres per minute.
+- Show STATIONARY instead of speed in alert banners for stationary targets; remove the BETA badge from the live AIS map while preserving dev/simulation indicators.
+
 - Initialize own-ship motion as stationary when the first valid GPS fix arrives before usable SOG. Preserve missing speed, AIS target startup rules and subsequent motion transitions.
 
 - Simplify GPS source selection to freshness (50), accepted-fix reliability (30) and optional declared GNSS quality (20). Use a shared own-speed reference and a 50 m freshness window bounded to 15 seconds–4 minutes; missing speed uses 4 minutes.

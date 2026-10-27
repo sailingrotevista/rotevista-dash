@@ -83,7 +83,8 @@ Il blocco `TRAJECTORY STABILITY` mostra:
 - La stabilità descrive il movimento osservato, non il livello di pericolo.
 - Non dedurre oscillazione dal solo stato AIS anchored.
 - Un tocco espande i dettagli diagnostici per 8 secondi; un altro tocco li richiude subito.
-- I dettagli includono pattern di sosta, fix, intervallo osservato, raggio e ritorni quando disponibili; l'analisi della previsione mostra campioni, confronti, errore e crescita d'incertezza disponibili.
+- I dettagli della sosta non ancora confermata mostrano avanzamento `2/5 fixes · 2/5 min`, distanza massima dal centro osservato (`position spread`) e ritorni. I requisiti sono forniti dal tracker (`requiredFixes`, `requiredSpanSeconds`); ripiego 5 fix/5 minuti per server precedenti. I fix esclusi appaiono solo se maggiori di zero. I requisiti minimi di osservazione non garantiscono di riconoscere un pattern FIXED o OSCILLATING.
+- `POSITION PREDICTION`: per target fermi mostra `Target stationary: no movement forecast.`; per dati insufficienti `More AIS reports needed.` con numero di report e verifiche; altrimenti espone deriva osservata della previsione e crescita stimata dell’incertezza in m/min, convertendo i valori m/s senza cambiare il calcolo.
 - Cambiando target o smontando la scheda, i dettagli tornano nascosti e il timer viene eliminato.
 - La visualizzazione diagnostica non modifica osservazioni, soglie o allarmi.
 
@@ -154,3 +155,7 @@ Verifiche: [navigazione della propria barca](../test/ownShipNavigation.test.js).
 ## SOG dei target non disponibile
 
 La velocità assente è null nei frame e viene mostrata come --.- kn; non classificare automaticamente come STOPPED o contare come ancorato un target per il solo null. La velocità zero realmente ricevuta resta 0.0 kn. Il tracker emette soltanto MOVING/STATIONARY.
+
+Nel banner, un target STATIONARY mostra `STATIONARY` al posto della SOG e senza icona del tachimetro. Per dati legacy/simulati privi di motionState usare isMoving=false; uno stato MOVING esplicito prevale sul flag. Non dedurre lo stato dalla sola SOG bassa o assente. Nessuna modifica alla valutazione degli allarmi.
+
+La mappa AIS non mostra più il badge BETA in modalità Live sul plugin installato. Restano visibili gli indicatori DEV, SIMULATION e LIVE + SIM nei relativi contesti. Il numero di versione e il tag npm non cambiano per questa modifica grafica.
