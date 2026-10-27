@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {WindEngine}=require('../wind/windEngine');
@@ -13,17 +14,17 @@ test('server preserves depth source time, ignores stale history and publishes nu
  try {
  const e=new WindEngine({},()=>({}));const writes=[];e.manageHistory=(k,v)=>{if(k==='depth')writes.push(v);};
  const path='environment.depth.belowTransducer';
- e.processIncomingDelta(path,2,now-5000);e.sampleHistory();assert.deepEqual(writes,[]);
- now+=5000;e.processIncomingDelta(path,2,now);e.sampleHistory();
+ feedWindInput(e,path,2,now-5000);e.sampleHistory();assert.deepEqual(writes,[]);
+ now+=5000;feedWindInput(e,path,2,now);e.sampleHistory();
  assert.equal(e.getRawTimes()[path],now);
  assert.deepEqual(writes,[2]);
- now+=1000;e.processIncomingDelta(path,2,now);
+ now+=1000;feedWindInput(e,path,2,now);
  assert.equal(e.getRawTimes()[path],now);
- e.processIncomingDelta(path,1,now-1000);assert.equal(e.getRaw()[path],2);
- e.processIncomingDelta(path,Infinity,now+100);assert.equal(e.getRawTimes()[path],now);
- e.processIncomingDelta(path,null,now);assert.equal(e.getRaw()[path],null);
+ feedWindInput(e,path,1,now-1000);assert.equal(e.getRaw()[path],2);
+ feedWindInput(e,path,Infinity,now+100);assert.equal(e.getRawTimes()[path],now);
+ feedWindInput(e,path,null,now);assert.equal(e.getRaw()[path],null);
  assert.equal(e.getRawTimes()[path],now);
- now+=1000;e.processIncomingDelta(path,0,now);e.sampleHistory();
+ now+=1000;feedWindInput(e,path,0,now);e.sampleHistory();
  assert.equal(writes.at(-1),0);
  }finally{Date.now=original;}
 });

@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {WindEngine}=require('../wind/windEngine');
@@ -24,21 +25,21 @@ test('server repeatedly updates COG heading and TWD without publishing synthesiz
  const original=Date.now;let now=1000000;Date.now=()=>now;
  try {
   const e=new WindEngine({debug(){}},()=>({}));let twd;e.manageHistory=(k,v)=>{if(k==='twd')twd=v;};
-  e.processIncomingDelta(S,2,now);
-  e.processIncomingDelta('environment.wind.angleTrueWater',0.5,now);
-  e.processIncomingDelta(C,1,now);e.sampleHistory();
+  feedWindInput(e,S,2,now);
+  feedWindInput(e,'environment.wind.angleTrueWater',0.5,now);
+  feedWindInput(e,C,1,now);e.sampleHistory();
   assert.ok(Math.abs(twd-1.5)<1e-10);
-  now+=1000;e.processIncomingDelta(C,2,now);e.sampleHistory();
+  now+=1000;feedWindInput(e,C,2,now);e.sampleHistory();
   assert.ok(Math.abs(twd-2.5)<1e-10);
   assert.equal(e.getRaw()[H],undefined);
   assert.equal(e.getRollingAngles().hdg.at(-1).val,2);
-  e.processIncomingDelta(H,0.25,now);now+=1000;e.sampleHistory();
+  feedWindInput(e,H,0.25,now);now+=1000;e.sampleHistory();
   assert.ok(Math.abs(twd-0.75)<1e-10);
-  now+=1000;e.processIncomingDelta(C,3,now);e.sampleHistory();
+  now+=1000;feedWindInput(e,C,3,now);e.sampleHistory();
   assert.equal(e.getRaw()[H],0.25);
   assert.ok(Math.abs(twd-0.75)<1e-10);
   now+=6000;twd=undefined;
-  e.processIncomingDelta('environment.wind.angleTrueWater',0.6,now);e.sampleHistory();
+  feedWindInput(e,'environment.wind.angleTrueWater',0.6,now);e.sampleHistory();
   assert.equal(twd,undefined);
  } finally {Date.now=original;}
 });

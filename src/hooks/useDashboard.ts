@@ -1,4 +1,4 @@
-import { applyNormalizedSessionPosition, handleMeasurementReset, shouldApplySessionMeasurement } from '../utils/measurementReset.mjs';
+import { applyNormalizedSessionSog, applyNormalizedSessionPosition, handleMeasurementReset, shouldApplySessionMeasurement } from '../utils/measurementReset.mjs';
 import { aggregateTwd, historyRetentionMs } from '../utils/twdHistory.mjs';
 import { resolveOwnShipNavigation, validOwnPosition } from '../utils/ownShipNavigation.mjs';
 import { gybeSoundAllowed } from '../utils/gybeSound.mjs';
@@ -604,13 +604,17 @@ export function useDashboard() {
   }, []);
 
   // Process incoming data
+  const normalizedSogRef = useRef(false);
+  const normalizedAwsRef = useRef(false);
   const realAisTargetsRef = useRef<AisTarget[]>([]);
   const simulatedAisTargetsRef = useRef<AisTarget[]>([]);
-  const processIncomingData = useCallback((path: string, val: any, timeMs?: number) => {
+  const processIncomingData = useCallback((path: string, val: any, timeMs?: number, authoritativeAws = false) => {
     if (sharedSessionManagedRef.current && !applyingSessionRef.current) {
-      if (path.startsWith('environment.ais_') || path === 'environment.harbor_clusters' || path === 'navigation.position') return;
+      if (path.startsWith('environment.ais_') || path === 'environment.harbor_clusters' || path === 'navigation.position' || (normalizedSogRef.current && path === 'navigation.speedOverGround') || (normalizedAwsRef.current && path === 'environment.wind.speedApparent')) return;
       if (sharedSessionModeRef.current === 'simulation' && (path.startsWith('navigation.') || path.startsWith('environment.wind.') || path.startsWith('environment.depth.'))) return;
     }
+    // Ordered server frames may legitimately select an older backup source.
+    if (authoritativeAws && path === 'environment.wind.speedApparent') delete storeRef.current.timestamps[path];
     if (handleMeasurementReset(storeRef.current, path, val, timeMs, Date.now())) return;
     if (path === 'environment.depth.belowTransducer') {
       if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
@@ -1016,10 +1020,25 @@ export function useDashboard() {
         setDashboardMode(frame.mode); setDashboardEnvironment(frame.environment);
         setOwnShipMotion(frame.ownMotion || null);
         sharedEnvironmentRef.current = frame.environment;
+        normalizedSogRef.current = frame.normalizedSog === true;
+        normalizedAwsRef.current = frame.normalizedAws === true;
         applyingSessionRef.current = true;
         try {
           for (const [path, value] of Object.entries(frame.raw || {})) {
             const sourceTime = frame.rawTimes?.[path];
+            if (path === 'environment.wind.speedApparent' && frame.normalizedAws === true) {
+              const observedAt = Number.isFinite(sourceTime) && sourceTime <= frame.serverNow ? Date.now() - (frame.serverNow-sourceTime) : undefined;
+              const signature = JSON.stringify([value,sourceTime,frame.awsMeasurement?.source]);
+              if (sessionRawTimesRef.current[path]?.value !== signature) {
+                sessionRawTimesRef.current[path] = {time: sourceTime, value: signature};
+                processIncomingData(path,observedAt === undefined ? null : value,observedAt,true);
+              }
+              continue;
+            }
+            if (path === 'navigation.speedOverGround' && frame.normalizedSog === true) {
+              applyNormalizedSessionSog(storeRef.current,value,sourceTime,frame.serverNow,Date.now());
+              continue;
+            }
             if (path === 'navigation.position' && frame.normalizedPosition === true) {
               applyNormalizedSessionPosition(storeRef.current, value, sourceTime, frame.serverNow, Date.now(), frame.positionMeasurement?.expiresAt);
               continue;

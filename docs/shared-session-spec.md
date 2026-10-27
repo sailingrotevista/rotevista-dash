@@ -150,3 +150,13 @@ La nostra barca parte a sud del gruppo di Marina di Ragusa (36.7774059750889, 14
 Il dev recupera l’input Live dal Cerbo ogni 1000 ms, senza richieste sovrapposte. La sessione locale continua a elaborare a 1 Hz. I timestamp sorgente non vengono rinnovati dal recupero HTTP; la scadenza GPS è quella fornita dal Normalizer; 5000 ms resta il ripiego legacy in GUI. Questa frequenza riduce il ritardo del ponte dev e non modifica le sorgenti o le modalità del Cerbo.
 
 La diagnostica GPS mostra anche validityMs ed expiresAt. I frame dei plugin precedenti senza questi campi restano sul comportamento legacy: il nuovo timeout diventa operativo sul Cerbo solo dopo pubblicazione e installazione.
+
+I frame live/mixed espongono anche normalizedSog e sogMeasurement per la SOG ricevuta selezionata da SensorNormalizer e inoltrata da SensorDerivedData. La GUI non deve sovrascriverla con delta SOG grezzi dopo l’aggancio; timestamp sorgente e scadenza di 5 secondi restano invariati. I campi della simulazione pura rimangono sintetici.
+
+AWS ricevuta: i frame live/mixed includono `normalizedAws` e `awsMeasurement`
+(misura selezionata, sorgente, timestamp originale, scadenza e diagnostica).
+La GUI applica anche il passaggio a una riserva con timestamp più vecchio,
+convertendo l'età dall'orologio server a quello locale. Lo stesso fix non diventa
+nuovo tramite polling. Dopo l'aggancio alla sessione, AWS da websocket non può
+sovrascrivere la misura autorevole. In simulazione pura `normalizedAws` è false
+ed `awsMeasurement` è null. Dev resta isolato e inoltra i sensori dal plugin.

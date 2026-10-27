@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {WindEngine}=require('../wind/windEngine');
@@ -40,7 +41,7 @@ for (const [channel,path] of [['aws','environment.wind.speedApparent'],['tws','e
    const e=new WindEngine({debug(){}},()=>({graphs:{historyMinutes:5,reef1:15}}));
    for(let second=0;second<=120;second++) {
     now=1800000+second*1000;
-    e.processIncomingDelta(path,second<2 ? 10/1.94384 : 0,now);
+    feedWindInput(e,path,second<2 ? 10/1.94384 : 0,now);
     e.sampleHistory(now);
    }
    const history=e.getHistories()[channel];

@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {WindEngine}=require('../wind/windEngine');
@@ -17,20 +18,20 @@ test('server preserves speed source time through dedup and falls back to AWS aft
  try {
  const e=new WindEngine({debug(){}},()=>({}));let tws;
  e.manageHistory=(key,value)=>{if(key==='tws')tws=value;};
- e.processIncomingDelta(SOG,4,now);
- now+=1000;e.processIncomingDelta(SOG,4,now);
+ feedWindInput(e,SOG,4,now);
+ now+=1000;feedWindInput(e,SOG,4,now);
  assert.equal(e.getRawTimes()[SOG],now);
- e.processIncomingDelta(SOG,8,now-1000);
- e.processIncomingDelta(SOG,NaN,now+100);
+ feedWindInput(e,SOG,8,now-1000);
+ feedWindInput(e,SOG,NaN,now+100);
  assert.equal(e.getRaw()[SOG],4);
  assert.equal(e.getRawTimes()[SOG],now);
  now+=4999;
- e.processIncomingDelta('environment.wind.angleApparent',0,now);
- e.processIncomingDelta('environment.wind.speedApparent',10,now);e.sampleHistory();
+ feedWindInput(e,'environment.wind.angleApparent',0,now);
+ feedWindInput(e,'environment.wind.speedApparent',10,now);e.sampleHistory();
  assert.ok(Math.abs(tws-6*1.94384)<1e-9);
- now+=1000;e.processIncomingDelta('navigation.headingTrue',0,now);e.sampleHistory();
+ now+=1000;feedWindInput(e,'navigation.headingTrue',0,now);e.sampleHistory();
  assert.ok(Math.abs(tws-10*1.94384)<1e-9);
- e.processIncomingDelta(SOG,null,now);
+ feedWindInput(e,SOG,null,now);
  assert.equal(e.getRaw()[SOG],null);
  assert.equal(e.getRawTimes()[SOG],now);
  } finally {Date.now=original;}

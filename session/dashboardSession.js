@@ -52,7 +52,7 @@ class DashboardSession {
         const raw=live.raw || {};
         const p=raw['navigation.position']?.value || raw['navigation.position'];
         const liveOwn=live.own || (p ? {lat:p.latitude,lon:p.longitude,
-            sog:(raw['navigation.speedOverGround'] || 0)*1.94384,
+            sog:typeof raw['navigation.speedOverGround']==='number'&&Number.isFinite(raw['navigation.speedOverGround']) ? raw['navigation.speedOverGround']*1.94384 : null,
             cog:(raw['navigation.courseOverGroundTrue'] || 0)*180/Math.PI,
             hdg:(raw['navigation.headingTrue'] ?? raw['navigation.courseOverGroundTrue'] ?? 0)*180/Math.PI} : null);
         this.liveAlerts.update(live.targets || [],liveOwn,now);
@@ -125,7 +125,10 @@ class DashboardSession {
         this.revision++;
         this.current={propulsionMode:this.propulsionMode,mode:this.mode,generation:this.generation,environment:this.environment,changedAt:this.changedAt,
             revision:this.revision,serverNow:now,normalizedPosition:live.normalizedPosition===true && this.mode!=='simulation',
-            positionMeasurement:this.mode==='simulation' ? null : live.positionMeasurement || null,raw:outRaw,rawTimes:this.mode==='simulation' ? Object.fromEntries(Object.keys(outRaw).map(path=>[path,now])) : (live.rawTimes || {}),own,ownMotion,targets,harborClusters:clusters,
+            normalizedSog:live.normalizedSog===true && this.mode!=='simulation',
+            normalizedAws:live.normalizedAws===true && this.mode!=='simulation',
+            awsMeasurement:this.mode==='simulation'?null:live.awsMeasurement || null,
+            sogMeasurement:this.mode==='simulation'?null:live.sogMeasurement || null,positionMeasurement:this.mode==='simulation' ? null : live.positionMeasurement || null,raw:outRaw,rawTimes:this.mode==='simulation' ? Object.fromEntries(Object.keys(outRaw).map(path=>[path,now])) : (live.rawTimes || {}),own,ownMotion,targets,harborClusters:clusters,
             sharedAlerts:this.sharedAlerts.snapshot(now),waitingForLivePosition:this.mode==='mixed'&&!own};
         return this.current;
     }

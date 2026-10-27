@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {WindEngine}=require('../wind/windEngine');
@@ -13,13 +14,13 @@ test('server does not write stale STW history and resumes with measured zero',()
  try {
  const e=new WindEngine({},()=>({}));const writes=[];e.manageHistory=(k,v)=>{if(k==='stw')writes.push(v);};
  const path='navigation.speedThroughWater';
- e.processIncomingDelta(path,4,now-5000);e.sampleHistory();
+ feedWindInput(e,path,4,now-5000);e.sampleHistory();
  assert.deepEqual(writes,[]);
- now+=1000;e.processIncomingDelta(path,0,now);e.sampleHistory();
+ now+=1000;feedWindInput(e,path,0,now);e.sampleHistory();
  assert.deepEqual(writes,[0]);
- now+=1000;e.processIncomingDelta(path,5,now-6000);
+ now+=1000;feedWindInput(e,path,5,now-6000);
  assert.deepEqual(writes,[0]);
- e.processIncomingDelta(path,null,now);
+ feedWindInput(e,path,null,now);
  assert.equal(e.getRaw()[path],null);
  assert.deepEqual(writes,[0]);
  }finally{Date.now=original;}

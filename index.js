@@ -58,6 +58,8 @@ module.exports = function (app) {
     const harborDetector = new HarborDetector();
     const windEngine = new WindEngine(app, () => currentConfig);
     windEngine.normalizedPositionManaged = true;
+    windEngine.normalizedSogManaged = true;
+    windEngine.normalizedAwsManaged = true;
     const aisEngine = new AisEngine(app, () => currentConfig, windEngine, harborDetector, collisionPipeline);
 
     // Own GPS is selected once and distributed through DerivedData to all consumers.
@@ -71,7 +73,7 @@ module.exports = function (app) {
     const { DashboardSession, registerDashboardRoutes } = require('./session/dashboardSession');
     const readDashboardLive = () => ({raw:windEngine.getRaw(),rawTimes:windEngine.getRawTimes(),targets:aisEngine.getNearbyVessels(),
         harborClusters:aisEngine.getHarborClusters(),ownMotion:aisEngine.getOwnMotion(),
-        normalizedPosition:true,positionMeasurement:sensorDerivedData.getSnapshot()?.measurements['navigation.position'] || null,config:currentConfig});
+        normalizedPosition:true,normalizedSog:true,normalizedAws:true,awsMeasurement:sensorDerivedData.getSnapshot()?.measurements['environment.wind.speedApparent'] || null,sogMeasurement:sensorDerivedData.getSnapshot()?.measurements['navigation.speedOverGround'] || null,positionMeasurement:sensorDerivedData.getSnapshot()?.measurements['navigation.position'] || null,config:currentConfig});
     const dashboardSession = new DashboardSession({readLive:readDashboardLive,liveAlerts:aisEngine.sharedAlerts});
 
     /**
@@ -178,9 +180,7 @@ module.exports = function (app) {
                 { path: 'sensors.gps.fromCenter', minPeriod: 1000 },
                 { path: 'navigation.state', minPeriod: 1000 },
                 { path: 'navigation.speedThroughWater', minPeriod: 1000 },
-                { path: 'navigation.speedOverGround', minPeriod: 1000 },
                 { path: 'environment.depth.belowTransducer', minPeriod: 1000 },
-                { path: 'environment.wind.speedApparent', minPeriod: 1000 },
                 { path: 'environment.wind.angleApparent', minPeriod: 1000 },
                 { path: 'environment.wind.speedTrue', minPeriod: 1000 },
                 { path: 'environment.wind.angleTrueWater', minPeriod: 1000 },
@@ -203,7 +203,7 @@ module.exports = function (app) {
                     delta.updates.forEach(update => {
                         if (update.values) {
                             update.values.forEach(v => {
-                                if (v.path === 'navigation.position') return; // Receiver/Normalizer is the only GPS input.
+                                if (v.path === 'navigation.position' || v.path === 'navigation.speedOverGround' || v.path === 'environment.wind.speedApparent') return; // Receiver/Normalizer is the only migrated sensor input.
                                 aisEngine.updateWindEvidence(v.path, v.value, update.timestamp);
                                 if (!aisEngine.updateOwnGeometry(v.path, v.value)) {
                                     windEngine.processIncomingDelta(v.path, v.value, update.timestamp);
@@ -238,10 +238,14 @@ module.exports = function (app) {
                 if (snapshot) {
                     const derived = sensorDerivedData.process(snapshot);
                     windEngine.applyNormalizedPosition(derived.measurements['navigation.position'], now);
+                    windEngine.applyNormalizedSog(derived.measurements['navigation.speedOverGround'], now);
+                    windEngine.applyNormalizedAws(derived.measurements['environment.wind.speedApparent'], now);
                 }
             } catch (error) {
                 windEngine.applyNormalizedPosition(null, now);
-                app.debug(`GPS normalization: ${error.message || error}`);
+                windEngine.applyNormalizedSog(null, now);
+                windEngine.applyNormalizedAws(null, now);
+                app.debug(`Sensor normalization: ${error.message || error}`);
             }
             windEngine.sampleHistory(now);
             dashboardSession.tick(now);

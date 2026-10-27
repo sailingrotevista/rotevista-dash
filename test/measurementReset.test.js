@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {WindEngine} = require('../wind/windEngine');
@@ -19,19 +20,19 @@ test('server rejects delayed resets and replayed measurements across every instr
  const now = Date.now();
  for (const path of paths) {
   const e = engine(), value = valueFor(path);
-  e.processIncomingDelta(path, value, now-2000);
+  feedWindInput(e,path, value, now-2000);
   const accepted = e.getRaw()[path];
-  e.processIncomingDelta(path, null, now-3000);
+  feedWindInput(e,path, null, now-3000);
   assert.deepEqual(e.getRaw()[path], accepted, path);
-  e.processIncomingDelta(path, null, now-1000);
+  feedWindInput(e,path, null, now-1000);
   assert.equal(e.getRaw()[path], null, path);
   assert.equal(e.getRawTimes()[path], now-1000, path);
   for (const timestamp of [now-2000, now-1000]) {
-   e.processIncomingDelta(path, value, timestamp);
+   feedWindInput(e,path, value, timestamp);
    assert.equal(e.getRaw()[path], null, path);
    assert.equal(e.getRawTimes()[path], now-1000, path);
   }
-  e.processIncomingDelta(path, value, now);
+  feedWindInput(e,path, value, now);
   assert.deepEqual(e.getRaw()[path], accepted, path);
  }
 });
@@ -39,7 +40,7 @@ test('server rejects delayed resets and replayed measurements across every instr
 test('polling alone propagates resets, including same-timestamp resets, to browser state', async () => {
  const {handleMeasurementReset, shouldApplySessionMeasurement} = await import('../src/utils/measurementReset.mjs');
  const now = Date.now(), e = engine();
- for (const path of paths) e.processIncomingDelta(path, valueFor(path), now-1000);
+ for (const path of paths) feedWindInput(e,path, valueFor(path), now-1000);
  const session = new DashboardSession({now, readLive:() => ({raw:e.getRaw(),rawTimes:e.getRawTimes(),targets:[]})});
  const store = {raw:{},timestamps:{},smoothBuf:{awa:[],twa:[]},longBuf:{awa:[],twa:[]}};
  const previous = {};
@@ -57,7 +58,7 @@ test('polling alone propagates resets, including same-timestamp resets, to brows
  poll();
  for (const path of paths) {
   assert.notEqual(store.raw[path],null,path);
-  e.processIncomingDelta(path,null,now-1000);
+  feedWindInput(e,path,null,now-1000);
  }
  poll();
  for (const path of paths) {
@@ -85,15 +86,15 @@ test('silence still expires at five seconds while a reset stops sampling immedia
  const e = engine(), path = 'navigation.speedOverGround', now = Date.now();
  const writes = [];
  e.manageHistory = (channel,value) => {if (channel === 'sog') writes.push(value);};
- e.processIncomingDelta(path,1,now-4999);
+ feedWindInput(e,path,1,now-4999);
  e.sampleHistory(now);
  assert.equal(writes.length,1);
  e.sampleHistory(now+1000);
  assert.equal(writes.length,1);
  const resetEngine = engine();
  resetEngine.manageHistory = e.manageHistory;
- resetEngine.processIncomingDelta(path,1,now-1000);
- resetEngine.processIncomingDelta(path,null,now);
+ feedWindInput(resetEngine,path,1,now-1000);
+ feedWindInput(resetEngine,path,null,now);
  resetEngine.sampleHistory(now);
  assert.equal(writes.length,1);
  assert.equal(resetEngine.getRawTimes()[path],now);

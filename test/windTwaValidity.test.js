@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const policy=require('../shared/windDataPolicy.json');
@@ -28,15 +29,15 @@ test('server accepts native TWA without AWS and preserves source times and uniqu
  const original=Date.now;let now=1000000;Date.now=()=>now;
  try {
   const e=new WindEngine({debug(){}},()=>({}));
-  e.processIncomingDelta(TWA,1,now-1000);e.sampleHistory();
+  feedWindInput(e,TWA,1,now-1000);e.sampleHistory();
   assert.equal(e.getRollingAngles().twa.length,1);
   assert.equal(e.getRawTimes()[TWA],now-1000);
-  now+=1000;e.processIncomingDelta(TWA,2,now-2000);
+  now+=1000;feedWindInput(e,TWA,2,now-2000);
   assert.equal(e.getRaw()[TWA],1);
   assert.equal(e.getRollingAngles().twa.length,1);
-  e.processIncomingDelta(TWA,NaN,now);
+  feedWindInput(e,TWA,NaN,now);
   assert.equal(e.getRawTimes()[TWA],now-2000);
-  e.processIncomingDelta(TWA,null,now);
+  feedWindInput(e,TWA,null,now);
   assert.equal(e.getRaw()[TWA],null);
   assert.equal(e.getRollingAngles().twa.length,0);
  } finally {Date.now=original;}
@@ -45,10 +46,10 @@ test('server calm fallback emits no TWA or derived TWD',()=>{
  const original=Date.now;Date.now=()=>1000000;
  try {
   const e=new WindEngine({debug(){}},()=>({}));e.manageHistory=()=>{};
-  e.processIncomingDelta('navigation.speedThroughWater',4,Date.now());
-  e.processIncomingDelta('navigation.headingTrue',1,Date.now());
-  e.processIncomingDelta(AWA,0,Date.now());
-  e.processIncomingDelta(AWS,4,Date.now());e.sampleHistory();
+  feedWindInput(e,'navigation.speedThroughWater',4,Date.now());
+  feedWindInput(e,'navigation.headingTrue',1,Date.now());
+  feedWindInput(e,AWA,0,Date.now());
+  feedWindInput(e,AWS,4,Date.now());e.sampleHistory();
   assert.equal(e.getRollingAngles().twa.length,0);
   assert.equal(e.getRollingAngles().twd.length,0);
  } finally {Date.now=original;}

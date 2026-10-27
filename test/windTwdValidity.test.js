@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {WindEngine}=require('../wind/windEngine');
@@ -18,11 +19,11 @@ test('server derives TWD from native TWA and heading only; stale heading stops i
  const original=Date.now;let now=1000000;Date.now=()=>now;
  try {
  const e=new WindEngine({debug(){}},()=>({}));const writes=[];e.manageHistory=(k,v)=>writes.push([k,v]);
- e.processIncomingDelta(H,1,now);
- e.processIncomingDelta(A,0.5,now);e.sampleHistory();
+ feedWindInput(e,H,1,now);
+ feedWindInput(e,A,0.5,now);e.sampleHistory();
  assert.ok(writes.some(([k,v])=>k==='twd'&&Math.abs(v-1.5)<1e-10));
  assert.equal(e.getRaw()[D],undefined);
- now+=5000;writes.length=0;e.processIncomingDelta(A,0.6,now);e.sampleHistory();
+ now+=5000;writes.length=0;feedWindInput(e,A,0.6,now);e.sampleHistory();
  assert.equal(writes.filter(([k])=>k==='twd').length,0);
  } finally {Date.now=original;}
 });
@@ -30,14 +31,14 @@ test('server native TWD keeps source timestamp, ignores duplicate and expires ol
  const original=Date.now;let now=1000000;Date.now=()=>now;
  try {
  const e=new WindEngine({debug(){}},()=>({}));e.manageHistory=()=>{};
- e.processIncomingDelta(D,1,now-1000);e.sampleHistory();
+ feedWindInput(e,D,1,now-1000);e.sampleHistory();
  assert.equal(e.getRawTimes()[D],now-1000);
  assert.equal(e.getRollingAngles().twd.length,1);
- e.processIncomingDelta(D,2,now-1000);
+ feedWindInput(e,D,2,now-1000);
  assert.equal(e.getRaw()[D],1);
- now+=10000;e.processIncomingDelta(D,2,now-6000);e.sampleHistory();
+ now+=10000;feedWindInput(e,D,2,now-6000);e.sampleHistory();
  assert.equal(e.getRollingAngles().twd.length,1);
- e.processIncomingDelta(D,null,now);
+ feedWindInput(e,D,null,now);
  assert.equal(e.getRaw()[D],null);
  } finally {Date.now=original;}
 });
@@ -46,11 +47,11 @@ test('invalidating native TWD retains averages while derived TWD remains valid',
  const original=Date.now;let now=1000000;Date.now=()=>now;
  try {
   const e=new WindEngine({debug(){}},()=>({}));e.manageHistory=()=>{};
-  e.processIncomingDelta(H,1,now);
-  e.processIncomingDelta(A,0.5,now);e.sampleHistory();
+  feedWindInput(e,H,1,now);
+  feedWindInput(e,A,0.5,now);e.sampleHistory();
   const before=structuredClone(e.getRollingAngles().twd);
   assert.ok(before.length>0);
-  e.processIncomingDelta(D,null,now);
+  feedWindInput(e,D,null,now);
   assert.deepEqual(e.getRollingAngles().twd,before);
   assert.equal(resolveTwd(e.getRaw(),e.getRawTimes(),now,policy),1.5);
   now+=5000;

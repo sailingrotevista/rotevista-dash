@@ -45,3 +45,10 @@ export function applyNormalizedSessionPosition(store, value, sourceTime, serverN
   store.raw['navigation.position'] = valid ? {...value} : null;
   store.timestamps['navigation.position'] = validTime ? localNow-Math.max(0,serverNow-sourceTime) : null;
 }
+
+// An ordered authoritative frame may switch to a backup with an older timestamp.
+export function applyNormalizedSessionSog(store,value,sourceTime,serverNow,localNow) {
+  const validTime=Number.isFinite(sourceTime)&&sourceTime<=serverNow;
+  store.raw['navigation.speedOverGround']=validTime&&typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=25.72?value:null;
+  store.timestamps['navigation.speedOverGround']=validTime?localNow-Math.max(0,serverNow-sourceTime):null;
+}

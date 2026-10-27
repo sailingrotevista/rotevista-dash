@@ -280,3 +280,20 @@ Verifiche: [conservazione e slot completi del radar](../test/windRadarRetention.
 - La GUI applica lo stesso controllo cronologico e conserva il timestamp dell'invalidazione. Le soglie di 5 secondi restano invariate.
 
 Verifiche: [reset e ordine dei messaggi, inclusa propagazione tramite polling](../test/measurementReset.test.js).
+
+### Ingresso SOG normalizzato
+
+La SOG propria viene applicata da index tramite applyNormalizedSog dopo SensorDerivedData; processIncomingDelta non accetta più navigation.speedOverGround. Il campionamento dello storico, i fallback del vento e la gestione delle medie consumano il valore selezionato con timestamp originale e scadenza precedente di 5 secondi. Zero reale rimane zero, dato scaduto/invalido/assente rimane null. In questa fase non si calcola SOG dal GPS e non si modifica alcuna formula del vento.
+
+Per SOG migrata, WindEngine non ripete controlli fisici o selezione: applica valid/value e rispetta esclusivamente expiresAt del Normalizer. Storico, TWS ricostruito, pesi TWD e ripiego prua su COG ricevono la stessa SOG utilizzabile. Il resolver TWS condiviso accetta opzionalmente questo valore già risolto; senza valore autorevole mantiene il controllo legacy per gli altri contesti. Restano la media nel bucket dello storico SOG e il filtro raffiche per il solo vento.
+
+### AWS normalizzata
+
+L'AWS ricevuta ora entra esclusivamente da SensorDerivedData tramite
+`applyNormalizedAws`; WindEngine non acquisisce più il path AWS da delta grezzi.
+Il normalizer seleziona la sorgente per frequenza/freschezza e isteresi, con
+scadenza di 5 secondi e timestamp originale. WindEngine applica la scadenza
+assoluta anche ai calcoli vettoriali e ai pesi TWD. Il campionamento dello storico
+resta a 1 Hz: il filtro delle raffiche sostenute e le formule AWS/TWS non cambiano.
+La GUI live/mixed segue l'AWS selezionata dal server, senza sovrascrittura dal
+websocket; la simulazione pura mantiene il vento sintetico.

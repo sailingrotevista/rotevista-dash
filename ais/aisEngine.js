@@ -3,7 +3,7 @@ const { OwnMotionState, OWN_MOTION_ID } = require('./ownMotionState');
 const { extractReportedAis } = require('./aisReportedData');
 const { AisSharedAlerts } = require('../session/aisSharedAlerts');
 const { BubbleEntryTracker } = require('./bubbleEntryTracker');
-const { positionMaxAgeMs } = require('../shared/windDataPolicy.json');
+const { positionMaxAgeMs, boatSpeedMaxAgeMs } = require('../shared/windDataPolicy.json');
 const { getAreaAtPositionFromAreas } = require('./harborDetector');
 /**
  * ==========================================================================
@@ -269,14 +269,13 @@ class AisEngine {
             }
             this.aisDiagnostics.myGps = { lat: myGps.lat, lon: myGps.lon };
 
-            let mySpeedKn = 0;
-            if (raw['navigation.speedOverGround'] !== undefined) {
-                mySpeedKn = raw['navigation.speedOverGround'] * 1.94384;
-            } else if (typeof app.getSelfPath === 'function') {
-                const sog = app.getSelfPath('navigation.speedOverGround');
-                const sogVal = (sog && sog.value !== undefined) ? sog.value : sog;
-                if (sogVal !== undefined && !isNaN(sogVal)) mySpeedKn = parseFloat(sogVal) * 1.94384;
-            }
+            const ownSog = raw['navigation.speedOverGround'];
+            const ownSogTime = this.windEngine.getRawTimes?.()['navigation.speedOverGround'];
+            // Only the DerivedData-backed store supplies own SOG; never reload a
+            // discarded/missing value from the Signal K cache.
+            const mySpeedKn = typeof ownSog === 'number' && Number.isFinite(ownSog) && ownSog >= 0 &&
+                (!this.windEngine.normalizedSogManaged || (Number.isFinite(ownSogTime) && ownSogTime <= now && now-ownSogTime < boatSpeedMaxAgeMs))
+                ? ownSog * 1.94384 : null;
 
             let myHdg = 0;
             if (raw['navigation.headingTrue'] !== undefined) {

@@ -2,7 +2,7 @@
 
 const { GPS_AUXILIARY_PATHS } = require('./sensorNormalizer/gpsQuality');
 const GPS_PATH = 'navigation.position';
-const GPS_INPUT_PATHS = Object.freeze([GPS_PATH, ...GPS_AUXILIARY_PATHS]);
+const SENSOR_INPUT_PATHS = Object.freeze([GPS_PATH, ...GPS_AUXILIARY_PATHS, 'environment.wind.speedApparent']);
 
 function sourceReference(update) {
     if (typeof update.$source === 'string' && update.$source.trim()) return update.$source.trim();
@@ -31,7 +31,7 @@ class SignalKReceiver {
         for (const update of delta.updates) {
             if (!update || !Array.isArray(update.values)) continue;
             for (const item of update.values) {
-                if (!item || !GPS_INPUT_PATHS.includes(item.path) || !Object.prototype.hasOwnProperty.call(item, 'value')) continue;
+                if (!item || !SENSOR_INPUT_PATHS.includes(item.path) || !Object.prototype.hasOwnProperty.call(item, 'value')) continue;
                 const value = Array.isArray(item.value) ? item.value.slice() : item.value && typeof item.value === 'object' ? { ...item.value } : item.value;
                 const measurement = { path: item.path, value, source: sourceReference(update),
                     sourceInfo: update.source && typeof update.source === 'object' ? { ...update.source } : null,
@@ -51,7 +51,7 @@ class SignalKReceiver {
         try {
             // minPeriod=0 preserves source cadence. Newer servers expose all source
             // deltas through the sixth argument; older servers may filter upstream.
-            app.subscriptionmanager.subscribe({ context: 'vessels.self', subscribe: GPS_INPUT_PATHS.map(path => ({ path, policy: 'instant', minPeriod: 0 })) }, this.unsubscribes, this.onError, delta => this.receive(delta), undefined, 'all');
+            app.subscriptionmanager.subscribe({ context: 'vessels.self', subscribe: SENSOR_INPUT_PATHS.map(path => ({ path, policy: 'instant', minPeriod: 0 })) }, this.unsubscribes, this.onError, delta => this.receive(delta), undefined, 'all');
         } catch (error) {
             this.stop();
             throw error;

@@ -4,7 +4,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.RotevistaTwdHistory = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
-  function resolveTws(raw, timestamps, now, policy) {
+  function resolveTws(raw, timestamps, now, policy, normalizedSog, normalizedAws) {
     const fresh = (path, maxAge, valid) => {
       const value = raw[path], time = timestamps[path];
       return Number.isFinite(value) && valid(value) && Number.isFinite(time) &&
@@ -13,12 +13,12 @@
     const speed = v => v >= 0 && v <= 51.44;
     const native = fresh('environment.wind.speedTrue', policy.twsNativeMaxAgeMs, speed);
     if (native !== null) return native;
-    const aws = fresh('environment.wind.speedApparent', policy.awsMaxAgeMs, speed);
+    const aws = normalizedAws === undefined ? fresh('environment.wind.speedApparent', policy.awsMaxAgeMs, speed) : normalizedAws;
     const awa = fresh('environment.wind.angleApparent', policy.awaMaxAgeMs, v => Math.abs(v) <= Math.PI*2);
     if (aws === null || awa === null) return null;
     const boatSpeed = v => v >= 0 && v <= 25.72;
     const stw = fresh('navigation.speedThroughWater', policy.boatSpeedMaxAgeMs, boatSpeed);
-    const sog = fresh('navigation.speedOverGround', policy.boatSpeedMaxAgeMs, boatSpeed);
+    const sog = normalizedSog === undefined ? fresh('navigation.speedOverGround', policy.boatSpeedMaxAgeMs, boatSpeed) : normalizedSog;
     const velocity = (stw !== null && !(sog !== null && sog > 0.77 && stw < 0.25) ? stw : sog) ?? 0;
     return Math.hypot(aws*Math.cos(awa)-velocity, aws*Math.sin(awa));
   }

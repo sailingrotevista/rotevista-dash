@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Route received AWS through source selection and normalization at 1 Hz, then DerivedData, Wind and shared clients. Keep source timestamps, 5-second expiry and the existing sustained-gust history filter; block direct AWS overwrites and retain pure simulation. Share speed-source scoring between SOG and AWS.
+
+- Route own received SOG through SogNormalizer and SensorDerivedData, selecting sources by frequency and freshness with hysteresis. Preserve zero, original timestamps and existing 5-second expiry; block direct SOG overwrites in Wind, AIS fallback and normalized dashboard clients. GPS-derived speed remains deferred.
+
 - Clarify AIS rest diagnostics with fix/time progress, position spread and nonzero excluded-fix counts; simplify prediction descriptions and display moving prediction rates in metres per minute.
 - Show STATIONARY instead of speed in alert banners for stationary targets; remove the BETA badge from the live AIS map while preserving dev/simulation indicators.
 

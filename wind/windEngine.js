@@ -18,7 +18,7 @@ const { awsMaxAgeMs, awaMaxAgeMs, twsNativeMaxAgeMs, twaNativeMaxAgeMs, trueWind
 // COSTANTI DI SVILUPPO (DEVELOPER CONFIG)
 // ==========================================================================
 
-function resolveHeading(raw, timestamps, now, policy, allowCog = true) {
+function resolveHeading(raw, timestamps, now, policy, allowCog = true, normalizedSog) {
   const fresh = (path, age) => {
     const value = raw[path], time = timestamps[path];
     return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= Math.PI * 2 &&
@@ -33,9 +33,11 @@ function resolveHeading(raw, timestamps, now, policy, allowCog = true) {
   if (trueHeading !== null) return trueHeading;
   if (!allowCog) return null;
   const cog = fresh('navigation.courseOverGroundTrue', policy.headingMaxAgeMs);
-  const sog = raw['navigation.speedOverGround'], time = timestamps['navigation.speedOverGround'];
-  return cog !== null && Number.isFinite(sog) && sog > 0.77 && sog <= 25.72 &&
-    Number.isFinite(time) && now-time >= 0 && now-time < policy.boatSpeedMaxAgeMs ? cog : null;
+  const rawSog = raw['navigation.speedOverGround'], time = timestamps['navigation.speedOverGround'];
+  const legacySog = Number.isFinite(rawSog) && rawSog >= 0 && rawSog <= 25.72 &&
+    Number.isFinite(time) && now-time >= 0 && now-time < policy.boatSpeedMaxAgeMs ? rawSog : null;
+  const sog = normalizedSog === undefined ? legacySog : normalizedSog;
+  return cog !== null && sog !== null && sog > 0.77 ? cog : null;
 }
 
 class WindEngine {
@@ -94,6 +96,32 @@ class WindEngine {
         if (valid) this.updatePositionForecast(value, now);
     }
 
+    // Validity/selection belong to SogNormalizer. Consumers only honour the
+    // original deadline so a stopped input clock cannot freeze a usable value.
+    applyNormalizedSog(measurement, now = Date.now()) {
+        this.normalizedSogManaged = true;
+        this.sogMeasurement = measurement ? {...measurement} : null;
+        this.raw['navigation.speedOverGround'] = this.getNormalizedSog(now);
+        this.speedSourceTimes['navigation.speedOverGround'] = measurement?.timestamp ?? null;
+    }
+
+    getNormalizedSog(now = Date.now()) {
+        const m = this.sogMeasurement;
+        return m?.valid === true && gpsPositionFresh(m.timestamp, now, m.expiresAt, boatSpeedMaxAgeMs) ? m.value : null;
+    }
+
+    applyNormalizedAws(measurement, now = Date.now()) {
+        this.normalizedAwsManaged = true;
+        this.awsMeasurement = measurement ? {...measurement} : null;
+        this.raw['environment.wind.speedApparent'] = this.getNormalizedAws(now);
+        this.lastAwsReceivedTime = measurement?.timestamp ?? null;
+    }
+
+    getNormalizedAws(now = Date.now()) {
+        const m = this.awsMeasurement;
+        return m?.valid === true && gpsPositionFresh(m.timestamp, now, m.expiresAt, awsMaxAgeMs) ? m.value : null;
+    }
+
     updatePositionForecast(value, now) {
         const current30mSlot = Math.floor(now / 1800000) * 1800000;
         if (current30mSlot > this.lastForecast30mSlot &&
@@ -135,7 +163,7 @@ class WindEngine {
      */
     processIncomingDelta(path, val, sourceTimestamp) {
         // Own position has one entry point: the measurement emitted by DerivedData.
-        if (path === 'navigation.position') return;
+        if (path === 'navigation.position' || path === 'navigation.speedOverGround' || path === 'environment.wind.speedApparent') return;
         const sourceFields = {
             'environment.depth.belowTransducer': 'depthSourceTime',
             'environment.wind.speedTrue': 'lastNativeTwsTime',
@@ -208,20 +236,20 @@ class WindEngine {
         const speed = value => value >= 0 && value <= 25.72;
         const angle = value => Math.abs(value) <= Math.PI*2;
         const stw = fresh('navigation.speedThroughWater',boatSpeedMaxAgeMs,speed);
-        const sog = fresh('navigation.speedOverGround',boatSpeedMaxAgeMs,speed);
+        const sog = this.normalizedSogManaged ? this.getNormalizedSog(now) : fresh('navigation.speedOverGround',boatSpeedMaxAgeMs,speed);
         const depth = fresh('environment.depth.belowTransducer',depthMaxAgeMs,value => value >= -2 && value <= 500);
-        const aws = fresh('environment.wind.speedApparent',awsMaxAgeMs,value => value >= 0 && value <= 51.44);
+        const aws = this.normalizedAwsManaged ? this.getNormalizedAws(now) : fresh('environment.wind.speedApparent',awsMaxAgeMs,value => value >= 0 && value <= 51.44);
         const awa = fresh('environment.wind.angleApparent',awaMaxAgeMs,angle);
         const cog = fresh('navigation.courseOverGroundTrue',headingMaxAgeMs,angle);
-        const heading = resolveHeading(raw,times,now,windDataPolicy);
+        const heading = resolveHeading(raw,times,now,windDataPolicy,true,this.normalizedSogManaged ? sog : undefined);
         const measuredSpeed = stw !== null && !(sog !== null && sog > 0.77 && stw < 0.25) ? stw : sog;
         let twa = fresh('environment.wind.angleTrueWater',twaNativeMaxAgeMs,angle);
         if (twa === null && aws !== null && awa !== null) {
             const x = aws*Math.cos(awa)-(measuredSpeed ?? 0), y = aws*Math.sin(awa);
             if (Math.hypot(x,y) > trueWindDirectionMinSpeedMps) twa = Math.atan2(y,x);
         }
-        const tws = resolveTws(raw,times,now,windDataPolicy);
-        const compass = resolveHeading(raw,times,now,windDataPolicy,false);
+        const tws = resolveTws(raw,times,now,windDataPolicy,this.normalizedSogManaged ? sog : undefined,this.normalizedAwsManaged ? aws : undefined);
+        const compass = resolveHeading(raw,times,now,windDataPolicy,false,this.normalizedSogManaged ? sog : undefined);
         const nativeTwd = fresh('environment.wind.directionTrue',twdNativeMaxAgeMs,angle);
         const twd = twa !== null && compass !== null ? compass+twa : nativeTwd !== null ? nativeTwd :
             twa !== null && heading !== null ? heading+twa : null;
@@ -304,7 +332,7 @@ class WindEngine {
         const tempBuf = graphTempBuf[type];
 
         // Cattura la velocità del vento corrente (in m/s) al momento della lettura
-        const currentTws = type === 'twd' ? resolveTws(raw, this.getRawTimes(), now, windDataPolicy) : null;
+        const currentTws = type === 'twd' ? resolveTws(raw, this.getRawTimes(), now, windDataPolicy,this.normalizedSogManaged ? this.getNormalizedSog(now) : undefined,this.normalizedAwsManaged ? this.getNormalizedAws(now) : undefined) : null;
         tempBuf.push({ val: value, tws: currentTws, time: now });
 
         // Controllo avanzamento del secchiello temporale (Bucket)

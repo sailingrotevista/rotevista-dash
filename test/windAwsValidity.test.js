@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {WindEngine}=require('../wind/windEngine');
@@ -18,16 +19,16 @@ test('server stops fallback with stale AWS and resumes on a real update includin
  try {
   const engine=new WindEngine({debug(){}},()=>({}));
   const writes=[];engine.manageHistory=(type,val)=>writes.push({type,val});
-  engine.processIncomingDelta('environment.wind.speedApparent',4,now);
-  engine.processIncomingDelta('environment.wind.angleApparent',0.5);
+  feedWindInput(engine,'environment.wind.speedApparent',4,now);
+  feedWindInput(engine,'environment.wind.angleApparent',0.5);
   engine.sampleHistory();
   assert.ok(writes.some(p=>p.type==='tws'));
   writes.length=0;now+=awsMaxAgeMs;
-  engine.processIncomingDelta('navigation.headingTrue',1);
+  feedWindInput(engine,'navigation.headingTrue',1);
   engine.sampleHistory();
   assert.equal(writes.some(p=>['tws','vmg','twd'].includes(p.type)),false);
-  engine.processIncomingDelta('environment.wind.angleApparent',0.5,now);
-  engine.processIncomingDelta('environment.wind.speedApparent',0,now);
+  feedWindInput(engine,'environment.wind.angleApparent',0.5,now);
+  feedWindInput(engine,'environment.wind.speedApparent',0,now);
   now+=1000;engine.sampleHistory();
   assert.ok(writes.some(p=>p.type==='aws'&&p.val===0));
   assert.ok(writes.some(p=>p.type==='tws'&&p.val===0));
@@ -39,14 +40,14 @@ test('unchanged new reports refresh AWS age but old reports and invalid values d
  const oldNow=Date.now;let now=1000000;Date.now=()=>now;
  try {
   const engine=new WindEngine({debug(){}},()=>({}));
-  engine.processIncomingDelta('environment.wind.speedApparent',4,now);
-  now+=1000;engine.processIncomingDelta('environment.wind.speedApparent',4,now);
+  feedWindInput(engine,'environment.wind.speedApparent',4,now);
+  now+=1000;feedWindInput(engine,'environment.wind.speedApparent',4,now);
   assert.equal(engine.lastAwsReceivedTime,now);
-  engine.processIncomingDelta('environment.wind.speedApparent',9,now-10000);
-  engine.processIncomingDelta('environment.wind.speedApparent',Infinity,now+1000);
+  feedWindInput(engine,'environment.wind.speedApparent',9,now-10000);
+  feedWindInput(engine,'environment.wind.speedApparent',Infinity,now+1000);
   assert.equal(engine.lastAwsReceivedTime,now);
   assert.equal(engine.raw['environment.wind.speedApparent'],4);
-  engine.processIncomingDelta('environment.wind.speedApparent',null,now);
+  feedWindInput(engine,'environment.wind.speedApparent',null,now);
   assert.equal(engine.lastAwsReceivedTime,now);
   assert.equal(engine.raw['environment.wind.speedApparent'],null);
  } finally {Date.now=oldNow;}

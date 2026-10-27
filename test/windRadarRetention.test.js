@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');const assert=require('node:assert/strict');
 const {WindEngine}=require('../wind/windEngine');const {historyRetentionMs}=require('../wind/twdHistory');const policy=require('../shared/windDataPolicy.json');
 const start=Date.UTC(2026,9,25,18);const MINUTE=60000;
@@ -9,8 +10,8 @@ test('short 5/10 minute graphs retain the whole radar interval through periodic 
  for(let second=0;second<=1800;second++){
  now=start+second*1000;
  if(second<1780){
- e.processIncomingDelta('environment.wind.speedTrue',(second<600?25:5)/1.94384,now);
- e.processIncomingDelta('environment.wind.directionTrue',second<600?0:1,now);
+ feedWindInput(e,'environment.wind.speedTrue',(second<600?25:5)/1.94384,now);
+ feedWindInput(e,'environment.wind.directionTrue',second<600?0:1,now);
  }
  e.sampleHistory();
  if(second%60===0)e.pruneStaleHistories();

@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const policy=require('../shared/windDataPolicy.json');
@@ -33,13 +34,13 @@ test('server preserves native timestamp and rejects stale native history',()=>{
  try {
   const engine=new WindEngine({debug(){}},()=>({}));const writes=[];
   engine.manageHistory=(type,value)=>writes.push({type,value});
-  engine.processIncomingDelta(TWS,8,now-6000);
+  feedWindInput(engine,TWS,8,now-6000);
   assert.equal(writes.length,0);
   assert.equal(engine.getRawTimes()[TWS],now-6000);
-  engine.processIncomingDelta(AWA,0,now);
-  engine.processIncomingDelta(AWS,4,now);engine.sampleHistory();
+  feedWindInput(engine,AWA,0,now);
+  feedWindInput(engine,AWS,4,now);engine.sampleHistory();
   assert.ok(writes.some(p=>p.type==='tws'&&Math.abs(p.value-4*1.94384)<1e-10));
-  now+=1000;engine.processIncomingDelta(TWS,0,now);engine.sampleHistory();
+  now+=1000;feedWindInput(engine,TWS,0,now);engine.sampleHistory();
   assert.ok(writes.some(p=>p.type==='tws'&&p.value===0));
   assert.equal(engine.getRawTimes()[TWS],now);
  } finally {Date.now=original;}

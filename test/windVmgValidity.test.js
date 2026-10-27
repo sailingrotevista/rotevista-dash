@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const policy=require('../shared/windDataPolicy.json');
@@ -19,12 +20,12 @@ test('server VMG independent of apparent wind and stops when speed expires',()=>
  const original=Date.now;let now=1000000;Date.now=()=>now;
  try {
  const e=new WindEngine({},()=>({}));const values=[];e.manageHistory=(k,v)=>{if(k==='vmg')values.push(v);};
- e.processIncomingDelta(H,3,now);
- e.processIncomingDelta(A,Math.PI,now);e.sampleHistory();
+ feedWindInput(e,H,3,now);
+ feedWindInput(e,A,Math.PI,now);e.sampleHistory();
  assert.ok(Math.abs(values.at(-1)-3*1.94384)<1e-9);
- now+=5000;values.length=0;e.processIncomingDelta(A,Math.PI/2,now);e.sampleHistory();
+ now+=5000;values.length=0;feedWindInput(e,A,Math.PI/2,now);e.sampleHistory();
  assert.equal(values.length,0);
- e.processIncomingDelta(H,0,now);now+=1000;e.sampleHistory();
+ feedWindInput(e,H,0,now);now+=1000;e.sampleHistory();
  assert.equal(values.at(-1),0);
  }finally{Date.now=original;}
 });

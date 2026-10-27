@@ -1,6 +1,6 @@
 # Acquisizione, selezione e derivazione dei sensori
 
-Stato: migrazione della posizione GPS propria collegata il 26 ottobre 2026. SensorDerivedData alimenta WindEngine, quindi AIS, motion tracker e frame condivisi; gli altri sensori mantengono il percorso precedente.
+Stato: migrazione della posizione GPS propria collegata il 26 ottobre 2026. SensorDerivedData alimenta WindEngine, quindi AIS, motion tracker e frame condivisi; la SOG ricevuta è migrata nello stesso flusso; gli altri sensori mantengono il percorso precedente.
 
 ## Confini dei moduli
 
@@ -12,12 +12,12 @@ Signal K (tutte le sorgenti disponibili, frequenza originale)
   → SensorNormalizer
   → snapshot a 1 Hz
   → SensorDerivedData
-  → WindEngine (posizione propria) → AIS / motion tracker / frame → GUI
+  → WindEngine (GPS, SOG e AWS normalizzati) → AIS / motion tracker / frame → GUI
 ```
 
-- [SignalKReceiver](../sensors/SignalKReceiver.js): adattatore di ingresso. Acquisisce posizione propria e contesto opzionale della stessa sorgente: SOG, COG vero, metodo GNSS, integrità, HDOP e satelliti, alla frequenza originale. Inoltra percorso, valore, identità e metadati della sorgente, timestamp originale e istante di ricezione. Non conserva uno storico, non sceglie sorgenti, non media e non attribuisce “adesso” a un timestamp mancante. Le posizioni degli altri target sono escluse.
+- [SignalKReceiver](../sensors/SignalKReceiver.js): adattatore di ingresso. Acquisisce AWS e posizione propria con contesto opzionale della stessa sorgente: SOG, COG vero, metodo GNSS, integrità, HDOP e satelliti, alla frequenza originale. Inoltra percorso, valore, identità e metadati della sorgente, timestamp originale e istante di ricezione. Non conserva uno storico, non sceglie sorgenti, non media e non attribuisce “adesso” a un timestamp mancante. Le posizioni degli altri target sono escluse.
 - [SensorNormalizer](../sensors/SensorNormalizer.js): conserva lo storico breve per sorgente, valida coordinate e tempi, valuta continuità/cadenza, sceglie una sorgente con lock/failover e produce al massimo uno snapshot ogni secondo. Tutte le scelte sono locali al server e in RAM.
-- [SensorDerivedData](../sensors/SensorDerivedData.js): per ora copia lo snapshot GPS senza cambiare valore, validità, sorgente o timestamp. I calcoli e i ripieghi Wind non sono stati trasferiti. Il modulo non invia messaggi Signal K; index trasferisce la sua posizione selezionata allo store Wind.
+- [SensorDerivedData](../sensors/SensorDerivedData.js): per ora copia lo snapshot GPS/SOG/AWS senza cambiare valore, validità, sorgente o timestamp. I calcoli e i ripieghi Wind non sono stati trasferiti. Il modulo non invia messaggi Signal K; index trasferisce la sua posizione selezionata allo store Wind.
 
 La connessione di ingresso è in `index.js`; il timer esistente a 1 Hz elabora il ramo parallelo. Gli errori di questo ramo invalidano la posizione operativa, senza interrompere gli altri sensori. Sottoscrizione propria idempotente e rimossa a stop del plugin. Nessun riavvio o modifica alle configurazioni di Signal K per attivare test automatici.
 
@@ -101,3 +101,68 @@ Lo snapshot contiene sampledAt e measurements['navigation.position']: value, val
 [Test della scadenza dinamica](../test/gpsFreshness.test.js): cadenza AIS di tre minuti, estremi 15 s/4 minuti, riferimento comune, velocità assente, failover, tre componenti, memoria limitata, passaggio della scadenza a Wind/tracker/GUI e orologi client differenti.
 
 [Test del flusso](../test/sensorPipeline.test.js) e [migrazione](../test/normalizedPosition.test.js): ricezione, ordinamento, reset, replay, lock, promozione con nuovi fix e blocco degli ingressi GPS diretti. La disponibilità delle sorgenti e il comportamento in navigazione restano da verificare sui dispositivi. Nessuna pubblicazione o riavvio del Cerbo effettuati da questi test.
+
+## Prima migrazione SOG — 27 ottobre 2026
+
+`SignalKReceiver` acquisisce già navigation.speedOverGround di tutte le sorgenti a frequenza nativa. SensorNormalizer inoltra la SOG sia al contesto GPS sia al nuovo [SogNormalizer](../sensors/sensorNormalizer/SogNormalizer.js). Snapshot comune a 1 Hz e passaggio invariato in SensorDerivedData.
+
+### Controlli e selezione
+
+- Dato ricevuto in m/s, numerico finito fra 0 e 25,72 (limite precedente, circa 50 kn); zero è misurato, null/assenza non diventano zero. Provenienza e timestamp obbligatori, non futuro né già scaduto.
+- Ordinamento per sorgente; duplicati/replay non maturano frequenza, lock o nuove osservazioni. Null allo stesso timestamp revoca il valore; un replay non lo ripristina. Un nuovo valore invalido rende non utilizzabile quella sorgente, senza scegliere un valore inventato.
+- Scadenza SOG invariata a 5 secondi. Nessuna estensione automatica dal timeout GPS, nessuna stima dagli spostamenti, media, filtro di accelerazione o confronto con altre misure in questa fase.
+- Due componenti, pesi configurabili iniziali pari a 50: frequenza e freschezza. Frequenza = min(1,1000/intervallo mediano in ms dei fix distinti validi); beneficio saturato a 1 Hz. Freschezza = max(0,min(1,1−età/5000)). Media pesata normalizzata su 100 delle componenti disponibili; con un solo fix frequenza non disponibile e non inventata.
+- Storico degli istanti: 60 secondi, massimo 120 fix per sorgente, massimo 16 sorgenti, eliminazione dopo 30 minuti senza ricezione. Sono parametri in testa a SogNormalizer.
+- Lock della sorgente corrente utilizzabile. Promozione: almeno 15 punti di vantaggio per 5 secondi, almeno 3 nuovi fix della candidata estesi su almeno 5 secondi. Se la corrente scade/è invalida, failover immediato al tick successivo alla migliore valida. Spareggio iniziale: timestamp più recente, poi identità deterministica; a parità non forzare cambio del lock.
+- Nessuna preferenza automatica per la sorgente scelta dal GPS. Diagnostica tramite getSogSourceDiagnostics: score, frequenza, freschezza, intervallo tipico, età e selezione.
+
+### Distribuzione
+
+WindEngine.applyNormalizedSog riceve il valore da DerivedData tramite index, conserva timestamp e scadenza, espone null se inutilizzabile. Non ripete i controlli fisici del Normalizer: applica il risultato e rispetta expiresAt durante un’interruzione. I calcoli Wind consumano questa stessa SOG risolta, senza un secondo timeout indipendente. WindEngine.processIncomingDelta rifiuta il path SOG; la sottoscrizione legacy del plugin lo esclude e ignora eventuali consegne accidentali. Errori del ramo sensori invalidano sia GPS sia SOG.
+
+AIS legge la SOG propria esclusivamente dallo store Wind alimentato da DerivedData: nessun ripiego su getSelfPath. La selezione SOG dei target AIS esterni non cambia. I frame live/mixed portano normalizedSog e sogMeasurement; la GUI li applica autorevolmente anche quando una riserva ha timestamp meno recente e blocca gli ingressi SOG diretti da websocket dopo l’aggancio alla sessione normalizzata. La simulazione pura resta sintetica; i server precedenti senza flag mantengono il percorso GUI legacy.
+
+Tutti i calcoli Wind, storico SOG, vettori e tracker usano quindi il valore selezionato, mantenendo le attuali scadenze. Il futuro riferimento di SOG calcolata dal GPS e la selezione più potente non sono implementati qui.
+
+Verifiche: [SOG e lock](../test/sogNormalizer.test.js), [storico SOG](../test/windSogValidity.test.js), [integrazione plugin](../test/sensorPipeline.test.js). Nessuna pubblicazione, modifica della modalità del Cerbo o riavvio per queste prove.
+
+## Prima migrazione AWS — 27 ottobre 2026
+
+`environment.wind.speedApparent` segue il medesimo ingresso operativo di GPS e SOG:
+SignalKReceiver (tutte le sorgenti, cadenza originale) → SensorNormalizer →
+[AwsNormalizer](../sensors/sensorNormalizer/AwsNormalizer.js) → snapshot comune a
+1 Hz → SensorDerivedData → WindEngine / frame live e mixed / GUI.
+
+- Valori ricevuti in m/s: numeri finiti fra 0 e 51,44, come il precedente limite AWS.
+  Zero è misurato; null, assenza e valori invalidi non diventano bonaccia.
+- Scadenza a 5 secondi dal timestamp originale. Riletture e tick a 1 Hz non
+  rinnovano il dato. Timestamp mancante, futuro, scaduto e replay sono rifiutati.
+- Selezione indipendente da SOG/GPS: frequenza 50 e freschezza 50, con le stesse
+  formule e regole di lock/failover della SOG sopra descritte. Storico degli
+  istanti 60 secondi / 120 campioni / 16 sorgenti, rimozione dopo 30 minuti.
+- La logica comune di selezione è in
+  [ReceivedSpeedNormalizer](../sensors/sensorNormalizer/ReceivedSpeedNormalizer.js);
+  SogNormalizer e AwsNormalizer dichiarano separatamente percorso, limiti e
+  configurazione. Nessuna media fra sorgenti, correzione o filtro delle raffiche
+  nel normalizer. L'uscita è l'ultimo valore della sorgente selezionata.
+- `applyNormalizedAws` è l'unico ingresso AWS in WindEngine: il percorso delta
+  diretto e la vecchia sottoscrizione sono esclusi. Il motore conserva la scadenza
+  assoluta e la rispetta anche se il produttore si interrompe; AWS risolta alimenta
+  anche TWA/TWS di ripiego e la ponderazione dello storico TWD.
+- I frame espongono `normalizedAws` e `awsMeasurement`, inclusa sorgente,
+  timestamp, età, validità, score e scadenza. In live/mixed la GUI segue la scelta
+  server anche se una riserva ha un timestamp precedente; traduce il tempo in
+  quello locale senza attribuire freschezza al polling. Il websocket AWS diretto
+  non sovrascrive questo ingresso dopo l'aggancio alla sessione normalizzata.
+- La simulazione pura resta sintetica; server precedenti senza flag mantengono
+  la compatibilità GUI. Il dev bridge usa la misura normalizzata fornita dal
+  plugin installato: per provare il selettore nuovo sui sensori reali occorre
+  installare questa versione sul server.
+- Storico AWS/TWS e filtro delle raffiche sostenute rimangono in WindEngine,
+  con campionamento a 1 Hz e formule invariate. Nessun nuovo timestamp AIS.
+
+Verifiche automatiche: [AWS](../test/awsNormalizer.test.js),
+[flusso plugin](../test/sensorPipeline.test.js),
+[raffiche](../test/windGust.test.js),
+[campionamento](../test/windSampling.test.js). La selezione e la variabilità delle
+sorgenti di vento reali restano da osservare dopo l'installazione della beta.

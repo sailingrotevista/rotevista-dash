@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {WindEngine}=require('../wind/windEngine');
@@ -14,19 +15,19 @@ test('AWA observations exist without AWS and stale AWA blocks fallback despite f
  try {
   const engine=new WindEngine({debug(){}},()=>({}));
   const writes=[];engine.manageHistory=(type,val)=>writes.push({type,val});
-  engine.processIncomingDelta('environment.wind.angleApparent',0,now);engine.sampleHistory();
+  feedWindInput(engine,'environment.wind.angleApparent',0,now);engine.sampleHistory();
   assert.equal(engine.rollingAngles.awa.length,1);
   assert.equal(engine.rollingAngles.awa[0].val,0);
   now+=5000;
-  engine.processIncomingDelta('environment.wind.speedApparent',4,now);engine.sampleHistory();
+  feedWindInput(engine,'environment.wind.speedApparent',4,now);engine.sampleHistory();
   assert.equal(writes.some(p=>p.type==='tws'),false);
-  engine.processIncomingDelta('environment.wind.angleApparent',0.5,now);now+=1000;engine.sampleHistory();
+  feedWindInput(engine,'environment.wind.angleApparent',0.5,now);now+=1000;engine.sampleHistory();
   assert.ok(writes.some(p=>p.type==='tws'));
   const count=engine.rollingAngles.awa.length;
   now+=1000;
-  engine.processIncomingDelta('environment.wind.angleApparent',0.5,now-1000);
+  feedWindInput(engine,'environment.wind.angleApparent',0.5,now-1000);
   assert.equal(engine.rollingAngles.awa.length,count);
-  engine.processIncomingDelta('environment.wind.angleApparent',null,now);
+  feedWindInput(engine,'environment.wind.angleApparent',null,now);
   assert.equal(engine.rollingAngles.awa.length,0);
  } finally { Date.now=oldNow; }
 });
