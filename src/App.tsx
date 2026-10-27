@@ -260,6 +260,7 @@ export const App: React.FC = () => {
         onDoubleTap={toggleGraphMode}
       >
         <div className="graph-wrapper">
+          {appView === 'wind' && (
           <Sparkline
             id="stw-graph"
             type="stw"
@@ -270,6 +271,7 @@ export const App: React.FC = () => {
             displayMode="STW"
             isFocused={focusedBox === 'stw'}
           />
+          )}
         </div>
       </DataBox>
 
@@ -287,6 +289,7 @@ export const App: React.FC = () => {
         onSingleTap={handleSogSingleTap}
       >
         <div className="graph-wrapper">
+          {appView === 'wind' && (
           <Sparkline
             id="sog-graph"
             type="sog"
@@ -297,6 +300,7 @@ export const App: React.FC = () => {
             displayMode={displayModeSog}
             isFocused={focusedBox === 'sog'}
           />
+          )}
         </div>
       </DataBox>
 
@@ -448,6 +452,7 @@ export const App: React.FC = () => {
         onDoubleTap={toggleGraphMode}
       >
         <div className="graph-wrapper">
+          {appView === 'wind' && (
           <Sparkline
             id="depth-graph"
             type="depth"
@@ -459,6 +464,7 @@ export const App: React.FC = () => {
             isFocused={focusedBox === 'depth'}
             isNightMode={isNightMode}
           />
+          )}
         </div>
       </DataBox>
 
@@ -476,6 +482,7 @@ export const App: React.FC = () => {
         onSingleTap={handleTwsSingleTap}
       >
         <div className="graph-wrapper">
+          {appView === 'wind' && (
           <Sparkline
             id="tws-graph"
             type="tws"
@@ -487,6 +494,7 @@ export const App: React.FC = () => {
             isFocused={focusedBox === 'tws'}
             isNightMode={isNightMode}
           />
+          )}
         </div>
       </DataBox>
 

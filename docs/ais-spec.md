@@ -172,3 +172,25 @@ Riferimenti: [tracker degli ingressi](../ais/bubbleEntryTracker.js), [politica d
 - Verificare sul campo partenza lenta, jitter da fermi, perdita/ripresa dei dati e incroci con grandi scafi.
 - Non confondere test automatici, replay con posizioni mantenute artificialmente ferme e prove su dati reali in navigazione.
 - L'affidabilità della previsione resta limitata dalla qualità e dall'età dei dati AIS disponibili.
+
+
+## Rendering incrementale del poligono delle aree
+
+La GUI conserva un poligono Leaflet per identificativo di area. Un nuovo elenco
+ricevuto non ricrea il poligono se contorno e stile sono invariati; distanza da
+own ship, conteggio, centro dell'etichetta e altri metadati non ne invalidano la
+geometria. Contorno modificato: setLatLngs sullo stesso oggetto; tipo area o
+modalità notte modificati: setStyle. Nuove aree aggiunte, aree rimosse o prive di
+un contorno valido eliminate; registro svuotato alla distruzione della mappa.
+
+Anche le etichette PORT/Anchorage/Rest area conservano un marker per area.
+Posizione modificata: setLatLng sul marker esistente. Conteggio o tipo modificato:
+setIcon soltanto quando cambia il contenuto visibile. Polling invariato, distanza,
+contorno e altri metadati non ricreano il marker o la sua icona. Aspetto, blur,
+ombra, dimensioni e ancoraggio restano invariati. Registri rimossi insieme alla
+mappa; aree eliminate o senza contorno valido rilasciano anche l’etichetta.
+Nessuna modifica a rilevamento aree, collisioni o movimento della mappa. Un paint
+del browser causato da elementi sovrapposti non implica che il poligono venga
+ricreato. Verifica della stabilità degli oggetti e delle chiamate Leaflet in
+[test/harborPolygons.test.js](../test/harborPolygons.test.js) e
+[test/harborBadges.test.js](../test/harborBadges.test.js).

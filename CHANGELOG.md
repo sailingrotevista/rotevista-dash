@@ -1,6 +1,16 @@
 # Changes
 
-## Unreleased
+## 9.6.0-beta.9 — 2026-10-27
+
+- Separate memoized chart grids, depth threshold lines and scale labels from the moving trace, retaining layout, thresholds and chart formulas.
+
+- Unmount the four Wind sparklines while AIS is visible, stopping hidden SVG updates and chart timers while preserving data collection/history. Reopen Wind with current history and clock.
+
+- Keep harbor badges and icons across unchanged refreshes; update position only when the area centre changes and icon only when visible content changes. Preserve appearance and blur.
+
+- Keep harbor map polygons alive across refreshed area lists; update geometry/style only when changed and remove only departed areas.
+
+## Changes included through 9.6.0-beta.8
 
 - Normalize received AWA, native TWA/TWD, COG and true/magnetic heading through source selection at 1 Hz, preserving source time and 5-second expiry. Route shared clients and AIS wind/navigation context through selected inputs, with existing heading/WMM priorities.
 - Move VMG calculation from WindEngine into SensorDerivedData with input provenance and dependency deadlines. Wind records the result, shared clients display it and pure shared simulation uses the same derivation. Preserve the existing formula and fallback rules.

@@ -416,6 +416,27 @@ body.night-mode .alarm-danger {
     background: transparent !important;
 }
 
+/* Independent SVG roots keep the fixed grid out of the trace update tree. */
+.sparkline-plot {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    isolation: isolate;
+}
+.sparkline-plot > .sparkline-grid,
+.sparkline-plot > .sparkline-trace {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    contain: layout paint;
+}
+.sparkline-grid { z-index: 0; }
+.sparkline-trace { z-index: 1; }
+
 .graph-wrapper polygon {
     shape-rendering: geometricPrecision;
 }
@@ -446,7 +467,7 @@ body.night-mode .alarm-danger {
 }
 
 /* --- COLONNA SINISTRA (STW, SOG): Scala a DX del grafico, allineata a destra a filo con 'kts' --- */
-.box-stw .sparkline, .box-sog .sparkline { order: 1; }
+.box-stw .sparkline-plot, .box-sog .sparkline-plot { order: 1; }
 .box-stw .scale-labels, .box-sog .scale-labels {
     order: 2;
     text-align: right;
@@ -461,7 +482,7 @@ body.night-mode .alarm-danger {
     padding-left: 4px;
     padding-right: 3px;
 }
-.box-depth .sparkline, .box-tws .sparkline { order: 2; }
+.box-depth .sparkline-plot, .box-tws .sparkline-plot { order: 2; }
 
 /* --- REGOLE HERCULES (Zoom) --- */
 .box-hercules { background: rgba(255, 0, 0, 0.05) !important; }
@@ -649,8 +670,8 @@ body.night-mode,
     border: 1px solid #330000;
 }
 
-.night-mode .sparkline line[stroke="rgba(0,0,0,0.12)"],
-.night-mode .sparkline line[stroke="rgba(0,0,0,0.08)"] {
+.night-mode .sparkline-grid line[stroke="rgba(0,0,0,0.12)"],
+.night-mode .sparkline-grid line[stroke="rgba(0,0,0,0.08)"] {
     stroke: rgba(255, 0, 0, 0.1) !important;
 }
 

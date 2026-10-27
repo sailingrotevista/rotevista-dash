@@ -333,3 +333,32 @@ La formula abs(speed*cos(TWA)), la scelta STW/SOG e il ripiego angolare
 AWS/AWA restano invariati. Il campionamento a 1 Hz gestisce soltanto lo storico.
 La GUI usa vmgMeasurement nei frame autorevoli, con compatibilità legacy per
 server precedenti; la simulazione condivisa usa lo stesso derivatore server.
+
+
+### Grafici nascosti durante AIS
+
+I quattro componenti Sparkline (STW, SOG/VMG, depth, TWS/AWS) sono montati soltanto
+quando appView è wind. Entrando in AIS vengono smontati, eliminando i rispettivi
+timer a 1 Hz, listener focus/visibilitychange e gli elementi SVG nascosti.
+L'acquisizione, il campionamento e lo storico in useDashboard/server continuano:
+non viene sospeso o svuotato alcun buffer dati. Al ritorno su Wind i componenti
+ricevono le serie correnti e inizializzano il proprio orologio con Date.now(),
+senza riprodurre aggiornamenti arretrati. Modi, scale e selezioni restano nello
+stato della dashboard; il layout dei contenitori non cambia.
+
+
+### Separazione della griglia dalla traccia dei grafici
+
+Ogni Sparkline ha due radici SVG sovrapposte, con viewBox e dimensioni identici:
+la griglia/soglie sotto e la curva/riempimento sopra, nello stesso ordine visivo
+precedente. SparklineGrid è memoizzato e riceve solo durata visibile, coordinate
+delle soglie e stato focus; il clock e i dati della curva non ne fanno parte.
+SparklineScale è separato e memoizzato su tipo/min/max. Tacche, colori, spessori,
+tratteggi, posizione delle scale e formule di scala restano invariati.
+
+La durata della finestra aggiorna la griglia verticale; scala e soglie aggiornano
+le linee della profondità; il focus ne aggiorna gli spessori. La traccia resta a
+1 Hz e conserva buchi, gradienti e colori. Il contenitore segue il layout CSS
+senza timer aggiuntivi. La separazione riduce il lavoro di aggiornamento React
+sulla parte fissa; un paint del browser può ancora includere aree sovrapposte e
+va verificato separatamente nel monitor rendering.

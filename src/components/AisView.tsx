@@ -1,3 +1,5 @@
+import { syncHarborBadges } from '../utils/harborBadges.mjs';
+import { syncHarborPolygons } from '../utils/harborPolygons.mjs';
 import { getAisAgeVisual } from '../utils/aisAgeVisual.mjs';
 import { copyText } from '../utils/clipboard.mjs';
 import { formatAge, displayCpa, formatAisSpeed } from '../utils/aisDetailData.mjs';
@@ -130,6 +132,8 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const ringsLayerRef = useRef<L.LayerGroup | null>(null);
   const clustersLayerRef = useRef<L.LayerGroup | null>(null);
+  const harborPolygonsRef = useRef<Map<string, {layer:L.Polygon;geometryKey:string;styleKey:string}>>(new Map());
+  const harborBadgesRef = useRef<Map<string, {layer:L.Marker;positionKey:string;contentKey:string}>>(new Map());
   const ownShipMarkerRef = useRef<L.Marker | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const listBodyRef = useRef<HTMLDivElement | null>(null);
@@ -475,6 +479,9 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
       mapEl?.removeEventListener('touchstart', handleTouchInteraction);
       resizeObserver.disconnect();
       map.remove();
+      harborPolygonsRef.current.clear();
+      harborBadgesRef.current.clear();
+      clustersLayerRef.current = null;
       mapRef.current = null;
       smoothMarkersRef.current = {};
     };
@@ -961,37 +968,10 @@ export const AisView: React.FC<AisViewProps> = React.memo(({
   // Render Harbor Clusters Hulls
   useEffect(() => {
     if (!isActive || !clustersLayerRef.current) return;
-    clustersLayerRef.current.clearLayers();
-
-    harborClusters.forEach(cluster => {
-      if (cluster.hull && cluster.hull.length >= 3) {
-        const isAnchorage = cluster.kind === 'ANCHORAGE';
-        const isProvisional = cluster.kind === 'PROVISIONAL';
-        const areaLabel = isAnchorage ? 'Anchorage' : isProvisional ? 'Rest area' : 'Port';
-        const areaColor = isAnchorage ? '#f59e0b' : isProvisional ? '#94a3b8' : '#38bdf8';
-        const polygon = L.polygon(cluster.hull, {
-          color: areaColor,
-          weight: 1.2,
-          dashArray: '5, 6',
-          fillColor: areaColor,
-          fillOpacity: isNightMode ? 0.12 : 0.08,
-          interactive: false,
-        });
-        clustersLayerRef.current?.addLayer(polygon);
-
-        const centerPt: [number, number] = cluster.center || [cluster.lat, cluster.lon];
-        const badgeMarker = L.marker(centerPt, {
-          icon: L.divIcon({
-            className: 'harbor-cluster-badge-marker',
-            html: `<div style="background:rgba(15,23,42,0.88);backdrop-filter:blur(8px);border:1px solid rgba(56,189,248,0.45);border-radius:8px;padding:2px 7px;font-size:9.5px;font-weight:900;font-family:monospace;color:${areaColor};box-shadow:0 4px 12px rgba(0,0,0,0.6);white-space:nowrap;display:inline-flex;align-items:center;gap:4px;pointer-events:none;text-transform:uppercase;"><span>${isAnchorage ? '⚓' : isProvisional ? '◌' : '🏛️'}</span><span>${areaLabel} (${cluster.count})</span></div>`,
-            iconSize: [96, 22],
-            iconAnchor: [48, 11],
-          }),
-          interactive: false,
-        });
-        clustersLayerRef.current?.addLayer(badgeMarker);
-      }
-    });
+    syncHarborPolygons(harborPolygonsRef.current, clustersLayerRef.current, harborClusters, isNightMode,
+      (hull, options) => L.polygon(hull, options));
+    syncHarborBadges(harborBadgesRef.current, clustersLayerRef.current, harborClusters,
+      (position, options) => L.marker(position, options), options => L.divIcon(options));
   }, [isActive, harborClusters, isNightMode]);
 
   // Render Own Ship & AIS Target Markers

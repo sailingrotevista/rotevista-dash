@@ -88,7 +88,7 @@ npm run lint
 npm run build
 ```
 
-Beta releases use `npm publish --tag beta`.
+Beta releases use `npm publish --tag beta`; stable production releases use `npm publish --tag latest`.
 
 ## Specifications
 
@@ -96,7 +96,7 @@ Implementation details and agreed behavior are documented separately:
 
 - [Project structure and module responsibilities](docs/project-structure.md)
 
-- [Sensor pipeline: shared own GPS selection](docs/sensor-pipeline-spec.md)
+- [Sensor pipeline: source selection, normalization and derived values](docs/sensor-pipeline-spec.md)
 - [Wind calculations, validity and history](docs/wind-spec.md)
 - [AIS collision evaluation and alerts](docs/ais-spec.md)
 - [Target motion tracking](docs/motion-tracker-spec.md)

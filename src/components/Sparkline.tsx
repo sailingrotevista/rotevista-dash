@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { SparklineGrid, SparklineScale } from './SparklineFrame';
 import { graphViewport } from '../utils/graphViewport.mjs';
 import { HistoryPoint, AppConfig, GraphMode } from '../types';
 
@@ -164,17 +165,6 @@ export const Sparkline: React.FC<SparklineProps> = React.memo(({
     return { color, opacity, stroke };
   };
 
-  // Horizontal gridlines
-  const horizontalGridY = [0.25, 0.5, 0.75].map(p => h - p * h);
-
-  // Vertical time gridlines (passo divisibile proporzionale alla durata totale)
-  const gridInterval =
-    visibleMinutes <= 10 ? 1 : visibleMinutes <= 30 ? 5 : visibleMinutes <= 60 ? 10 : 20;
-  const verticalGridX: number[] = [];
-  for (let m = gridInterval; m < visibleMinutes; m += gridInterval) {
-    verticalGridX.push(w - (m / visibleMinutes) * w);
-  }
-
   // Depth warning and danger lines
   const dangerY =
     isDepth && config.alarms.depthDanger >= min && config.alarms.depthDanger <= max
@@ -184,7 +174,6 @@ export const Sparkline: React.FC<SparklineProps> = React.memo(({
     isDepth && config.alarms.depthWarning >= min && config.alarms.depthWarning <= max
       ? h - ((config.alarms.depthWarning - min) / range) * h
       : null;
-  const alarmStrokeWidth = isFocused ? '4.8' : '1.8';
 
   // 3. CURVE AND AREA GEOMETRY GENERATION
   const { lineElements, areaPath, gradientStops } = useMemo(() => {
@@ -261,80 +250,25 @@ export const Sparkline: React.FC<SparklineProps> = React.memo(({
 
   return (
     <>
-      <div className="scale-labels" id={`${type}-scale`}>
-        <span>{Math.round(max)}</span>
-        <span>{Math.round((min + max) / 2)}</span>
-        <span>{Math.round(min)}</span>
+      <SparklineScale type={type} min={min} max={max} />
+      <div className="sparkline-plot">
+        <SparklineGrid id={id} visibleMinutes={visibleMinutes} dangerY={dangerY} warningY={warningY} isFocused={isFocused} />
+        <svg className="sparkline sparkline-trace" id={id} viewBox="0 0 200 40" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2={w} y2="0" gradientUnits="userSpaceOnUse">
+              {gradientStops.map((stop, idx) => (
+                <stop key={idx} offset={`${stop.offset}%`} stopColor={stop.color} stopOpacity={stop.opacity} />
+              ))}
+            </linearGradient>
+          </defs>
+
+          {/* Gradient fill area */}
+          {areaPath && <path d={areaPath} fill={`url(#${gradId})`} stroke="none" />}
+
+          {/* Sparkline segments */}
+          {lineElements}
+        </svg>
       </div>
-      <svg className="sparkline" id={id} viewBox="0 0 200 40" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2={w} y2="0" gradientUnits="userSpaceOnUse">
-            {gradientStops.map((stop, idx) => (
-              <stop key={idx} offset={`${stop.offset}%`} stopColor={stop.color} stopOpacity={stop.opacity} />
-            ))}
-          </linearGradient>
-        </defs>
-
-        {/* Horizontal gridlines */}
-        {horizontalGridY.map((y, i) => (
-          <line
-            key={`hg-${i}`}
-            x1="0"
-            y1={y}
-            x2={w}
-            y2={y}
-            stroke="rgba(0,0,0,0.12)"
-            strokeWidth="0.5"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-
-        {/* Vertical time gridlines */}
-        {verticalGridX.map((x, i) => (
-          <line
-            key={`vg-${i}`}
-            x1={x}
-            y1="0"
-            x2={x}
-            y2={h}
-            stroke="rgba(0,0,0,0.08)"
-            strokeWidth="0.4"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-
-        {/* Depth warning and danger lines */}
-        {dangerY !== null && (
-          <line
-            x1="4"
-            y1={dangerY}
-            x2={w - 4}
-            y2={dangerY}
-            stroke="rgba(255, 59, 48, 0.95)"
-            strokeWidth={alarmStrokeWidth}
-            strokeDasharray="12, 6, 2, 6"
-            vectorEffect="non-scaling-stroke"
-          />
-        )}
-        {warningY !== null && (
-          <line
-            x1="4"
-            y1={warningY}
-            x2={w - 4}
-            y2={warningY}
-            stroke="rgba(255, 204, 0, 0.95)"
-            strokeWidth={alarmStrokeWidth}
-            strokeDasharray="6, 2, 6, 12"
-            vectorEffect="non-scaling-stroke"
-          />
-        )}
-
-        {/* Gradient fill area */}
-        {areaPath && <path d={areaPath} fill={`url(#${gradId})`} stroke="none" />}
-
-        {/* Sparkline segments */}
-        {lineElements}
-      </svg>
     </>
   );
 });
