@@ -362,3 +362,4 @@ le linee della profondità; il focus ne aggiorna gli spessori. La traccia resta 
 senza timer aggiuntivi. La separazione riduce il lavoro di aggiornamento React
 sulla parte fissa; un paint del browser può ancora includere aree sovrapposte e
 va verificato separatamente nel monitor rendering.
+
