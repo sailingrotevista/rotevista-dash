@@ -64,7 +64,7 @@ test('Normalizer rejects invalid coordinates, missing provenance, old reports, f
     const normalizer = new SensorNormalizer();
     assert.equal(normalizer.ingest(event('gps', 0)), true);
     for (const sample of [
-        event('gps', 0), event('gps', -1), event('backup', 0, position, 5000),
+        event('gps', 0), event('gps', -1), event('backup', 0, position, 240000),
         event('backup', 1, position, 0), { ...event('backup', 0), timestamp:null },
         { ...event('backup', 0), source:null }, { ...event('backup', 0), receivedAt:NaN },
         { ...event('backup', 0), path:'navigation.speedOverGround' },
@@ -102,11 +102,11 @@ test('snapshot is capped at 1Hz and preserves the latest chosen real fix; repeat
     assert.deepEqual(result,second);
     result.measurements[path].value.longitude=0;
     assert.equal(derived.getSnapshot().measurements[path].value.longitude,position.longitude);
-    assert.equal(gps(normalizer.tick(origin+5500)).value,null);
-    assert.equal(gps(normalizer.tick(origin+6500)).status,'STALE');
+    assert.deepEqual(gps(normalizer.tick(origin+5500)).value,position);
+    assert.equal(gps(normalizer.tick(origin+240400)).status,'STALE');
 });
 
-test('initial selection favors direct GNSS over AIS and never averages positions from different sources', () => {
+test('initial equal-score selection is deterministic without rewarding GNSS type over AIS and never averages positions from different sources', () => {
     const normalizer = new SensorNormalizer();
     normalizer.ingest(event('yacht_device.AI',0,reserve,0,aisInfo));
     normalizer.ingest(event('direct.GP',0,position,0,info));
@@ -129,7 +129,7 @@ test('a healthy lock does not alternate between equal GPS sources as their repor
 });
 
 test('failover needs a fresh backup and silent sources do not become fresh at the next tick', () => {
-    const normalizer = new SensorNormalizer();
+    const normalizer = new SensorNormalizer({maxAgeMs:5000});
     normalizer.ingest(event('primary.GP',0,position,0,info));normalizer.tick(origin);
     normalizer.ingest(event('backup.AI',4000,reserve,4000,aisInfo));
     assert.equal(gps(normalizer.tick(origin+4000)).source,'primary.GP');
@@ -148,6 +148,8 @@ test('return to a preferred source requires sustained real fixes rather than rep
     for (let second=1;second<=6;second++) {
         normalizer.ingest(event('backup.AI',second*1000,reserve,second*1000,aisInfo));
         normalizer.ingest(event('direct.GP',second*1000,position,second*1000,info));
+        normalizer.ingest({...event('backup.AI',second*1000),path:'navigation.gnss.methodQuality',value:'manual input'});
+        normalizer.ingest({...event('direct.GP',second*1000),path:'navigation.gnss.methodQuality',value:'rtk fixed integer'});
         const m=gps(normalizer.tick(origin+second*1000));
         assert.equal(m.source,second<6?'backup.AI':'direct.GP');
         if (second===6) assert.equal(m.selectionReason,'PREFERRED_SOURCE');
@@ -268,9 +270,9 @@ test('score exposes independent historical contributions without inventing GNSS 
     assert.equal(gps(normalizer.tick(origin+5000)).sourceScore,100);
     const later=normalizer.getSourceDiagnostics(origin+6000)[0];
     assert.equal(later.metrics.observationCount,6);
-    assert.equal(later.components.regularity.points,assessment.components.regularity.points);
+    assert.deepEqual(Object.keys(later.components),['freshness','coherence','declaredQuality']);
     assert.equal(later.components.coherence.factor,1);
-    assert.equal(normalizer.getSourceDiagnostics(origin+10000)[0].score,null,'an expired source cannot win on a good historical score');
+    assert.equal(normalizer.getSourceDiagnostics(origin+245000)[0].score,null,'an expired source cannot win on a good historical score');
 });
 
 test('a GPS faster than 1Hz gets no extra score compared with an equally regular 1Hz source', () => {
@@ -281,10 +283,10 @@ test('a GPS faster than 1Hz gets no extra score compared with an equally regular
     }
     const rows=normalizer.getSourceDiagnostics(origin+5000);
     assert.equal(rows.find(row=>row.source==='fast.GP').score,rows.find(row=>row.source==='steady.GP').score);
-    assert.equal(rows[0].components.frequency.factor,1);
+    assert.equal(rows[0].components.frequency,undefined);
 });
 
-test('an isolated long outage reduces regularity even when most source intervals are perfect', () => {
+test('regularity remains diagnostic but no longer contributes a separate score', () => {
     const normalizer=new SensorNormalizer();
     for(let ms=0;ms<=10000;ms+=1000) {
         normalizer.ingest(event('steady.GP',ms,position,ms,info));
@@ -294,9 +296,10 @@ test('an isolated long outage reduces regularity even when most source intervals
     const regular=rows.find(row=>row.source==='steady.GP');
     const interrupted=rows.find(row=>row.source==='interrupted.GP');
     assert.equal(interrupted.metrics.typicalIntervalMs,1000);
-    assert.equal(interrupted.components.regularity.points,0);
-    assert.ok(regular.score>interrupted.score);
-    assert.equal(gps(normalizer.tick(origin+10000)).source,'steady.GP');
+    assert.ok(interrupted.metrics.intervalVariationRatio>0);
+    assert.equal(interrupted.components.regularity,undefined);
+    assert.equal(regular.score,interrupted.score);
+    assert.equal(gps(normalizer.tick(origin+10000)).source,'interrupted.GP');
 });
 
 test('fresh recovered positions retain penalties for recent invalid fixes and jumps until history expires', () => {
@@ -311,19 +314,19 @@ test('fresh recovered positions retain penalties for recent invalid fixes and ju
     assert.equal(before.eligible,true);
     assert.equal(before.metrics.jumpRejections,5);
     assert.equal(before.metrics.rejectedFixes,5);
-    assert.ok(before.components.coherence.points<20);
+    assert.ok(before.components.coherence.factor<1);
     assert.equal(gps(normalizer.tick(origin+5000)).source,'steady.GP');
     assert.equal(normalizer.ingest(event('erratic.GP',5000,position,6000,info)),false);
     const replay=normalizer.getSourceDiagnostics(origin+6000).find(row=>row.source==='erratic.GP');
     assert.equal(replay.metrics.observationCount,before.metrics.observationCount);
     assert.equal(replay.components.coherence.points,before.components.coherence.points);
-    normalizer.ingest(event('erratic.GP',70000,position,70000,info));
-    const recovered=normalizer.getSourceDiagnostics(origin+70000).find(row=>row.source==='erratic.GP');
+    normalizer.ingest(event('erratic.GP',910000,position,910000,info));
+    const recovered=normalizer.getSourceDiagnostics(origin+910000).find(row=>row.source==='erratic.GP');
     assert.equal(recovered.metrics.rejectedFixes,0);
     assert.equal(recovered.components.coherence.factor,1);
 });
 
-test('historical reception delay lowers the source score independently of current fix age', () => {
+test('reception delay is diagnostic without duplicating the freshness score', () => {
     const normalizer=new SensorNormalizer();
     const arrivals=[];
     for(let ms=0;ms<=5000;ms+=1000) {
@@ -335,20 +338,20 @@ test('historical reception delay lowers the source score independently of curren
     const fast=rows.find(row=>row.source==='on-time.GP'),slow=rows.find(row=>row.source==='delayed.GP');
     assert.equal(fast.metrics.ageMs,slow.metrics.ageMs);
     assert.equal(slow.metrics.meanLatencyMs,2000);
-    assert.ok(fast.components.latency.points>slow.components.latency.points);
-    assert.ok(fast.score>slow.score);
-    assert.equal(gps(normalizer.tick(origin+7000)).source,'on-time.GP');
+    assert.equal(fast.components.latency,undefined);
+    assert.equal(fast.score,slow.score);
+    assert.equal(gps(normalizer.tick(origin+7000)).source,'delayed.GP');
 });
 
 test('score weights can be inspected and tuned without confusing unknown quality with bad quality', () => {
-    const weights={sourceType:0,frequency:0,regularity:0,freshness:0,latency:0,coherence:100};
+    const weights={freshness:0,coherence:100,declaredQuality:0};
     const normalizer=new SensorNormalizer({},weights);
     normalizer.ingest(event('unknown',0));
     const row=normalizer.getSourceDiagnostics(origin)[0];
     assert.equal(row.score,100);
     assert.equal(row.declaredGpsQuality.available,false);
-    assert.equal(row.components.regularity.available,false);
-    assert.equal(row.components.regularity.factor,null);
+    assert.equal(row.components.declaredQuality.available,false);
+    assert.equal(row.components.declaredQuality.factor,null);
     assert.throws(()=>new SensorNormalizer({},{coherence:-1}));
     assert.throws(()=>new SensorNormalizer({},{unrecognized:10}));
 });

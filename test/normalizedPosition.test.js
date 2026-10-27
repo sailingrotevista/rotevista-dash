@@ -18,7 +18,7 @@ test('receiver-normalizer-derived GPS reaches Wind once per tick and expires wit
  const apply=t=>{const snapshot=n.tick(t);if(snapshot)e.applyNormalizedPosition(d.process(snapshot).measurements[path],t);};
  apply(now);assert.deepEqual(e.getRaw()[path],{latitude:36,longitude:14});
  apply(now+1000);assert.equal(e.getRawTimes()[path],now);
- apply(now+5000);assert.equal(e.getRaw()[path],null);assert.equal(e.getRawTimes()[path],now);
+ apply(now+240000);assert.equal(e.getRaw()[path],null);assert.equal(e.getRawTimes()[path],now);
 });
 test('browser applies authoritative backup and null reset even with an older GPS timestamp',async()=>{
  const {applyNormalizedSessionPosition}=await import('../src/utils/measurementReset.mjs');

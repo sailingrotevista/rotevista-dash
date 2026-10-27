@@ -118,7 +118,7 @@ Prima del prossimo rilascio verificare visivamente le ultime modifiche al popup 
 ## Dati della propria barca nella vista AIS
 
 - Risolvere la prua come Wind: magnetica + WMM, poi vera ricevuta, infine COG con SOG sufficiente. Non leggere direttamente la sola prua vera. Preservare 0° come misura valida.
-- Posizione, prua, COG e SOG scadono indipendentemente dopo 5 secondi dal rispettivo timestamp sorgente; nessun dato mancante diventa zero. STW non sostituisce SOG nel vettore geografico.
+- La posizione GPS usa la scadenza assoluta del Normalizer (50 m, minimo 15 secondi, massimo 4 minuti); prua, COG e SOG mantengono la scadenza indipendente di 5 secondi dal rispettivo timestamp sorgente; nessun dato mancante diventa zero. STW non sostituisce SOG nel vettore geografico.
 - Prima di un fix GPS non disegnare un'icona della propria barca alle coordinate iniziali della mappa. La posizione iniziale è solo un centro di presentazione.
 - Alla scadenza GPS conservare l'ultima posizione nota come punto grigio con indicazione GPS stale, senza vettori, ghost o cerchi centrati sulla propria barca. Sospendere inseguimento e triangolo di collisione basati su quella posizione; resta possibile ispezionare un target.
 - Con posizione valida ma prua non disponibile usare un punto senza orientamento. I vettori richiedono posizione, COG e SOG validi.

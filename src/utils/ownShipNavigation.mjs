@@ -1,3 +1,4 @@
+import { gpsPositionFresh } from './gpsPositionValidity.mjs';
 import { freshAwa, freshBoatSpeed, resolveHeading } from './windValidity.mjs';
 
 export function validOwnPosition(value) {
@@ -5,11 +6,9 @@ export function validOwnPosition(value) {
     Number.isFinite(value.longitude) && Math.abs(value.longitude) <= 180;
 }
 
-export function resolveOwnShipNavigation(raw, times, now, policy) {
+export function resolveOwnShipNavigation(raw, times, now, policy, positionExpiresAt) {
   const p = raw['navigation.position'];
-  const age = now - times['navigation.position'];
-  const position = validOwnPosition(p) && Number.isFinite(times['navigation.position']) &&
-    age >= 0 && age < policy.positionMaxAgeMs ? {lat:p.latitude,lon:p.longitude} : null;
+  const position = validOwnPosition(p) && gpsPositionFresh(times['navigation.position'],now,positionExpiresAt,policy.positionMaxAgeMs) ? {lat:p.latitude,lon:p.longitude} : null;
   const heading = resolveHeading(raw, times, now, policy);
   const cog = freshAwa(raw['navigation.courseOverGroundTrue'], times['navigation.courseOverGroundTrue'], now, policy.headingMaxAgeMs);
   const sog = freshBoatSpeed(raw['navigation.speedOverGround'], times['navigation.speedOverGround'], now, policy.boatSpeedMaxAgeMs);

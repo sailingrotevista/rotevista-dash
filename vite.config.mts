@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { installDashboardDev } = require(process.cwd() + '/dashboardDevServer.js');
+const devServerModule = process.cwd() + '/dashboardDevServer.js';
+// Vite config reloads must also reload the CommonJS dev bridge.
+delete require.cache[require.resolve(devServerModule)];
+const { installDashboardDev } = require(devServerModule);
 import react from '@vitejs/plugin-react';
 import http from 'node:http';
 import https from 'node:https';

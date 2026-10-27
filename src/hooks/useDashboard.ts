@@ -459,6 +459,7 @@ export function useDashboard() {
   const storeRef = useRef({
     raw: {} as Record<string, any>,
     timestamps: {} as Record<string, number>,
+    positionExpiresAt: undefined as number | null | undefined,
     smoothBuf: {
       hdg: [] as AngleBufferItem[],
       cog: [] as AngleBufferItem[],
@@ -1020,7 +1021,7 @@ export function useDashboard() {
           for (const [path, value] of Object.entries(frame.raw || {})) {
             const sourceTime = frame.rawTimes?.[path];
             if (path === 'navigation.position' && frame.normalizedPosition === true) {
-              applyNormalizedSessionPosition(storeRef.current, value, sourceTime, frame.serverNow, Date.now());
+              applyNormalizedSessionPosition(storeRef.current, value, sourceTime, frame.serverNow, Date.now(), frame.positionMeasurement?.expiresAt);
               continue;
             }
             const signature = JSON.stringify(value);
@@ -2104,7 +2105,7 @@ export function useDashboard() {
           : { text: nextStatusText, className: nextStatusClass }
       );
 
-      const navigation = resolveOwnShipNavigation(store.raw, store.timestamps, now, windDataPolicy);
+      const navigation = resolveOwnShipNavigation(store.raw, store.timestamps, now, windDataPolicy, store.positionExpiresAt);
       const previousPosition = latestAisRef.current.pos;
       const nextPosition: OwnShipPosition = navigation.position
         ? {...navigation.position,valid:true,hasFix:true}

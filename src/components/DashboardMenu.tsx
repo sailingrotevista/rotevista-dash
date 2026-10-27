@@ -46,6 +46,7 @@ export function DashboardMenu() {
           </button>
         </div>
         {error && <p role="alert">{error}</p>}
+        <p><a href="?gpsDebug=1">Own GPS debug</a></p>
         <p className="dashboard-menu-hint">Mode changes affect all devices on this server. Layout debug applies only to this screen.</p>
       </div>
     </main>

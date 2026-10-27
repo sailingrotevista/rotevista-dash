@@ -6,7 +6,7 @@ const paths = [
  'navigation.speedThroughWater', 'navigation.speedOverGround', 'navigation.headingTrue',
  'navigation.headingMagnetic', 'navigation.courseOverGroundTrue', 'environment.depth.belowTransducer',
  'environment.wind.speedTrue', 'environment.wind.directionTrue', 'environment.wind.angleTrueWater',
- 'environment.wind.angleApparent', 'environment.wind.speedApparent', 'navigation.position',
+ 'environment.wind.angleApparent', 'environment.wind.speedApparent',
 ];
 const valueFor = path => path === 'navigation.position' ? {latitude:36,longitude:14} : 1;
 function engine() {

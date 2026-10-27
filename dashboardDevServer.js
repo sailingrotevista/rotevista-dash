@@ -1,5 +1,6 @@
 'use strict';
 const http=require('http');
+const LIVE_REFRESH_MS = 1000;
 const {DashboardSession,registerDashboardRoutes}=require('./session/dashboardSession');
 
 function getJson(path) {
@@ -45,7 +46,7 @@ function installDashboardDev(server) {
     });
     void refresh();
     const timer=setInterval(()=>{if(!disposed)session.tick();},1000);
-    const refreshTimer=setInterval(()=>{void refresh();},3000);
+    const refreshTimer=setInterval(()=>{void refresh();},LIVE_REFRESH_MS);
     const close=()=>{disposed=true;clearInterval(timer);clearInterval(refreshTimer);};
     server.httpServer?.once('close',close);
     return {session,close};

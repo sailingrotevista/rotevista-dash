@@ -1,3 +1,4 @@
+const { gpsPositionFresh } = require('../shared/gpsPositionValidity');
 /**
  * ==========================================================================
  * Rotevista Dash - Wind, Telemetry & Forecast Engine
@@ -83,9 +84,9 @@ class WindEngine {
     // TODO: antenna offsets remain uncompensated when the selected source changes.
     applyNormalizedPosition(measurement, now = Date.now()) {
         this.normalizedPositionManaged = true;
+        this.positionMeasurement = measurement ? { ...measurement, value:measurement.value ? {...measurement.value} : null } : null;
         const value = measurement?.value, time = measurement?.timestamp;
-        const valid = measurement?.valid === true && Number.isFinite(time) && time <= now &&
-            now-time < windDataPolicy.positionMaxAgeMs && value &&
+        const valid = measurement?.valid === true && gpsPositionFresh(time, now, measurement?.expiresAt, windDataPolicy.positionMaxAgeMs) && value &&
             Number.isFinite(value.latitude) && Math.abs(value.latitude) <= 90 &&
             Number.isFinite(value.longitude) && Math.abs(value.longitude) <= 180;
         this.raw['navigation.position'] = valid ? { ...value } : null;
@@ -101,6 +102,8 @@ class WindEngine {
             this.fetchOpenMeteoForecast(value, current30mSlot);
         }
     }
+
+    getPositionMeasurement() { return this.positionMeasurement ? { ...this.positionMeasurement } : null; }
 
     getRaw() {
         return this.raw;
@@ -131,8 +134,9 @@ class WindEngine {
      * sampleHistory esegue il campionamento comune a tutti i canali una volta al secondo.
      */
     processIncomingDelta(path, val, sourceTimestamp) {
+        // Own position has one entry point: the measurement emitted by DerivedData.
+        if (path === 'navigation.position') return;
         const sourceFields = {
-            'navigation.position': 'positionSourceTime',
             'environment.depth.belowTransducer': 'depthSourceTime',
             'environment.wind.speedTrue': 'lastNativeTwsTime',
             'environment.wind.directionTrue': 'lastNativeTwdTime',
@@ -151,10 +155,7 @@ class WindEngine {
             if (Number.isFinite(previousTime) && (time < previousTime ||
                 (time === previousTime && (val !== null || this.raw[path] === null)))) return;
             if (val !== null) {
-                if (path === 'navigation.position') {
-                    if (!val || !Number.isFinite(val.latitude) || Math.abs(val.latitude) > 90 ||
-                        !Number.isFinite(val.longitude) || Math.abs(val.longitude) > 180) return;
-                } else {
+                {
                     if (!Number.isFinite(val)) return;
                     if (path === 'environment.depth.belowTransducer') {
                         if (val < -2 || val > 500) return;
@@ -187,11 +188,6 @@ class WindEngine {
         const raw = this.raw;
         const now = Date.now();
         this.lastPathProcessTimes[path] = now;
-        if (path === 'navigation.position') {
-            raw[path] = val;
-            this.updatePositionForecast(val, now);
-            return;
-        }
         if (typeof val === 'number' && (path.includes('angle') || path.includes('heading') ||
             path.includes('course') || path.includes('direction') || path.includes('twd'))) {
             raw[path] = ((val % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);

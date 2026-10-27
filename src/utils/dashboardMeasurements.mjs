@@ -3,6 +3,7 @@ const HISTORY_KEYS = ['stw','sog','vmg','depth','tws','aws','twd'];
 export function resetDashboardMeasurements(store) {
   store.raw = {};
   store.timestamps = {};
+  store.positionExpiresAt = undefined;
   store.gustFilter = {};
   for (const group of [store.histories, store.smoothBuf, store.longBuf, store.graphTempBuf]) {
     for (const key of Object.keys(group)) group[key] = [];

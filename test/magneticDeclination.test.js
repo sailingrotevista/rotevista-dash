@@ -30,6 +30,7 @@ test('GUI and server ignore instrument variation; magnetic leeway uses model, no
  const original=Date.now;Date.now=()=>now;
  try {
   const e=new WindEngine({debug(){}},()=>({}));e.fetchOpenMeteoForecast=()=>{};
+  e.applyNormalizedPosition({valid:true,value:position,timestamp:now,expiresAt:now+240000},now);
   for(const [p,v] of Object.entries(raw))e.processIncomingDelta(p,v,now);
   e.sampleHistory();
   assert.ok(Math.abs(e.getRollingAngles().hdg.at(-1).val-expected)<0.00051);
@@ -61,6 +62,7 @@ test('server reconstructed TWD overrides received TWD without modifying raw data
  const {WindEngine}=require('../wind/windEngine'); const original=Date.now;Date.now=()=>now;
  try{
  const e=new WindEngine({debug(){}},()=>({}));e.fetchOpenMeteoForecast=()=>{};
+  e.applyNormalizedPosition({valid:true,value:position,timestamp:now,expiresAt:now+240000},now);
  let last; e.manageHistory=(k,v)=>{if(k==='twd')last=v;};
  for(const [p,v] of Object.entries({'navigation.position':position,'navigation.headingTrue':2,'navigation.headingMagnetic':1,'environment.wind.angleTrueWater':0.5,'environment.wind.directionTrue':4}))e.processIncomingDelta(p,v,now);
  e.sampleHistory();

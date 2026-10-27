@@ -1,15 +1,17 @@
 'use strict';
-const { positionMaxAgeMs } = require('../../shared/windDataPolicy.json');
-const { GPS_AUXILIARY_PATHS, declaredGpsQuality, observedGpsQuality } = require('./gpsQuality');
+const { GPS_AUXILIARY_PATHS, declaredGpsQuality } = require('./gpsQuality');
 
 // Own GPS policy; its selected fix reaches consumers through SensorDerivedData.
 const GPS_NORMALIZER_CONFIG = {
     snapshotPeriodMs: 1000,
-    maxAgeMs: positionMaxAgeMs,
-    historyWindowMs: 60000,
-    maxSamplesPerSource: 60,
+    maxAgeMs: 240000,
+    minAgeMs: 15000,
+    displacementToleranceMeters: 50,
+    referenceSpeedMaxAgeMs: 15000,
+    historyWindowMs: 900000,
+    maxSamplesPerSource: 1800,
     maxSources: 16,
-    sourceRetentionMs: 600000,
+    sourceRetentionMs: 1800000,
     promotionHoldMs: 5000,
     promotionMinimumFixes: 3,
     promotionScoreMargin: 15,
@@ -31,14 +33,8 @@ const GPS_NORMALIZER_CONFIG = {
 // Provisional selection weights, not accuracy percentages. Tune after replay/live
 // review; missing GNSS quality indicators are not assigned an invented score.
 const GPS_SCORE_WEIGHTS = Object.freeze({
-    sourceType: 30,
-    frequency: 10,
-    regularity: 15,
-    freshness: 15,
-    latency: 10,
-    coherence: 20,
-    dispersion: 20,
-    speedConsistency: 20,
+    freshness: 50,
+    coherence: 30,
     declaredQuality: 20,
 });
 const GPS_PATH = 'navigation.position';
@@ -86,6 +82,8 @@ class GpsNormalizer {
         this.challenger = null;
         this.lastSnapshotAt = null;
         this.lastObservationId = null;
+        this.referenceSpeedMps = null;
+        this.referenceSpeedTime = null;
     }
 
     prune(now) {
@@ -176,8 +174,20 @@ class GpsNormalizer {
         return valid;
     }
 
+    // One prudential own speed shared by ALL position sources. Until a speed
+    // normalizer exists, use the maximum of recent, ordered same-source SOGs.
+    validityWindow(now) {
+        const speeds = [...this.sources.values()].map(state => state.auxiliary['navigation.speedOverGround']?.at(-1))
+            .filter(entry => entry && Number.isFinite(entry.value) && entry.value >= 0 && entry.timestamp <= now &&
+                now-entry.timestamp < this.config.referenceSpeedMaxAgeMs);
+        this.referenceSpeedMps = speeds.length ? Math.max(...speeds.map(entry => entry.value)) : null;
+        this.referenceSpeedTime = speeds.length ? Math.max(...speeds.map(entry => entry.timestamp)) : null;
+        return this.referenceSpeedMps > 0 ? Math.min(this.config.maxAgeMs,
+            Math.max(this.config.minAgeMs, this.config.displacementToleranceMeters / this.referenceSpeedMps * 1000)) : this.config.maxAgeMs;
+    }
+
     usable(state, now) {
-        return Boolean(state?.last?.valid && now >= state.last.timestamp && now - state.last.timestamp < this.config.maxAgeMs &&
+        return Boolean(state?.last?.valid && now >= state.last.timestamp && now - state.last.timestamp < this.validityWindow(now) &&
             !declaredGpsQuality(state.auxiliary,now,this.config).rejection);
     }
 
@@ -198,16 +208,10 @@ class GpsNormalizer {
         const invalidCount = observations.length - validCount;
         const clamp = value => Math.max(0, Math.min(1, value));
         const declaredQuality=declaredGpsQuality(state.auxiliary,now,this.config);
-        const observedQuality=observedGpsQuality(samples,state.auxiliary,now,this.config);
+        const validityMs = this.validityWindow(now);
         const factors = {
-            sourceType: state.type === 'GNSS' ? 1 : state.type === 'UNKNOWN' ? 2 / 3 : 0,
-            frequency: period === null ? null : clamp(1000 / period),
-            regularity: variation === null ? null : clamp(1 - variation),
-            freshness: ageMs === null ? null : clamp(1 - ageMs / this.config.maxAgeMs),
-            latency: meanLatencyMs === null ? null : clamp(1 - meanLatencyMs / this.config.maxAgeMs),
+            freshness: ageMs === null ? null : clamp(1 - ageMs / validityMs),
             coherence: observations.length ? validCount / observations.length : null,
-            dispersion: observedQuality.dispersion.value,
-            speedConsistency: observedQuality.speedConsistency.value,
             declaredQuality: declaredQuality.value,
         };
         // Missing optional evidence has no weight. Normalize the available
@@ -226,9 +230,10 @@ class GpsNormalizer {
                 observationCount: observations.length,
                 observedSpanMs: samples.length > 1 ? samples.at(-1).timestamp - samples[0].timestamp : 0,
                 intervalCount: intervals.length, typicalIntervalMs: period, intervalVariationRatio: variation,
-                ageMs, meanLatencyMs, medianLatencyMs: median(delays),
+                ageMs, validityMs, expiresAt:state.last ? state.last.timestamp+validityMs : null,
+                referenceSpeedMps:this.referenceSpeedMps, meanLatencyMs, medianLatencyMs: median(delays),
                 maximumLatencyMs: delays.length ? Math.max(...delays) : null },
-            declaredGpsQuality: declaredQuality, observedGpsQuality: observedQuality,
+            declaredGpsQuality: declaredQuality,
         };
     }
 
@@ -287,7 +292,9 @@ class GpsNormalizer {
         const observationId = valid ? JSON.stringify([state.source, sample.timestamp]) : null;
         // TODO: compensate offsets between GPS antennas. For now emit the selected
         // real fix unchanged; sourceChanged exposes a possible positional discontinuity.
-        const measurement = { value: valid ? { ...sample.value } : null, valid,
+        const validityMs = this.validityWindow(now);
+        const measurement = { validityMs, expiresAt:sample ? sample.timestamp+validityMs : null,
+            referenceSpeedMps:this.referenceSpeedMps, value: valid ? { ...sample.value } : null, valid,
             status: valid ? 'VALID' : declaredGpsQuality(state?.auxiliary || {},now,this.config).rejection ? 'INVALID' : sample ? sample.valid ? 'STALE' : 'INVALID' : 'UNAVAILABLE',
             source: state?.source ?? null, sourceType: state?.type ?? null,
             sourceScore: valid ? this.score(state, now) : null,

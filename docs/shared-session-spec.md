@@ -27,7 +27,7 @@ L'URL normale apre la modalità corrente del server. Il menu speciale `?menu=1` 
 - Un nuovo dispositivo si unisce allo scenario già in corso, senza riavviarlo.
 - I contatti sintetici hanno identità `sim:` e indicazione di simulazione; non vengono scritti nell'albero di navigazione Signal K.
 - In modalità mista le valutazioni dei target reali sono mantenute; i contatti aggiunti usano una finestra base di simulazione di 5 minuti.
-- La modalità mista attende una posizione propria reale utilizzabile. Se il timestamp disponibile della posizione supera 30 secondi, rimuove i contatti sintetici e attende dati nuovi.
+- La modalità mista attende una posizione propria reale utilizzabile. Alla scadenza GPS indicata da positionMeasurement.expiresAt rimuove i contatti sintetici e attende dati utilizzabili; 30 secondi rimane il ripiego legacy senza metadati.
 - Cambiare modalità crea una nuova generazione dello scenario e ricrea lo stato degli avvisi simulati. Scegliere la modalità già corrente non riavvia lo scenario.
 - Tornare a Live rimuove i contatti sintetici e riutilizza lo stato degli avvisi reali mantenuto dal server.
 - Il layout debug rimane un'opzione locale, anche quando viene aperto dal menu.
@@ -136,3 +136,17 @@ Le prove automatiche non sostituiscono la verifica su dispositivi reali con sosp
 
 - I frame includono `ownMotion`, calcolato dal motore AIS sul server tramite la voce riservata della nostra barca nell’unico tracker condiviso con i target AIS. La sessione installata riusa questo stato senza istanziare altri tracker. La lettura dei frame può acquisire un nuovo fix sorgente ma non trasformare riletture o proiezioni in nuove osservazioni.
 - La modalità mista riusa la sosta Live per le soglie dei target simulati; la modalità di simulazione pura espone movimento simulato e non cambia il tracker Live. Il server dev usa l’informazione Live se disponibile, altrimenti osserva localmente i fix ricevuti senza scrivere sul Cerbo.
+
+## Percorso della simulazione pura
+
+La nostra barca parte a sud del gruppo di Marina di Ragusa (36.7774059750889, 14.546565992362526) e procede a 045° a 5,2 kn: passaggio radente al margine sud-est, anziché partenza dal centro degli ormeggi. I bersagli ormeggiati e i poligoni restano nelle posizioni del campione. La modalità mista usa esclusivamente la posizione reale. Il percorso non modifica le soglie: i target dentro area ricevono il fattore geografico previsto dalla matrice.
+
+## Diagnostica GPS propria
+
+`?gpsDebug=1`, accessibile dal menu debug, apre una pagina separata di sola lettura. Interroga `/rotevista-dashboard` e aggiunge una riga locale ogni secondo (massimo 300), con coordinate, sorgente, timestamp originale, validità del selettore, età nel frame e nel browser, revisione, tempo dall’ultima risposta, RTT e motivo della selezione. Usa il validatore della dashboard; non legge lo stato interno di altre schede e non modifica modalità, sorgente, timeout o avvisi. Pausa, cancellazione, copia (anche su HTTP) e download del log restano locali. Nessuna persistenza sul server.
+
+### Frequenza del ponte dev
+
+Il dev recupera l’input Live dal Cerbo ogni 1000 ms, senza richieste sovrapposte. La sessione locale continua a elaborare a 1 Hz. I timestamp sorgente non vengono rinnovati dal recupero HTTP; la scadenza GPS è quella fornita dal Normalizer; 5000 ms resta il ripiego legacy in GUI. Questa frequenza riduce il ritardo del ponte dev e non modifica le sorgenti o le modalità del Cerbo.
+
+La diagnostica GPS mostra anche validityMs ed expiresAt. I frame dei plugin precedenti senza questi campi restano sul comportamento legacy: il nuovo timeout diventa operativo sul Cerbo solo dopo pubblicazione e installazione.

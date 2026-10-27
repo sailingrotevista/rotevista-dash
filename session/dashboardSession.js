@@ -1,3 +1,4 @@
+const {gpsPositionFresh}=require('../shared/gpsPositionValidity');
 'use strict';
 const { randomUUID } = require('crypto');
 const { AisSharedAlerts, createDashboardAlertHandlers, readAlertAction } = require('./aisSharedAlerts');
@@ -62,10 +63,10 @@ class DashboardSession {
         if (!live.ownMotion && !this.ownMotionState) this.ownMotionState=new OwnMotionState(new TargetMotionTracker({}, {
             harborDetector:{ getAreaAtPosition:(lat,lon)=>getAreaAtPositionFromAreas(lat,lon,this.liveAreaContext.areas,this.liveAreaContext.evaluatedAt) },
         }));
-        const liveMotion=live.ownMotion || this.ownMotionState.update(raw,live.rawTimes || {},clusters,now);
+        const liveMotion=live.ownMotion || this.ownMotionState.update(raw,live.rawTimes || {},clusters,now,live.positionMeasurement?.expiresAt);
         let ownMotion=liveMotion;
         let own=liveOwn;
-        if (this.mode==='mixed' && Number.isFinite(live.rawTimes?.['navigation.position']) && now-live.rawTimes['navigation.position']>30000) own=null;
+        if (this.mode==='mixed' && (live.normalizedPosition===true || Number.isFinite(live.rawTimes?.['navigation.position'])) && !gpsPositionFresh(live.rawTimes?.['navigation.position'],now,live.positionMeasurement?.expiresAt,30000)) own=null;
         const dt=Math.max(0,(now-this.lastTick)/1000); this.lastTick=now;
         if (this.mode!=='live') {
             if (this.mode==='simulation') {

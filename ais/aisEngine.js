@@ -1,3 +1,4 @@
+const { gpsPositionFresh } = require('../shared/gpsPositionValidity');
 const { OwnMotionState, OWN_MOTION_ID } = require('./ownMotionState');
 const { extractReportedAis } = require('./aisReportedData');
 const { AisSharedAlerts } = require('../session/aisSharedAlerts');
@@ -120,7 +121,7 @@ class AisEngine {
         const navigationState = raw['navigation.state'] !== undefined ? raw['navigation.state']
             : typeof this.app.getSelfPath === 'function' ? this.app.getSelfPath('navigation.state') : null;
         return this.ownMotionState.update({ ...raw, 'navigation.state': navigationState },
-            this.windEngine.getRawTimes?.() || {}, this.lastHarborClusters, now);
+            this.windEngine.getRawTimes?.() || {}, this.lastHarborClusters, now, this.windEngine.getPositionMeasurement?.()?.expiresAt);
     }
 
     getTopThreat() {
@@ -248,7 +249,7 @@ class AisEngine {
             }
             if (this.windEngine.normalizedPositionManaged) {
                 const time = this.windEngine.getRawTimes()['navigation.position'];
-                if (!Number.isFinite(time) || now-time < 0 || now-time >= positionMaxAgeMs) myGps = null;
+                if (!gpsPositionFresh(time,now,this.windEngine.getPositionMeasurement?.()?.expiresAt,positionMaxAgeMs)) myGps = null;
             }
             if (myGps && !isNaN(myGps.lat) && !isNaN(myGps.lon)) {
                 this.lastOwnGps = { lat: myGps.lat, lon: myGps.lon, t: now };

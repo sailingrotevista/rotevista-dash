@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Simplify GPS source selection to freshness (50), accepted-fix reliability (30) and optional declared GNSS quality (20). Use a shared own-speed reference and a 50 m freshness window bounded to 15 seconds–4 minutes; missing speed uses 4 minutes.
+- Carry the original fix deadline through DerivedData, Wind, AIS, own-motion tracking, mixed sessions and the GUI; preserve source timestamps and expire during connection loss.
+- Add a read-only own GPS debug page with a bounded text log, copy and download; refresh the dev bridge every second.
+
 - Replace the motion tracker with the reviewed two-state model: initial rest up to 0.5 kn, five real fixes over five minutes within a 50 m diameter for stopping, and net displacement across three positions for restarting.
 - Use 50/150/300 m restart distances from the detected rest-area context; select own-ship positions across a five-minute history while AIS keeps its latest three reports.
 - Preserve missing AIS SOG as null through ingestion, cache and shared frames; display --.- instead of a measured zero and avoid projecting targets without valid speed.

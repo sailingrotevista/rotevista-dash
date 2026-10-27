@@ -38,90 +38,66 @@ Preferire `$source`; in sua assenza ricostruire un riferimento da `source.label`
 
 L’adattatore chiede `sourcePolicy='all'` tramite il sesto argomento della [subscription manager ufficiale](https://github.com/SignalK/signalk-server/blob/master/src/subscriptionmanager.ts), senza limitare a 1 Hz gli ingressi. Su versioni precedenti del server le priorità a monte possono comunque impedire di ricevere tutte le sorgenti; verificare sull’installazione sulla versione installata.
 
-## Prime regole GPS implementate
+## Regole GPS — 27 ottobre 2026
 
-Parametri raccolti in `GPS_NORMALIZER_CONFIG`, all’inizio di GpsNormalizer:
+Validità fisica, freschezza e selezione restano in GpsNormalizer. SensorDerivedData inoltra lo snapshot senza ricalcolare la politica. L’uscita a 1 Hz non rinnova timestamp, coordinate o identità dell’osservazione.
 
-| Parametro | Valore iniziale |
-| --- | ---: |
-| Periodo snapshot | 1.000 ms |
-| Età massima utilizzabile | `positionMaxAgeMs` della politica attuale, 5.000 ms |
-| Finestra dello storico per sorgente | 60 secondi |
-| Massimo campioni per sorgente | 60 |
-| Massimo sorgenti | 16 |
-| Rimozione sorgenti inattive | 10 minuti |
-| Persistenza per promuovere una sorgente migliore | 5 secondi e almeno 3 fix reali osservati |
-| Vantaggio minimo per la promozione | 15 punti di selezione |
-| Controllo salti della stessa sorgente | 25 m di tolleranza + spazio a 80 kn nel tempo fra i fix |
-| Intervallo massimo per il controllo del salto | 30 secondi |
+### Validità del fix
 
-- Coordinate numeriche finite, latitudine entro ±90°, longitudine entro ±180°; zero è valido.
-- Richiedere timestamp valido, non futuro e recente rispetto alla ricezione. Un pacchetto vecchio riletto dalla cache non diventa un fix nuovo.
-- Ogni sorgente ha il proprio ordinamento temporale. Duplicati e pacchetti retrodatati non aggiungono campioni né maturano promozioni. Un `null` con lo stesso timestamp può invalidare l’ultimo fix della medesima sorgente; un replay non lo ripristina.
-- I controlli di salto si applicano ai fix successivi della stessa sorgente. Un’anomalia rende il candidato non utilizzabile e consente il failover, senza sostituire le coordinate con una stima.
-- La scelta iniziale considera tipo di sorgente, frequenza, regolarità, freschezza, ritardo storico e coerenza dei campioni. Il tipo mantiene una preferenza iniziale GNSS diretto / non identificato come AIS / AIS, ma non certifica la precisione. Oltre 1 Hz non c’è ulteriore vantaggio di frequenza. Gli indicatori opzionali partecipano solo quando disponibili.
-- Il lock impedisce sostituzioni fra sorgenti equivalenti a ogni messaggio. Una sorgente con un vantaggio persistente può essere promossa solo con nuovi fix distribuiti nel tempo; i tick ripetuti non bastano.
-- Se la sorgente scelta scade o diventa invalida, scegliere una riserva fresca al tick successivo. Se manca una riserva, esporre valore nullo e stato STALE/INVALID/UNAVAILABLE: non utilizzare come attuale l’ultimo dato noto.
-- Non mediare le coordinate fra GPS diversi né smussare per ora le coordinate di una stessa sorgente. La posizione valida in uscita è l’ultimo fix ricevuto della sorgente scelta.
+- Coordinate finite, latitudine entro ±90°, longitudine entro ±180°; zero è un valore valido.
+- Identità sorgente e timestamp obbligatori, non futuro. Un report già vecchio di almeno 4 minuti all’arrivo non viene acquisito come nuova osservazione utilizzabile.
+- Ordinamento separato per sorgente; duplicati e replay non aggiungono osservazioni. Un null allo stesso timestamp revoca il fix e non può essere annullato da un replay.
+- Salti della stessa sorgente: tolleranza 25 m più spazio percorribile a 80 kn, per intervalli non oltre 30 secondi. Un salto rifiutato o un reset entra nello storico di affidabilità.
+- No GPS, Error o integrità Unsafe recenti della stessa sorgente escludono il candidato. La mancata disponibilità di qualità opzionale non equivale a qualità zero.
 
-## Score storico delle sorgenti
+### Freschezza e scadenza dinamica
 
-Affinamento del 26 ottobre 2026, sempre nel ramo GPS parallelo. Prima escludere sorgenti con campione corrente scaduto o invalido, poi confrontare gli score: nessun ottimo storico rende utilizzabile una posizione scaduta.
+```text
+validityMs = min(240000, max(15000, 50 / referenceSpeedMps * 1000))
+referenceSpeedMps zero o assente: validityMs = 240000
+expiresAt = timestamp originale del fix + validityMs
+STALE quando now >= expiresAt
+```
 
-Pesi iniziali modificabili in `GPS_SCORE_WEIGHTS` all’inizio di SensorNormalizer, normalizzati su 100 considerando soltanto le componenti disponibili. Sono pesi provvisori di selezione da calibrare, NON percentuali di precisione:
+La scadenza temporale non è un controllo sulla correttezza delle coordinate. I 50 m sono un riferimento di spostamento possibile, non una certificazione di accuratezza; il minimo di 15 secondi può corrispondere a più di 50 m alle alte velocità.
 
-| Componente | Peso | Criterio |
+Si usa la stessa velocità propria prudenziale per tutte le sorgenti: provvisoriamente il massimo delle ultime SOG valide per sorgente, ricevute con timestamp non futuro e vecchie di meno di 15 secondi. Null e valori invalidi non diventano zero. In assenza di SOG recente si usa il limite massimo di 4 minuti, senza dichiarare la barca ferma. Il riferimento sarà sostituibile con l’uscita del futuro normalizzatore della velocità. La finestra è rivalutata ai tick usando il riferimento corrente.
+
+### Tre punteggi
+
+| Componente | Peso | Formula del fattore 0..1 |
 | --- | ---: | --- |
-| Tipo sorgente | 30 | GNSS riconosciuto 30, non identificato come AIS 20, AIS 0 |
-| Frequenza | 10 | Intervallo mediano dei fix validi, beneficio saturato a 1 Hz |
-| Regolarità | 15 | Deviazione assoluta media degli intervalli rispetto alla mediana; comprende anche un’interruzione isolata |
-| Freschezza corrente | 15 | Età dell’ultimo timestamp sorgente, rispetto al limite configurato |
-| Ritardo storico | 10 | Media delle differenze fra ricezione e timestamp dei fix validi |
-| Coerenza osservata | 20 | Frazione di campioni utilizzabili fra gli aggiornamenti ordinati recenti, compresi reset, coordinate invalide e salti scartati |
+| Freschezza | 50 | max(0, min(1, 1 − età / validityMs)) |
+| Affidabilità osservata (coherence nel codice) | 30 | fix accettati / osservazioni ordinate ricevute |
+| Qualità GNSS dichiarata | 20 | media pesata degli indicatori disponibili della stessa sorgente |
 
-Ogni componente ha disponibilità, fattore e contributo separati. Regolarità e frequenza senza campioni sufficienti non sono inventate. La qualità assente è esposta come `declaredGpsQuality: { available: false, value: null }` ed esclusa dal punteggio, senza penalità.
+Score = 100 × somma(fattore × peso) / somma dei pesi disponibili. Sorgenti stale/invalide escluse prima del confronto. Tipo GNSS/AIS, frequenza, regolarità e ritardo non assegnano punti separati; tipo e metriche temporali restano diagnostici. Dispersione e confronto con velocità non sono più componenti dello score e non vengono calcolati nel ciclo di selezione; le funzioni sperimentali in gpsQuality rimangono testabili separatamente.
 
-- Conservare uno storico limitato anche degli aggiornamenti rifiutati per reset, coordinate o salto, con lo stesso limite temporale e numerico dei fix validi. Lo stesso timestamp revocato con null sostituisce l’osservazione, non ne aggiunge un’altra.
-- Duplicati, replay, timestamp assenti, futuri o già scaduti non diventano campioni dello storico né prove per una promozione. I pacchetti con tempi non utilizzabili restano esclusi all’ingresso.
-- Dopo una ripresa, gli errori recenti restano nel punteggio finché escono dallo storico o dal limite di campioni; una singola lettura corretta non cancella la cronologia. La finestra è di 60 secondi con massimo 60 elementi per ciascuno dei due buffer per sorgente, quindi ad alta frequenza la copertura temporale effettiva può essere inferiore. Esporre durata e numero dei campioni per renderlo verificabile.
-- `getSourceDiagnostics(now)` restituisce una copia calcolata delle valutazioni per sorgente: id, tipo, selezione, eleggibilità, score, contributi, conteggio fix validi/rifiutati/salti, durata osservata, intervallo tipico, variazione degli intervalli, età corrente e latenza media/mediana/massima. La lettura non aggiunge osservazioni e non modifica il lock.
-- Nessun nuovo endpoint o contenuto GUI: diagnostica accessibile dal modulo e dai test. La posizione GPS selezionata alimenta gli utilizzatori operativi. I pesi possono essere personalizzati come secondo argomento del costruttore; vietare valori negativi, non finiti o componenti sconosciute.
-- Lock, margine di promozione, richiesta di nuovi fix per almeno 5 secondi e failover mantengono la struttura già implementata. L’età massima rimane 5 secondi: il timeout adattivo alla frequenza è ancora una proposta da discutere separatamente.
+Indicatori GNSS validi per 30 secondi. Metodo e HDOP: peso interno 4; integrità: 2; satelliti: 1. Metodo: GNSS fix 0,6; DGNSS 0,8; precise GNSS/RTK float 0,9; RTK fixed 1; estimated 0,2; manual/simulator 0,1. Integrità safe 1, caution 0,3. HDOP: 1/max(1,HDOP), se positivo. Satelliti: min(1,n/12). Gli indicatori non riconosciuti o assenti sono esclusi.
 
-## Snapshot e nuove osservazioni
+### Storico e isteresi
 
-Lo snapshot contiene `sampledAt` e `measurements['navigation.position']`: valore, validità, stato, sorgente/tipo e `sourceScore`, timestamp sorgente in millisecondi, ricezione, età, `observationId`, `isNewObservation`, `sourceChanged` e motivo della scelta.
+Parametri in testa a GpsNormalizer: finestra 15 minuti, massimo 1800 elementi per buffer e sorgente, massimo 16 sorgenti, rimozione sorgenti inattive dopo 30 minuti. Ad altissima frequenza il tetto numerico può ridurre la copertura effettiva; la diagnostica espone conteggi e durata. Gli errori recenti restano fino all’uscita dallo storico o dal limite numerico. Lo stesso timestamp revocato con null sostituisce l’osservazione.
 
-- `sampledAt` misura il tick, non l’età del GPS. Tick intermedi mantengono il timestamp sorgente e lo stesso `observationId`.
-- `isNewObservation` indica se il fix differisce da quello dell’ultimo snapshot valido emesso; rileggere uno snapshot non è una nuova osservazione. Gli utilizzatori futuri devono conservare identità e timestamp, non contare i tick.
-- Un failover segnala `sourceChanged`. Per decisione attuale gli offset tra antenne sono ignorati: la posizione selezionata resta invariata. Compensare questa discontinuità è un miglioramento futuro, segnalato anche nel codice; il cambio sorgente può introdurre uno spostamento apparente.
-- Il modulo restituisce `null` se chiamato prima del periodo minimo; non inventa campioni per recuperare tick persi.
+- Prima scelta: migliore candidata utilizzabile, poi timestamp più recente e identità per spareggio deterministico. Nessuna preferenza fissa GPS/AIS a parità di qualità.
+- Corrente utilizzabile: vantaggio di almeno 15 punti mantenuto per almeno 5 secondi, almeno 3 fix distinti della candidata estesi su almeno 5 secondi.
+- Corrente stale o invalida: failover alla migliore utilizzabile al tick successivo senza attendere la promozione.
+- Nessuna riserva: posizione null e stato STALE/INVALID/UNAVAILABLE.
+- Nessuna regola aggiuntiva al 50% della validità. I tick ripetuti non maturano fix per promozioni o motion tracker.
 
-## Verifiche e lavoro successivo
+### Contratto in uscita e consumatori
 
-[Test del flusso](../test/sensorPipeline.test.js): acquisizione ad alta frequenza, contesto proprio, provenienza, timestamp mancanti/vecchi/futuri, reset e replay, scelta diretta/AIS, lock, riserva, rientro controllato, nessuna media fra coordinate, saturazione a 1 Hz dello score di frequenza, interruzioni isolate, memoria degli errori, latenza storica, qualità dichiarata non inventata, memoria limitata e collegamento tramite DerivedData e blocco degli ingressi GPS diretti.
+Lo snapshot contiene sampledAt e measurements['navigation.position']: value, valid, status, source/sourceType, sourceScore, timestamp originale, receivedAt, ageMs, validityMs, expiresAt, referenceSpeedMps, observationId, isNewObservation, sourceChanged e selectionReason.
 
-Restano da verificare sull’installazione reale la disponibilità di tutte le sorgenti e le soglie di selezione. La posizione GPS propria è ora migrata; gli offset fra antenne restano ignorati per decisione concordata. Le altre misure non sono migrate.
+- La freschezza progressiva serve allo score interno. I consumatori applicano expiresAt, senza ricostruire la politica di velocità. Alla scadenza il dato non deve restare utilizzabile durante un’interruzione degli aggiornamenti.
+- WindEngine rifiuta navigation.position anche dentro processIncomingDelta: applyNormalizedPosition è il solo ingresso operativo GPS. WindEngine conserva la misura e il timestamp, applica la scadenza assoluta e fornisce la stessa scadenza ad AIS e OwnMotionState. Il tracker non riceve una nuova osservazione rileggendo lo stesso fix.
+- I frame live/mixed espongono positionMeasurement. La GUI traduce timestamp e scadenza dall’orologio del server a quello locale usando la stessa differenza; null invalida subito. Prua, SOG e gli altri sensori mantengono le proprie scadenze.
+- Modalità mista: posizione sintetica mai inventata; il limite GPS è quello del Normalizer, non un ulteriore limite fisso di 30 secondi. Server precedenti senza metadati conservano il ripiego legacy.
+- GUI/debug e consumatori senza expiresAt mantengono compatibilità con il limite fisso precedente; la simulazione pura mantiene i propri fix sintetici.
+- Nessuna media fra coordinate di sorgenti diverse e nessuna proiezione creata dal Normalizer. Offset fra antenne ignorati per decisione concordata: il cambio sorgente può introdurre una discontinuità.
 
-## Qualità opzionale e prove simulate — 26 ottobre 2026
+### Verifiche
 
-Il supporto [gpsQuality](../sensors/sensorNormalizer/gpsQuality.js) aggiunge pesi da 20 per dispersione residua, coerenza della velocità e qualità dichiarata. Lo score non certifica accuratezza assoluta.
+[Test della scadenza dinamica](../test/gpsFreshness.test.js): cadenza AIS di tre minuti, estremi 15 s/4 minuti, riferimento comune, velocità assente, failover, tre componenti, memoria limitata, passaggio della scadenza a Wind/tracker/GUI e orologi client differenti.
 
-- Indicatori GNSS della stessa sorgente validi per 30 secondi; no GPS, Error e Unsafe recenti escludono il candidato. Null annulla il precedente indicatore. Metodo e HDOP hanno peso interno 4, integrità 2, satelliti 1; HDOP non è convertito in metri.
-- Buffer ausiliari limitati a 60 elementi e 60 secondi per percorso. Non rinnovano la posizione né creano fix.
-- Dispersione residua rispetto alla traiettoria interpolata, non al centro della sosta: almeno cinque secondi osservati e tre confronti, punti distanziati almeno un secondo, intervalli non oltre cinque secondi.
-- Coerenza su finestre di almeno cinque secondi con SOG e COG opzionale della stessa sorgente, abbinati entro due secondi; tolleranza cinque metri più 15% della distanza attesa. Senza velocità la componente resta sconosciuta.
-- Manovre confermate da COG con variazione oltre 30 gradi e velocità almeno 0,8 kn escludono i confronti coinvolti. Nessuna media o modifica delle coordinate emesse.
-
-[Test simulati](../test/gpsQuality.test.js): sosta, moto rettilineo, oscillazioni circolari, virata a 90 gradi, jitter, posizione bloccata con velocità dichiarata e qualità opzionale mancante/scaduta. I test del flusso verificano anche perdita sorgente, riserva, rientro e timestamp invariati.
-
-Replay di 210 secondi reali: 210 snapshot validi sul Cerbo, un tick iniziale vuoto, nessun cambio sorgente, età massima 3,128 secondi. Interrompendo gli ingressi dopo 60 secondi, il primo tick non valido arriva cinque secondi dopo il taglio. La registrazione contiene posizioni, senza SOG/COG abbinati o indicatori GNSS: non costituisce una prova in navigazione. Il replay precede il collegamento operativo; i test di integrazione coprono ora anche tale collegamento.
-
-## Collegamento operativo della posizione propria
-
-- Index esclude navigation.position dalla vecchia sottoscrizione e ignora eventuali delta GPS su quel percorso. A ogni tick passa lo snapshot attraverso SensorDerivedData e applica la misura risultante a WindEngine prima del campionamento e del frame condiviso.
-- Wind conserva il timestamp originale, anche quando la riserva ha un fix meno recente della sorgente precedente. Dato invalido, scaduto o errore del Normalizer produce posizione null, senza attribuire il tempo del tick a un fix.
-- AIS usa esclusivamente questa posizione nel plugin migrato; non recupera la posizione scartata dalla cache Signal K o dall'ultimo GPS valido. La bolla riceve il timestamp sorgente esposto da getRawTimes.
-- I frame live/mixed espongono normalizedPosition e positionMeasurement (sorgente, validità e timestamp). La GUI applica la posizione dei frame ordinati anche al cambio sorgente con timestamp meno recente, e ignora gli ingressi GPS diretti una volta gestita dalla sessione server. La modalità simulation mantiene le coordinate sintetiche.
-- Il dev server legge la posizione selezionata dall'endpoint live-input del plugin aggiornato. Il ripiego verso installazioni precedenti rimane legacy e non garantisce la selezione di tutte le sorgenti; non scrive sul Cerbo.
-- [Test di migrazione](../test/normalizedPosition.test.js): riserva con fix precedente, scadenza nel motore, catena Normalizer/DerivedData/Wind, accettazione GUI del frame autorevole, blocco dei ripieghi GPS di AIS. Test automatici locali; nessun riavvio o prova sui dispositivi effettuato per questa modifica.
+[Test del flusso](../test/sensorPipeline.test.js) e [migrazione](../test/normalizedPosition.test.js): ricezione, ordinamento, reset, replay, lock, promozione con nuovi fix e blocco degli ingressi GPS diretti. La disponibilità delle sorgenti e il comportamento in navigazione restano da verificare sui dispositivi. Nessuna pubblicazione o riavvio del Cerbo effettuati da questi test.

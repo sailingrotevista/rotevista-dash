@@ -239,7 +239,7 @@ Verifiche: [medie e dati mancanti](../test/circularAverage.test.js).
 ## Timestamp della posizione GPS
 
 - Conservare separatamente il timestamp sorgente della posizione anche quando le coordinate sono identiche e la deduplicazione evita di rielaborarle. Riletture con timestamp uguale o precedente non rinnovano la misura.
-- Validare latitudine/longitudine numeriche finite entro i limiti geografici; null invalida la posizione. La GUI applica `positionMaxAgeMs = 5000` alla posizione corrente AIS. WMM può continuare a usare l'ultima posizione valida secondo la propria politica.
+- Validare latitudine/longitudine numeriche finite entro i limiti geografici; null invalida la posizione. La posizione GPS normalizzata usa expiresAt calcolato da GpsNormalizer (50 m, minimo 15 secondi, massimo 4 minuti); il limite fisso di 5000 ms rimane solo per input legacy senza metadati. WMM può continuare a usare l'ultima posizione valida secondo la propria politica.
 
 ## Ponderazione dello storico TWD
 

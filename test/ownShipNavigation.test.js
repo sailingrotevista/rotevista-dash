@@ -28,16 +28,15 @@ test('AIS inputs expire independently; no missing value becomes zero and GPS nee
  assert.equal(r(raw,{...times,[P]:now+1000},now,policy).position,null);
  assert.equal(r(raw,{...times,[H]:now-5000,[C]:now-5000},now,policy).course.hdg,null);
 });
-test('GPS timestamps refresh on unchanged fixes before dedup; duplicate/older/invalid fixes never renew them',()=>{
- const original=Date.now;let time=now;Date.now=()=>time;
- try{
+test('Wind accepts own position only from the normalized measurement entry point',()=>{
  const e=new WindEngine({debug(){}},()=>({}));e.fetchOpenMeteoForecast=()=>{};
- e.processIncomingDelta(P,position,time);assert.equal(e.getRawTimes()[P],time);
- time+=1000;e.processIncomingDelta(P,{...position},time);assert.equal(e.getRawTimes()[P],time);
- e.processIncomingDelta(P,{...position,latitude:37},time-1000);assert.equal(e.getRaw()[P].latitude,position.latitude);
- e.processIncomingDelta(P,{...position,latitude:91},time+100);assert.equal(e.getRawTimes()[P],time);
- time+=1000;e.processIncomingDelta(P,null,time);assert.equal(e.getRaw()[P],null);assert.equal(e.getRawTimes()[P],time);
- e.processIncomingDelta(P,position,time-1000);assert.equal(e.getRaw()[P],null);
- time+=1000;e.processIncomingDelta(P,position,time);assert.deepEqual(e.getRaw()[P],position);
- }finally{Date.now=original;}
+ e.processIncomingDelta(P,position,now);
+ assert.equal(e.getRaw()[P],undefined);
+ const fix={valid:true,value:position,timestamp:now,expiresAt:now+240000};
+ e.applyNormalizedPosition(fix,now);
+ assert.deepEqual(e.getRaw()[P],position);
+ for(const value of [null,{latitude:37,longitude:15},position]) e.processIncomingDelta(P,value,now+1000);
+ assert.deepEqual(e.getRaw()[P],position);assert.equal(e.getRawTimes()[P],now);
+ e.applyNormalizedPosition(null,now+1000);assert.equal(e.getRaw()[P],null);
+ e.processIncomingDelta(P,position,now+2000);assert.equal(e.getRaw()[P],null);
 });

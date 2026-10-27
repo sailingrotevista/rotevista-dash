@@ -1,4 +1,5 @@
 'use strict';
+const { gpsPositionFresh } = require('../shared/gpsPositionValidity');
 const { pointInPolygon } = require('./harborDetector');
 const { isAnchoredNavigationState } = require('./collisionPipeline');
 const policy = require('../shared/windDataPolicy.json');
@@ -12,12 +13,12 @@ class OwnMotionState {
         this.restConfirmed = false;
     }
 
-    update(raw = {}, times = {}, areas = [], now = Date.now()) {
+    update(raw = {}, times = {}, areas = [], now = Date.now(), positionExpiresAt) {
         const position = raw['navigation.position'];
         const time = times['navigation.position'];
         const fresh = (timestamp, maxAge) => Number.isFinite(timestamp) && timestamp <= now && now - timestamp < maxAge;
         const valid = position && Number.isFinite(position.latitude) && Math.abs(position.latitude) <= 90 &&
-            Number.isFinite(position.longitude) && Math.abs(position.longitude) <= 180 && fresh(time, policy.positionMaxAgeMs);
+            Number.isFinite(position.longitude) && Math.abs(position.longitude) <= 180 && gpsPositionFresh(time,now,positionExpiresAt,policy.positionMaxAgeMs);
         const last = this.tracker.get(OWN_MOTION_ID, now, 900000);
         if (valid && last && time - last.lastFixTime > this.tracker.config.restMaximumGapSeconds * 1000) {
             this.tracker.remove(OWN_MOTION_ID);
