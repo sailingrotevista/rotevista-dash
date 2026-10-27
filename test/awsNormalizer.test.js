@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {AwsNormalizer}=require('../sensors/sensorNormalizer/AwsNormalizer');
@@ -74,7 +75,7 @@ test('Wind uses normalized AWS deadline for fallback and history, with no second
  try {
  const wind=new WindEngine({debug(){}},()=>({graphs:{historyMinutes:5}}));
  wind.applyNormalizedAws({valid:true,value:10,timestamp:t,expiresAt:t+10000},t);
- wind.processIncomingDelta('environment.wind.angleApparent',0,t+6000);
+ feedWindInput(wind,'environment.wind.angleApparent',0,t+6000);
  const writes=[];wind.manageHistory=(type,value)=>writes.push({type,value});
  wind.sampleHistory(t+6000);
  assert.ok(writes.some(p=>p.type==='aws'&&p.value===10*1.94384));

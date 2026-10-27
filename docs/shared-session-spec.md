@@ -168,3 +168,16 @@ stwMeasurement, twsMeasurement, depthMeasurement. Live/mixed seguono la sorgente
 server anche in failover a timestamp precedente; websocket non sovrascrive i
 path gestiti. Polling non rinnova il timestamp. In simulazione pura i flag sono
 false e i metadati null: i valori sintetici mantengono il loro percorso.
+
+
+Angoli ricevuti: normalizedAngles e angleMeasurements[path] distribuiscono AWA,
+TWA/TWD nativi, COG e heading vera/magnetica. La GUI rispetta sorgente e tempo
+originale, anche in failover a una riserva più vecchia; websocket escluso per i
+path gestiti. Simulazione pura: normalizedAngles=false, angleMeasurements=null.
+
+VMG calcolata: derivedVmg e vmgMeasurement portano il risultato autorevole di
+SensorDerivedData con timestamp, expiresAt e ingressi utilizzati. La GUI traduce
+la scadenza rispetto a serverNow e non ricalcola la VMG per i frame nuovi. Server
+precedenti senza flag mantengono il ripiego frontend. Anche la simulazione pura
+condivisa espone VMG derivata dalla stessa funzione server, con input sintetici.
+Nessuno stato è persistito su disco.

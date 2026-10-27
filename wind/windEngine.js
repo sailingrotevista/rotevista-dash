@@ -9,6 +9,7 @@ const { gpsPositionFresh } = require('../shared/gpsPositionValidity');
  * file windEngine.js
  */
 const https = require('https');
+const angularSensorPaths=require('../shared/angularSensorPaths.json');
 const windDataPolicy = require('../shared/windDataPolicy.json');
 const {resolveTws, aggregateTwd, historyRetentionMs} = require('./twdHistory');
 const resolveDeclination = require('../shared/magneticDeclination')(require('geomagnetism'));
@@ -18,8 +19,9 @@ const { awsMaxAgeMs, awaMaxAgeMs, twsNativeMaxAgeMs, twaNativeMaxAgeMs, trueWind
 // COSTANTI DI SVILUPPO (DEVELOPER CONFIG)
 // ==========================================================================
 
-function resolveHeading(raw, timestamps, now, policy, allowCog = true, normalizedSog) {
+function resolveHeading(raw, timestamps, now, policy, allowCog = true, normalizedSog, normalizedAngles) {
   const fresh = (path, age) => {
+    if (normalizedAngles && Object.prototype.hasOwnProperty.call(normalizedAngles,path)) return normalizedAngles[path];
     const value = raw[path], time = timestamps[path];
     return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= Math.PI * 2 &&
       Number.isFinite(time) && now-time >= 0 && now-time < age ? value : null;
@@ -158,6 +160,53 @@ class WindEngine {
         return m?.valid === true && gpsPositionFresh(m.timestamp, now, m.expiresAt, depthMaxAgeMs) ? m.value : null;
     }
 
+    applyNormalizedAngle(path, measurement, now = Date.now()) {
+        if (!Object.prototype.hasOwnProperty.call(angularSensorPaths,path)) throw new TypeError('Unsupported angle path');
+        this.normalizedAnglesManaged = true;
+        if (!this.angleMeasurements) this.angleMeasurements = {};
+        this.angleMeasurements[path] = measurement ? {...measurement} : null;
+        this.raw[path] = this.getNormalizedAngle(path,now);
+        const time = measurement?.timestamp ?? null;
+        if (path === 'environment.wind.angleApparent') this.lastAwaReceivedTime = time;
+        if (path === 'environment.wind.angleTrueWater') this.lastNativeTwaTime = time;
+        if (path === 'environment.wind.directionTrue') this.lastNativeTwdTime = time;
+        if (path.startsWith('navigation.')) this.headingInputTimes[path] = time;
+        if (path === 'navigation.headingTrue') this.headingSourceTime = time;
+        // Explicit invalidation retains the existing rolling-buffer reset.
+        if (measurement?.valid !== true) {
+            const channel = path === 'environment.wind.angleApparent' ? 'awa' : path === 'environment.wind.angleTrueWater' ? 'twa' : null;
+            if (channel) this.rollingAngles[channel] = [];
+        }
+    }
+
+    getNormalizedAngle(path, now = Date.now()) {
+        const m = this.angleMeasurements?.[path];
+        if (m?.valid !== true || !gpsPositionFresh(m.timestamp,now,m.expiresAt,windDataPolicy[angularSensorPaths[path]])) return null;
+        // Wind's existing canonical representation; DerivedData retains the
+        // original signed value and all provenance unchanged.
+        return ((m.value % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);
+    }
+
+    getNormalizedAngles(now = Date.now()) {
+        return Object.fromEntries(Object.keys(angularSensorPaths).map(path=>[path,this.getNormalizedAngle(path,now)]));
+    }
+
+    getResolvedHeading(now = Date.now(), allowCog = true) {
+        return resolveHeading(this.raw,this.getRawTimes(),now,windDataPolicy,allowCog,
+            this.normalizedSogManaged ? this.getNormalizedSog(now) : undefined,
+            this.normalizedAnglesManaged ? this.getNormalizedAngles(now) : undefined);
+    }
+
+    applyDerivedVmg(measurement) {
+        this.derivedVmgManaged = true;
+        this.vmgMeasurement = measurement ? {...measurement} : null;
+    }
+
+    getDerivedVmg(now = Date.now()) {
+        const m = this.vmgMeasurement;
+        return m?.valid === true && gpsPositionFresh(m.timestamp,now,m.expiresAt,boatSpeedMaxAgeMs) ? m.value : null;
+    }
+
     updatePositionForecast(value, now) {
         const current30mSlot = Math.floor(now / 1800000) * 1800000;
         if (current30mSlot > this.lastForecast30mSlot &&
@@ -199,48 +248,7 @@ class WindEngine {
      */
     processIncomingDelta(path, val, sourceTimestamp) {
         // Own position has one entry point: the measurement emitted by DerivedData.
-        if (path === 'navigation.position' || path === 'navigation.speedOverGround' || path === 'environment.wind.speedApparent' || path === 'navigation.speedThroughWater' || path === 'environment.wind.speedTrue' || path === 'environment.depth.belowTransducer') return;
-        const sourceFields = {
-            'environment.depth.belowTransducer': 'depthSourceTime',
-            'environment.wind.speedTrue': 'lastNativeTwsTime',
-            'environment.wind.directionTrue': 'lastNativeTwdTime',
-            'environment.wind.angleTrueWater': 'lastNativeTwaTime',
-            'environment.wind.angleApparent': 'lastAwaReceivedTime',
-            'environment.wind.speedApparent': 'lastAwsReceivedTime',
-        };
-        const boatSpeed = ['navigation.speedThroughWater', 'navigation.speedOverGround'].includes(path);
-        const heading = ['navigation.headingTrue', 'navigation.headingMagnetic', 'navigation.courseOverGroundTrue'].includes(path);
-        if (sourceFields[path] || boatSpeed || heading) {
-            const parsed = typeof sourceTimestamp === 'number' ? sourceTimestamp : Date.parse(sourceTimestamp);
-            const now = Date.now();
-            const time = Number.isFinite(parsed) ? Math.min(now, parsed) : now;
-            const previousTime = this.getRawTimes()[path];
-            // At equal timestamps an explicit reset wins; a replay cannot undo it.
-            if (Number.isFinite(previousTime) && (time < previousTime ||
-                (time === previousTime && (val !== null || this.raw[path] === null)))) return;
-            if (val !== null) {
-                {
-                    if (!Number.isFinite(val)) return;
-                    if (path === 'environment.depth.belowTransducer') {
-                        if (val < -2 || val > 500) return;
-                    } else if (boatSpeed || path === 'environment.wind.speedTrue' || path === 'environment.wind.speedApparent') {
-                        if (val < 0 || val > (boatSpeed ? 25.72 : 51.44)) return;
-                    } else if (Math.abs(val) > Math.PI * 2) return;
-                }
-            }
-            if (sourceFields[path]) this[sourceFields[path]] = time;
-            if (boatSpeed) this.speedSourceTimes[path] = time;
-            if (heading) this.headingInputTimes[path] = time;
-            if (path === 'navigation.headingTrue') this.headingSourceTime = time;
-            if (val === null) {
-                // Retain the reset in snapshots, including its ordering timestamp.
-                this.raw[path] = null;
-                const channel = path === 'environment.wind.angleTrueWater' ? 'twa' :
-                    path === 'environment.wind.angleApparent' ? 'awa' : null;
-                if (channel) this.rollingAngles[channel] = [];
-                return;
-            }
-        }
+        if (path === 'navigation.position' || path === 'navigation.speedOverGround' || path === 'environment.wind.speedApparent' || path === 'navigation.speedThroughWater' || path === 'environment.wind.speedTrue' || path === 'environment.depth.belowTransducer' || Object.prototype.hasOwnProperty.call(angularSensorPaths,path)) return;
         // Navigation status is categorical, including an explicit null reset;
         // never pass it through the numerical smoothing used for instruments.
         if (path === 'navigation.state') {
@@ -265,7 +273,9 @@ class WindEngine {
         this.lastHistorySampleTime = now;
         this.freezeCompletedRadarSlots(now);
         const raw = this.raw, times = this.getRawTimes();
+        const normalizedAngles = this.normalizedAnglesManaged ? this.getNormalizedAngles(now) : undefined;
         const fresh = (path, maxAge, valid) => {
+            if (normalizedAngles && Object.prototype.hasOwnProperty.call(normalizedAngles,path)) return normalizedAngles[path];
             const value=raw[path], time=times[path];
             return Number.isFinite(value) && valid(value) && Number.isFinite(time) && now >= time && now-time < maxAge ? value : null;
         };
@@ -277,20 +287,20 @@ class WindEngine {
         const aws = this.normalizedAwsManaged ? this.getNormalizedAws(now) : fresh('environment.wind.speedApparent',awsMaxAgeMs,value => value >= 0 && value <= 51.44);
         const awa = fresh('environment.wind.angleApparent',awaMaxAgeMs,angle);
         const cog = fresh('navigation.courseOverGroundTrue',headingMaxAgeMs,angle);
-        const heading = resolveHeading(raw,times,now,windDataPolicy,true,this.normalizedSogManaged ? sog : undefined);
+        const heading = resolveHeading(raw,times,now,windDataPolicy,true,this.normalizedSogManaged ? sog : undefined,normalizedAngles);
         const measuredSpeed = stw !== null && !(sog !== null && sog > 0.77 && stw < 0.25) ? stw : sog;
         let twa = fresh('environment.wind.angleTrueWater',twaNativeMaxAgeMs,angle);
         if (twa === null && aws !== null && awa !== null) {
             const x = aws*Math.cos(awa)-(measuredSpeed ?? 0), y = aws*Math.sin(awa);
             if (Math.hypot(x,y) > trueWindDirectionMinSpeedMps) twa = Math.atan2(y,x);
         }
-        const tws = resolveTws(raw,times,now,windDataPolicy,this.normalizedSogManaged ? sog : undefined,this.normalizedAwsManaged ? aws : undefined,this.normalizedStwManaged ? stw : undefined,this.normalizedTwsManaged ? this.getNormalizedTws(now) : undefined);
-        const compass = resolveHeading(raw,times,now,windDataPolicy,false,this.normalizedSogManaged ? sog : undefined);
+        const tws = resolveTws(raw,times,now,windDataPolicy,this.normalizedSogManaged ? sog : undefined,this.normalizedAwsManaged ? aws : undefined,this.normalizedStwManaged ? stw : undefined,this.normalizedTwsManaged ? this.getNormalizedTws(now) : undefined,normalizedAngles?.['environment.wind.angleApparent']);
+        const compass = resolveHeading(raw,times,now,windDataPolicy,false,this.normalizedSogManaged ? sog : undefined,normalizedAngles);
         const nativeTwd = fresh('environment.wind.directionTrue',twdNativeMaxAgeMs,angle);
         const twd = twa !== null && compass !== null ? compass+twa : nativeTwd !== null ? nativeTwd :
             twa !== null && heading !== null ? heading+twa : null;
         for (const [channel,value] of [['stw',stw],['sog',sog],['depth',depth],['aws',aws],['tws',tws],
-            ['vmg',twa !== null && measuredSpeed !== null ? Math.abs(measuredSpeed*Math.cos(twa)) : null]]) {
+            ['vmg',this.getDerivedVmg(now)]]) {
             if (value !== null) this.manageHistory(channel,channel==='depth' ? value : value*1.94384,now);
         }
         for (const [channel,value] of [['hdg',heading],['cog',cog],['awa',awa],['twa',twa]]) {
@@ -368,7 +378,7 @@ class WindEngine {
         const tempBuf = graphTempBuf[type];
 
         // Cattura la velocità del vento corrente (in m/s) al momento della lettura
-        const currentTws = type === 'twd' ? resolveTws(raw, this.getRawTimes(), now, windDataPolicy,this.normalizedSogManaged ? this.getNormalizedSog(now) : undefined,this.normalizedAwsManaged ? this.getNormalizedAws(now) : undefined,this.normalizedStwManaged ? this.getNormalizedStw(now) : undefined,this.normalizedTwsManaged ? this.getNormalizedTws(now) : undefined) : null;
+        const currentTws = type === 'twd' ? resolveTws(raw, this.getRawTimes(), now, windDataPolicy,this.normalizedSogManaged ? this.getNormalizedSog(now) : undefined,this.normalizedAwsManaged ? this.getNormalizedAws(now) : undefined,this.normalizedStwManaged ? this.getNormalizedStw(now) : undefined,this.normalizedTwsManaged ? this.getNormalizedTws(now) : undefined,this.normalizedAnglesManaged ? this.getNormalizedAngle('environment.wind.angleApparent',now) : undefined) : null;
         tempBuf.push({ val: value, tws: currentTws, time: now });
 
         // Controllo avanzamento del secchiello temporale (Bucket)

@@ -159,6 +159,7 @@ class AisEngine {
     updateWindEvidence(path, value, timestamp) {
         if (!['environment.wind.directionTrue', 'environment.wind.speedTrue'].includes(path)) return;
         if (path === 'environment.wind.speedTrue' && this.windEngine.normalizedTwsManaged) return;
+        if (path === 'environment.wind.directionTrue' && this.windEngine.normalizedAnglesManaged) return;
         const t = Date.parse(timestamp);
         if (!Number.isFinite(t)) return;
         if (!this.windEvidence[path] || t >= this.windEvidence[path].t) this.windEvidence[path] = { value, t };
@@ -293,6 +294,15 @@ class AisEngine {
             let trueWindDir = myHdg;
             if (raw['environment.wind.directionTrue'] !== undefined) {
                 trueWindDir = (raw['environment.wind.directionTrue'] * 180 / Math.PI + 360) % 360;
+            }
+
+            if (this.windEngine.normalizedAnglesManaged) {
+                const heading = this.windEngine.getResolvedHeading(now);
+                const cog = this.windEngine.getNormalizedAngle('navigation.courseOverGroundTrue',now);
+                const twd = this.windEngine.getNormalizedAngle('environment.wind.directionTrue',now);
+                myHdg = heading === null ? 0 : (heading*180/Math.PI+360)%360;
+                myCog = cog === null ? myHdg : (cog*180/Math.PI+360)%360;
+                trueWindDir = twd === null ? myHdg : (twd*180/Math.PI+360)%360;
             }
 
             // 2. Lettura configurazione attiva con supporto gruppi ad albero e retrocompatibilità
@@ -462,13 +472,16 @@ class AisEngine {
                     const windSpeedEvidence = this.windEngine.normalizedTwsManaged
                         ? {value:this.windEngine.getNormalizedTws(now),t:this.windEngine.getRawTimes()['environment.wind.speedTrue']}
                         : this.windEvidence['environment.wind.speedTrue'];
+                    const windDirectionEvidence = this.windEngine.normalizedAnglesManaged
+                        ? {value:this.windEngine.getNormalizedAngle('environment.wind.directionTrue',now),t:this.windEngine.getRawTimes()['environment.wind.directionTrue']}
+                        : this.windEvidence['environment.wind.directionTrue'];
                     const motion = this.motionTracker.update(key, {
                         lat: vLat, lon: vLon, t: realAisTime, sourceTime: parsedTime, sog, sogTime:lastSogTime, cog, cogTime:lastCogTime, hdg, headingTime: motionTimestamp(hdgNode, hdgVal),
                     }, { now, historyMs: maxTrailAgeMs,
                         wind: {
-                            direction: Number.isFinite(this.windEvidence['environment.wind.directionTrue']?.value) ?
-                                (r2d(this.windEvidence['environment.wind.directionTrue'].value) + 360) % 360 : null,
-                            directionTime: this.windEvidence['environment.wind.directionTrue']?.t,
+                            direction: Number.isFinite(windDirectionEvidence?.value) ?
+                                (r2d(windDirectionEvidence.value) + 360) % 360 : null,
+                            directionTime: windDirectionEvidence?.t,
                             speedKnots: Number.isFinite(windSpeedEvidence?.value) ?
                                 windSpeedEvidence.value * 1.94384 : null,
                             speedTime: windSpeedEvidence?.t,

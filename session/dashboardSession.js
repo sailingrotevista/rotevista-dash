@@ -1,5 +1,7 @@
 const {gpsPositionFresh}=require('../shared/gpsPositionValidity');
 'use strict';
+const {deriveVmg}=require('../sensors/derivedData/vmg');
+const windPolicy=require('../shared/windDataPolicy.json');
 const { randomUUID } = require('crypto');
 const { AisSharedAlerts, createDashboardAlertHandlers, readAlertAction } = require('./aisSharedAlerts');
 const pipeline = require('../ais/collisionPipeline');
@@ -122,6 +124,10 @@ class DashboardSession {
                 this.simAlerts.update(targets,null,now);
             }
         }
+        // Pure simulation uses the same derivation as normalized live inputs.
+        const simulatedVmg=this.mode==='simulation' ? deriveVmg({sampledAt:now,measurements:Object.fromEntries(
+            ['navigation.speedThroughWater','navigation.speedOverGround','environment.wind.angleTrueWater','environment.wind.speedApparent','environment.wind.angleApparent']
+                .map(path=>[path,{value:outRaw[path],valid:true,source:'SIMULATION',timestamp:now,expiresAt:now+windPolicy.boatSpeedMaxAgeMs}]))}) : null;
         this.revision++;
         this.current={propulsionMode:this.propulsionMode,mode:this.mode,generation:this.generation,environment:this.environment,changedAt:this.changedAt,
             revision:this.revision,serverNow:now,normalizedPosition:live.normalizedPosition===true && this.mode!=='simulation',
@@ -130,6 +136,10 @@ class DashboardSession {
             normalizedStw:live.normalizedStw===true && this.mode!=='simulation',
             normalizedTws:live.normalizedTws===true && this.mode!=='simulation',
             normalizedDepth:live.normalizedDepth===true && this.mode!=='simulation',
+            normalizedAngles:live.normalizedAngles===true && this.mode!=='simulation',
+            derivedVmg:this.mode==='simulation' || live.derivedVmg===true,
+            vmgMeasurement:this.mode==='simulation'?simulatedVmg:live.vmgMeasurement || null,
+            angleMeasurements:this.mode==='simulation'?null:live.angleMeasurements || null,
             stwMeasurement:this.mode==='simulation'?null:live.stwMeasurement || null,
             twsMeasurement:this.mode==='simulation'?null:live.twsMeasurement || null,
             depthMeasurement:this.mode==='simulation'?null:live.depthMeasurement || null,

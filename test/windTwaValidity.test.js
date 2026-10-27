@@ -36,7 +36,8 @@ test('server accepts native TWA without AWS and preserves source times and uniqu
   assert.equal(e.getRaw()[TWA],1);
   assert.equal(e.getRollingAngles().twa.length,1);
   feedWindInput(e,TWA,NaN,now);
-  assert.equal(e.getRawTimes()[TWA],now-2000);
+  assert.equal(e.getRawTimes()[TWA],now,'a new invalid observation revokes the source at its original time');
+  assert.equal(e.getRaw()[TWA],null);
   feedWindInput(e,TWA,null,now);
   assert.equal(e.getRaw()[TWA],null);
   assert.equal(e.getRollingAngles().twa.length,0);

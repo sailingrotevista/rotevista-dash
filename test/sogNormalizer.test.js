@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {SogNormalizer}=require('../sensors/sensorNormalizer/SogNormalizer');
@@ -83,21 +84,21 @@ test('Wind history, fallback TWS and COG heading honour the supplied SOG deadlin
  const old=Date.now;let now=start;Date.now=()=>now;
  try {
   wind.applyNormalizedAws({valid:true,value:10,timestamp:now,expiresAt:now+5000},now);
-  wind.processIncomingDelta('environment.wind.angleApparent',0,now);
-  wind.processIncomingDelta('navigation.courseOverGroundTrue',1,now);
+  feedWindInput(wind,'environment.wind.angleApparent',0,now);
+  feedWindInput(wind,'navigation.courseOverGroundTrue',1,now);
   // A custom deadline demonstrates the contract; production remains five seconds.
   wind.applyNormalizedSog({valid:true,value:2,timestamp:start,expiresAt:start+10000},now);
   now=start+6000;
   wind.applyNormalizedAws({valid:true,value:10,timestamp:now,expiresAt:now+5000},now);
-  wind.processIncomingDelta('environment.wind.angleApparent',0,now);
-  wind.processIncomingDelta('navigation.courseOverGroundTrue',1,now);
+  feedWindInput(wind,'environment.wind.angleApparent',0,now);
+  feedWindInput(wind,'navigation.courseOverGroundTrue',1,now);
   const values={};wind.manageHistory=(key,value)=>{values[key]=value;};wind.sampleHistory(now);
   assert.equal(values.sog,2*1.94384);assert.equal(values.tws,8*1.94384);
   assert.equal(wind.getRollingAngles().hdg.at(-1).val,1);
   now=start+10000;
   wind.applyNormalizedAws({valid:true,value:10,timestamp:now,expiresAt:now+5000},now);
-  wind.processIncomingDelta('environment.wind.angleApparent',0,now);
-  wind.processIncomingDelta('navigation.courseOverGroundTrue',1,now);
+  feedWindInput(wind,'environment.wind.angleApparent',0,now);
+  feedWindInput(wind,'navigation.courseOverGroundTrue',1,now);
   delete values.sog;wind.sampleHistory(now);
   assert.equal(values.sog,undefined);assert.equal(values.tws,10*1.94384);
   assert.equal(wind.getNormalizedSog(now),null);

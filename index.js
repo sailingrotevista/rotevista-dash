@@ -15,6 +15,7 @@ const { HarborDetector } = require('./ais/harborDetector');
 const { WindEngine } = require('./wind/windEngine');
 const { AisEngine } = require('./ais/aisEngine');
 const { SignalKReceiver } = require('./sensors/SignalKReceiver');
+const angularSensorPaths=require('./shared/angularSensorPaths.json');
 const { SensorNormalizer } = require('./sensors/SensorNormalizer');
 const { SensorDerivedData } = require('./sensors/SensorDerivedData');
 const { prepareCollisionConfig, PLUGIN_BASE_TCPA_MINUTES } = require('./ais/collisionConfig');
@@ -63,6 +64,8 @@ module.exports = function (app) {
     windEngine.normalizedStwManaged = true;
     windEngine.normalizedTwsManaged = true;
     windEngine.normalizedDepthManaged = true;
+    windEngine.normalizedAnglesManaged = true;
+    windEngine.derivedVmgManaged = true;
     const aisEngine = new AisEngine(app, () => currentConfig, windEngine, harborDetector, collisionPipeline);
 
     // Own GPS is selected once and distributed through DerivedData to all consumers.
@@ -75,12 +78,15 @@ module.exports = function (app) {
 
     const { DashboardSession, registerDashboardRoutes } = require('./session/dashboardSession');
     const readDashboardLive = () => {
-        const measurements = sensorDerivedData.getSnapshot()?.measurements || {};
+        const sensorData = sensorDerivedData.getSnapshot();
+        const measurements = sensorData?.measurements || {};
         return {
             raw:windEngine.getRaw(),rawTimes:windEngine.getRawTimes(),targets:aisEngine.getNearbyVessels(),
             harborClusters:aisEngine.getHarborClusters(),ownMotion:aisEngine.getOwnMotion(),
             normalizedPosition:true,normalizedSog:true,normalizedAws:true,
-            normalizedStw:true,normalizedTws:true,normalizedDepth:true,
+            normalizedStw:true,normalizedTws:true,normalizedDepth:true,normalizedAngles:true,derivedVmg:true,
+            vmgMeasurement:sensorData?.derived?.vmg || null,
+            angleMeasurements:Object.fromEntries(Object.keys(angularSensorPaths).map(path=>[path,measurements[path] || null])),
             positionMeasurement:measurements['navigation.position'] || null,
             sogMeasurement:measurements['navigation.speedOverGround'] || null,
             awsMeasurement:measurements['environment.wind.speedApparent'] || null,
@@ -195,13 +201,7 @@ module.exports = function (app) {
                 { path: 'sensors.gps.fromBow', minPeriod: 1000 },
                 { path: 'sensors.gps.fromCenter', minPeriod: 1000 },
                 { path: 'navigation.state', minPeriod: 1000 },
-                { path: 'environment.wind.angleApparent', minPeriod: 1000 },
-                { path: 'environment.wind.angleTrueWater', minPeriod: 1000 },
-                { path: 'environment.wind.directionTrue', minPeriod: 1000 },
-                { path: 'navigation.headingTrue', minPeriod: 1000 },
-                { path: 'navigation.headingMagnetic', minPeriod: 1000 },
                 { path: 'navigation.magneticVariation', minPeriod: 60000 },
-                { path: 'navigation.courseOverGroundTrue', minPeriod: 1000 }
             ]
         };
 
@@ -216,7 +216,7 @@ module.exports = function (app) {
                     delta.updates.forEach(update => {
                         if (update.values) {
                             update.values.forEach(v => {
-                                if (v.path === 'navigation.position' || v.path === 'navigation.speedOverGround' || v.path === 'environment.wind.speedApparent' || v.path === 'navigation.speedThroughWater' || v.path === 'environment.wind.speedTrue' || v.path === 'environment.depth.belowTransducer') return; // Receiver/Normalizer is the only migrated sensor input.
+                                if (v.path === 'navigation.position' || v.path === 'navigation.speedOverGround' || v.path === 'environment.wind.speedApparent' || v.path === 'navigation.speedThroughWater' || v.path === 'environment.wind.speedTrue' || v.path === 'environment.depth.belowTransducer' || Object.prototype.hasOwnProperty.call(angularSensorPaths,v.path)) return; // Receiver/Normalizer is the only migrated sensor input.
                                 aisEngine.updateWindEvidence(v.path, v.value, update.timestamp);
                                 if (!aisEngine.updateOwnGeometry(v.path, v.value)) {
                                     windEngine.processIncomingDelta(v.path, v.value, update.timestamp);
@@ -256,6 +256,8 @@ module.exports = function (app) {
                     windEngine.applyNormalizedStw(derived.measurements['navigation.speedThroughWater'], now);
                     windEngine.applyNormalizedTws(derived.measurements['environment.wind.speedTrue'], now);
                     windEngine.applyNormalizedDepth(derived.measurements['environment.depth.belowTransducer'], now);
+                    for (const path of Object.keys(angularSensorPaths)) windEngine.applyNormalizedAngle(path,derived.measurements[path],now);
+                    windEngine.applyDerivedVmg(derived.derived.vmg);
                 }
             } catch (error) {
                 windEngine.applyNormalizedPosition(null, now);
@@ -264,6 +266,8 @@ module.exports = function (app) {
                 windEngine.applyNormalizedStw(null, now);
                 windEngine.applyNormalizedTws(null, now);
                 windEngine.applyNormalizedDepth(null, now);
+                for (const path of Object.keys(angularSensorPaths)) windEngine.applyNormalizedAngle(path,null,now);
+                windEngine.applyDerivedVmg(null);
                 app.debug(`Sensor normalization: ${error.message || error}`);
             }
             windEngine.sampleHistory(now);

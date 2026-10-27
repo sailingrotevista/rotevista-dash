@@ -317,3 +317,19 @@ consumano le misure selezionate con la loro scadenza assoluta: il TWS nativo
 valido mantiene la priorità, poi resta il ripiego AWS/AWA/velocità già esistente.
 Il minimo profondità nel bucket, il filtro raffiche e la formula VMG non cambiano.
 Spostare i calcoli in SensorDerivedData resta un passo successivo.
+
+
+### Ingressi angolari normalizzati e VMG trasferita
+
+AWA, TWA nativo, TWD nativo, COG e prua vera/magnetica entrano da DerivedData
+tramite applyNormalizedAngle. Selezione per sorgente e scadenza 5 secondi sono
+nel normalizer; Wind conserva la precedente rappresentazione 0..2π e rispetta
+expiresAt. Le medie circolari e i buffer restano invariati. La priorità prua
+magnetica + WMM / vera / COG con velocità sufficiente non cambia.
+
+VMG non è più calcolata dal campionamento Wind: applyDerivedVmg riceve il
+risultato di SensorDerivedData con gli ingressi originali e la scadenza minima.
+La formula abs(speed*cos(TWA)), la scelta STW/SOG e il ripiego angolare
+AWS/AWA restano invariati. Il campionamento a 1 Hz gestisce soltanto lo storico.
+La GUI usa vmgMeasurement nei frame autorevoli, con compatibilità legacy per
+server precedenti; la simulazione condivisa usa lo stesso derivatore server.

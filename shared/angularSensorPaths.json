@@ -1,0 +1,8 @@
+{
+  "environment.wind.angleApparent": "awaMaxAgeMs",
+  "environment.wind.angleTrueWater": "twaNativeMaxAgeMs",
+  "environment.wind.directionTrue": "twdNativeMaxAgeMs",
+  "navigation.courseOverGroundTrue": "headingMaxAgeMs",
+  "navigation.headingTrue": "headingMaxAgeMs",
+  "navigation.headingMagnetic": "headingMaxAgeMs"
+}

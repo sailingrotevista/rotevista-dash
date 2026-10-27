@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Normalize received AWA, native TWA/TWD, COG and true/magnetic heading through source selection at 1 Hz, preserving source time and 5-second expiry. Route shared clients and AIS wind/navigation context through selected inputs, with existing heading/WMM priorities.
+- Move VMG calculation from WindEngine into SensorDerivedData with input provenance and dependency deadlines. Wind records the result, shared clients display it and pure shared simulation uses the same derivation. Preserve the existing formula and fallback rules.
+
 - Normalize received STW, TWS and transducer depth through source selection at 1 Hz and DerivedData, with 5-second expiry and authoritative shared frames. Generalize the scalar source selector; preserve Wind fallback calculations, gust filtering and depth minima. AIS wind context consumes selected native TWS.
 
 - Preserve dashboard configuration identity on unchanged polling/websocket updates, avoiding extra immediate Wind display ticks when the 1 Hz timer restarts.

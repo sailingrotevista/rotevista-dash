@@ -4,7 +4,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.RotevistaTwdHistory = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
-  function resolveTws(raw, timestamps, now, policy, normalizedSog, normalizedAws, normalizedStw, normalizedTws) {
+  function resolveTws(raw, timestamps, now, policy, normalizedSog, normalizedAws, normalizedStw, normalizedTws, normalizedAwa) {
     const fresh = (path, maxAge, valid) => {
       const value = raw[path], time = timestamps[path];
       return Number.isFinite(value) && valid(value) && Number.isFinite(time) &&
@@ -14,7 +14,7 @@
     const native = normalizedTws === undefined ? fresh('environment.wind.speedTrue', policy.twsNativeMaxAgeMs, speed) : normalizedTws;
     if (native !== null) return native;
     const aws = normalizedAws === undefined ? fresh('environment.wind.speedApparent', policy.awsMaxAgeMs, speed) : normalizedAws;
-    const awa = fresh('environment.wind.angleApparent', policy.awaMaxAgeMs, v => Math.abs(v) <= Math.PI*2);
+    const awa = normalizedAwa === undefined ? fresh('environment.wind.angleApparent', policy.awaMaxAgeMs, v => Math.abs(v) <= Math.PI*2) : normalizedAwa;
     if (aws === null || awa === null) return null;
     const boatSpeed = v => v >= 0 && v <= 25.72;
     const stw = normalizedStw === undefined ? fresh('navigation.speedThroughWater', policy.boatSpeedMaxAgeMs, boatSpeed) : normalizedStw;

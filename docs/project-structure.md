@@ -16,9 +16,12 @@ sensors/                         acquisizione e selezione GPS e misure scalari c
     AwsNormalizer.js            AWS ricevuta
     StwNormalizer.js            STW ricevuta
     TwsNormalizer.js            TWS ricevuto
+    AngleNormalizer.js          AWA/TWA/TWD, COG e heading ricevuti
     DepthNormalizer.js          profondità sotto il trasduttore
     gpsQuality.js               qualità dichiarata e osservata
-  SensorDerivedData.js
+  SensorDerivedData.js           misure ricevute e valori derivati separati
+  derivedData/
+    vmg.js                       VMG da ingressi normalizzati
 ais/                             movimento, collisioni e aree di sosta
   aisEngine.js
   aisReportedData.js

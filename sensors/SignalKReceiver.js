@@ -1,9 +1,10 @@
 'use strict';
 
 const { GPS_AUXILIARY_PATHS } = require('./sensorNormalizer/gpsQuality');
+const angularPaths=require('../shared/angularSensorPaths.json');
 const GPS_PATH = 'navigation.position';
-const SENSOR_INPUT_PATHS = Object.freeze([GPS_PATH, ...GPS_AUXILIARY_PATHS, 'environment.wind.speedApparent',
-    'navigation.speedThroughWater','environment.wind.speedTrue','environment.depth.belowTransducer']);
+const SENSOR_INPUT_PATHS = Object.freeze([...new Set([GPS_PATH, ...GPS_AUXILIARY_PATHS, 'environment.wind.speedApparent',
+    'navigation.speedThroughWater','environment.wind.speedTrue','environment.depth.belowTransducer',...Object.keys(angularPaths)])]);
 
 function sourceReference(update) {
     if (typeof update.$source === 'string' && update.$source.trim()) return update.$source.trim();

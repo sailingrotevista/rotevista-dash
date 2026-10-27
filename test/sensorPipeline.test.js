@@ -48,7 +48,7 @@ test('Receiver requests raw all-source GPS and owns an idempotent subscription l
         calls++;
         assert.equal(command.context, 'vessels.self');
         assert.deepEqual(command.subscribe.map(row=>row.path), [path,'navigation.speedOverGround','navigation.courseOverGroundTrue',
-            'navigation.gnss.methodQuality','navigation.gnss.integrity','navigation.gnss.horizontalDilution','navigation.gnss.satellites','environment.wind.speedApparent','navigation.speedThroughWater','environment.wind.speedTrue','environment.depth.belowTransducer']);
+            'navigation.gnss.methodQuality','navigation.gnss.integrity','navigation.gnss.horizontalDilution','navigation.gnss.satellites','environment.wind.speedApparent','navigation.speedThroughWater','environment.wind.speedTrue','environment.depth.belowTransducer','environment.wind.angleApparent','environment.wind.angleTrueWater','environment.wind.directionTrue','navigation.headingTrue','navigation.headingMagnetic']);
         assert.ok(command.subscribe.every(row=>row.policy==='instant'&&row.minPeriod===0));
         assert.equal(sourcePolicy, 'all');
         unsubscribes.push(() => disposed++);
@@ -99,7 +99,9 @@ test('snapshot is capped at 1Hz and preserves the latest chosen real fix; repeat
     assert.equal(gps(second).observationId,gps(first).observationId);
     assert.equal(normalizer.gps.sources.get('gps').samples.length,5);
     const result=derived.process(second);
-    assert.deepEqual(result,second);
+    assert.deepEqual(result.measurements,second.measurements);
+    assert.equal(result.sampledAt,second.sampledAt);
+    assert.equal(result.derived.vmg.valid,false);
     result.measurements[path].value.longitude=0;
     assert.equal(derived.getSnapshot().measurements[path].value.longitude,position.longitude);
     assert.deepEqual(gps(normalizer.tick(origin+5500)).value,position);
@@ -195,6 +197,8 @@ test('plugin distributes only DerivedData GPS, blocks raw bypass and clears posi
             getRawTimes() { return {}; }
             processIncomingDelta(path, value, time) { production.writes.push({ path, value, time });production.raw[path] = value; }
             applyNormalizedPosition(measurement) { production.writes.push({normalized:true,measurement});production.raw[path] = measurement?.valid ? measurement.value : null; }
+            applyDerivedVmg(measurement) { production.vmg=measurement; }
+            applyNormalizedAngle(path,measurement) { production.raw[path]=measurement?.valid?measurement.value:null; }
             applyNormalizedStw(measurement) { production.raw['navigation.speedThroughWater']=measurement?.valid?measurement.value:null; }
             applyNormalizedTws(measurement) { production.raw['environment.wind.speedTrue']=measurement?.valid?measurement.value:null; }
             applyNormalizedDepth(measurement) { production.raw['environment.depth.belowTransducer']=measurement?.valid?measurement.value:null; }

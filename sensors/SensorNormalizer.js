@@ -1,4 +1,5 @@
 'use strict';
+const {AngleNormalizer,ANGLE_NORMALIZER_CONFIG}=require('./sensorNormalizer/AngleNormalizer');
 const {StwNormalizer}=require('./sensorNormalizer/StwNormalizer');
 const {TwsNormalizer}=require('./sensorNormalizer/TwsNormalizer');
 const {DepthNormalizer}=require('./sensorNormalizer/DepthNormalizer');
@@ -8,7 +9,7 @@ const {SogNormalizer,SOG_NORMALIZER_CONFIG}=require('./sensorNormalizer/SogNorma
 const { GpsNormalizer, GPS_NORMALIZER_CONFIG, GPS_SCORE_WEIGHTS } = require('./sensorNormalizer/GpsNormalizer');
 
 // Coordinates category-specific normalizers and exposes their shared snapshot.
-// GPS, SOG, AWS, STW, received TWS and depth are migrated. DerivedData feeds the operational engines.
+// GPS, SOG, AWS, STW, received TWS, depth and instrument angles are migrated. DerivedData feeds the operational engines.
 class SensorNormalizer {
     constructor(config = {}, scoreWeights = {}) {
         this.gps = new GpsNormalizer(config, scoreWeights);
@@ -17,7 +18,9 @@ class SensorNormalizer {
         this.stw = new StwNormalizer();
         this.tws = new TwsNormalizer();
         this.depth = new DepthNormalizer();
+        this.angles = Object.fromEntries(Object.keys(ANGLE_NORMALIZER_CONFIG).map(path=>[path,new AngleNormalizer(path)]));
         this.scalarChannels = {
+            ...this.angles,
             'navigation.speedOverGround':this.sog,
             'environment.wind.speedApparent':this.aws,
             'navigation.speedThroughWater':this.stw,
@@ -36,6 +39,7 @@ class SensorNormalizer {
         if(snapshot)for(const [path,normalizer] of Object.entries(this.scalarChannels))snapshot.measurements[path]=normalizer.tick(now);
         return snapshot;
     }
+    getAngleSourceDiagnostics(path, now = Date.now()) { return this.angles[path]?.getSourceDiagnostics(now) || []; }
     getStwSourceDiagnostics(now = Date.now()) { return this.stw.getSourceDiagnostics(now); }
     getTwsSourceDiagnostics(now = Date.now()) { return this.tws.getSourceDiagnostics(now); }
     getDepthSourceDiagnostics(now = Date.now()) { return this.depth.getSourceDiagnostics(now); }

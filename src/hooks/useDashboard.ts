@@ -1,3 +1,5 @@
+import { translateDerivedMeasurement, derivedMeasurementValue } from '../utils/derivedMeasurement.mjs';
+import angularSensorPaths from '../../shared/angularSensorPaths.json';
 import { mergeDashboardConfig } from '../utils/dashboardConfig.mjs';
 import { applyNormalizedSessionSog, applyNormalizedSessionPosition, handleMeasurementReset, shouldApplySessionMeasurement } from '../utils/measurementReset.mjs';
 import { aggregateTwd, historyRetentionMs } from '../utils/twdHistory.mjs';
@@ -605,6 +607,7 @@ export function useDashboard() {
   }, []);
 
   // Process incoming data
+  const derivedVmgRef = useRef<{managed:boolean;measurement:any}>({managed:false,measurement:null});
   const normalizedSogRef = useRef(false);
   const normalizedInputsRef = useRef<Record<string, string>>({});
   const realAisTargetsRef = useRef<AisTarget[]>([]);
@@ -1006,19 +1009,21 @@ export function useDashboard() {
         setOwnShipMotion(frame.ownMotion || null);
         sharedEnvironmentRef.current = frame.environment;
         normalizedSogRef.current = frame.normalizedSog === true;
+        derivedVmgRef.current = {managed:frame.derivedVmg === true,measurement:translateDerivedMeasurement(frame.vmgMeasurement,frame.serverNow,Date.now())};
         normalizedInputsRef.current = Object.fromEntries([
           ['environment.wind.speedApparent','Aws'],
           ['navigation.speedThroughWater','Stw'],
           ['environment.wind.speedTrue','Tws'],
           ['environment.depth.belowTransducer','Depth'],
         ].filter(([,name]) => frame['normalized'+name] === true));
+        if (frame.normalizedAngles === true) for (const path of Object.keys(angularSensorPaths)) normalizedInputsRef.current[path] = 'Angle';
         applyingSessionRef.current = true;
         try {
           for (const [path, value] of Object.entries(frame.raw || {})) {
             const sourceTime = frame.rawTimes?.[path];
             if (normalizedInputsRef.current[path]) {
               const observedAt = Number.isFinite(sourceTime) && sourceTime <= frame.serverNow ? Date.now() - (frame.serverNow-sourceTime) : undefined;
-              const signature = JSON.stringify([value,sourceTime,frame[normalizedInputsRef.current[path].toLowerCase()+'Measurement']?.source]);
+              const signature = JSON.stringify([value,sourceTime,(normalizedInputsRef.current[path] === 'Angle' ? frame.angleMeasurements?.[path]?.source : frame[normalizedInputsRef.current[path].toLowerCase()+'Measurement']?.source)]);
               if (sessionRawTimesRef.current[path]?.value !== signature) {
                 sessionRawTimesRef.current[path] = {time: sourceTime, value: signature};
                 processIncomingData(path,observedAt === undefined ? null : value,observedAt,true);
@@ -1576,7 +1581,7 @@ export function useDashboard() {
         }
       }
 
-      const currentVmg = resolveVmg(store.raw, store.timestamps, now, windDataPolicy);
+      const currentVmg = derivedVmgRef.current.managed ? derivedMeasurementValue(derivedVmgRef.current.measurement,now) : resolveVmg(store.raw, store.timestamps, now, windDataPolicy);
       const currentHeading = resolveHeading(store.raw, store.timestamps, now, windDataPolicy);
       const currentTwd = resolveTwd(store.raw, store.timestamps, now, windDataPolicy);
       const currentTwa = resolveTwa(store.raw, store.timestamps, now, windDataPolicy);

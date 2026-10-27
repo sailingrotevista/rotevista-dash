@@ -1,6 +1,6 @@
 # Acquisizione, selezione e derivazione dei sensori
 
-Stato: migrazione della posizione GPS propria collegata il 26 ottobre 2026. SensorDerivedData alimenta WindEngine, quindi AIS, motion tracker e frame condivisi; SOG, AWS, STW, TWS ricevuto e profondità seguono lo stesso flusso. Gli angoli e gli altri ingressi non migrati mantengono il percorso precedente.
+Stato: migrazione della posizione GPS propria collegata il 26 ottobre 2026. SensorDerivedData alimenta WindEngine, quindi AIS, motion tracker e frame condivisi; SOG, AWS, STW, TWS ricevuto e profondità seguono lo stesso flusso. AWA, TWA, TWD, COG e prua vera/magnetica seguono ora lo stesso flusso. Assetto e altri ingressi non migrati mantengono il percorso precedente. VMG è calcolata in SensorDerivedData.
 
 ## Confini dei moduli
 
@@ -17,7 +17,7 @@ Signal K (tutte le sorgenti disponibili, frequenza originale)
 
 - [SignalKReceiver](../sensors/SignalKReceiver.js): adattatore di ingresso. Acquisisce AWS, STW, TWS ricevuto, profondità e posizione propria con contesto opzionale della stessa sorgente: SOG, COG vero, metodo GNSS, integrità, HDOP e satelliti, alla frequenza originale. Inoltra percorso, valore, identità e metadati della sorgente, timestamp originale e istante di ricezione. Non conserva uno storico, non sceglie sorgenti, non media e non attribuisce “adesso” a un timestamp mancante. Le posizioni degli altri target sono escluse.
 - [SensorNormalizer](../sensors/SensorNormalizer.js): conserva lo storico breve per sorgente, valida coordinate e tempi, valuta continuità/cadenza, sceglie una sorgente con lock/failover e produce al massimo uno snapshot ogni secondo. Tutte le scelte sono locali al server e in RAM.
-- [SensorDerivedData](../sensors/SensorDerivedData.js): per ora copia lo snapshot GPS/SOG/AWS/STW/TWS/profondità senza cambiare valore, validità, sorgente o timestamp. I calcoli e i ripieghi Wind non sono stati trasferiti. Il modulo non invia messaggi Signal K; index trasferisce la sua posizione selezionata allo store Wind.
+- [SensorDerivedData](../sensors/SensorDerivedData.js): copia le misure ricevute senza cambiare valore, validità, sorgente o timestamp e produce VMG separatamente in derived.vmg. Gli altri calcoli e ripieghi Wind non sono ancora trasferiti. Il modulo non invia messaggi Signal K; index trasferisce la sua posizione selezionata allo store Wind.
 
 La connessione di ingresso è in `index.js`; il timer esistente a 1 Hz elabora il ramo parallelo. Gli errori di questo ramo invalidano la posizione operativa, senza interrompere gli altri sensori. Sottoscrizione propria idempotente e rimossa a stop del plugin. Nessun riavvio o modifica alle configurazioni di Signal K per attivare test automatici.
 
@@ -216,3 +216,72 @@ Verifiche: [scalari e distribuzione](../test/scalarSensors.test.js),
 [VMG](../test/windVmgValidity.test.js),
 [profondità](../test/windDepthValidity.test.js). La prova con i sensori reali
 richiede l'installazione della versione aggiornata, senza riavvii durante i test.
+
+
+## Angoli ricevuti e VMG derivata — 27 ottobre 2026
+
+[AngleNormalizer](../sensors/sensorNormalizer/AngleNormalizer.js) applica la stessa
+selezione frequenza/freschezza, lock, isteresi e failover di ReceivedValueNormalizer
+indipendentemente per ogni path in
+[angularSensorPaths.json](../shared/angularSensorPaths.json):
+
+- environment.wind.angleApparent (AWA)
+- environment.wind.angleTrueWater (TWA nativo)
+- environment.wind.directionTrue (TWD nativo)
+- navigation.courseOverGroundTrue (COG)
+- navigation.headingTrue e navigation.headingMagnetic
+
+Limiti precedenti conservati: radianti finiti fra −2π e +2π, zero valido,
+scadenza 5 secondi dal timestamp originale. Nessuna media fra sorgenti, nessun
+filtro di rotazione, correzione o dato ricostruito nel normalizer. Anche 359°→1°
+resta una scelta fra misure reali, senza media aritmetica a 180°. Lo snapshot a
+1 Hz non rinnova i timestamp né crea nuovi fix. DerivedData conserva i segni
+ricevuti; Wind applica la precedente rappresentazione canonica 0..2π.
+
+Index trasferisce gli angoli con applyNormalizedAngle e invalida anche questi
+canali in caso di errore del ramo. Il percorso delta Wind e la sottoscrizione
+legacy li escludono. La selezione della prua vera e magnetica è indipendente:
+la risoluzione successiva conserva la priorità magnetica + WMM, poi prua vera,
+poi COG con SOG valida >0,77 m/s. Il COG di ripiego non viene scritto come
+misura ricevuta di prua. Il contesto vento e la navigazione propria di AIS
+consumano gli ingressi selezionati e le relative scadenze.
+
+Frame live/mixed: normalizedAngles e angleMeasurements indicizzato per path.
+La GUI usa il medesimo ingresso autorevole degli scalari, ammettendo una riserva
+con timestamp precedente ed escludendo sovrascritture dal websocket. In
+simulazione pura normalizedAngles=false e angleMeasurements=null. Il dev bridge
+usa le misure del plugin installato; i nuovi selettori richiedono l'installazione
+sul server per la verifica con sorgenti reali.
+
+### Primo calcolo trasferito: VMG
+
+SensorDerivedData produce derived.vmg tramite
+[derivedData/vmg.js](../sensors/derivedData/vmg.js). Le misure ricevute rimangono
+separate in measurements, senza inventare un input strumentale VMG.
+
+- Velocità: STW valida, con il precedente ripiego SOG quando STW manca o quando
+  STW <0,25 m/s e SOG >0,77 m/s.
+- Angolo: TWA ricevuto valido; se manca, si usa il precedente calcolo vettoriale
+  AWS/AWA/velocità solo per ottenere l'angolo necessario alla VMG. Un vettore con
+  modulo ≤0,05 m/s non determina un angolo valido.
+- Formula invariata: abs(velocità × cos(TWA)), in m/s; anche in poppa resta positiva.
+  Mancanza/scadenza degli ingressi dà null; zero misurato resta valido.
+- Metadati: source=DERIVED, calculation, inputs con sorgenti e tempi originali,
+  timestamp minimo e expiresAt minimo fra le dipendenze realmente utilizzate.
+  Un polling o un tick senza nuovi ingressi non rinnova la scadenza/observationId.
+
+WindEngine riceve applyDerivedVmg, verifica la scadenza e popola lo storico:
+non calcola più la VMG. I frame espongono derivedVmg e vmgMeasurement. La GUI
+live/mixed usa il valore server e traduce la scadenza sull'orologio locale;
+il vecchio calcolo frontend rimane solo per compatibilità con server precedenti
+o simulazione locale non condivisa. La simulazione condivisa pura richiama la
+stessa funzione di derivazione, con ingressi sintetici marcati SIMULATION.
+
+Restano da trasferire gli altri calcoli Wind (vento risolto, prua WMM e leeway).
+Assetto non migrato. Nessuna modifica a soglie collisione, medie, raffiche o
+conservazione degli storici.
+
+Verifiche: [angoli](../test/angleNormalizer.test.js),
+[VMG derivata e client con orologi diversi](../test/derivedVmg.test.js),
+[flusso plugin](../test/sensorPipeline.test.js). Test automatici separati dalla
+verifica con sensori reali dopo l'installazione.

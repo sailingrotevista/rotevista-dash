@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {StwNormalizer}=require('../sensors/sensorNormalizer/StwNormalizer');
@@ -68,10 +69,10 @@ test('native TWS has priority; expiry falls back to normalized AWS/STW and no us
  const m=(value,life=5000)=>({valid:true,value,timestamp:base,expiresAt:base+life});
  try{
   wind.applyNormalizedAws(m(10,10000),now);wind.applyNormalizedStw(m(2,10000),now);wind.applyNormalizedTws(m(15),now);
-  wind.processIncomingDelta('environment.wind.angleApparent',0,now);
+  feedWindInput(wind,'environment.wind.angleApparent',0,now);
   const values={};wind.manageHistory=(channel,value)=>{values[channel]=value;};wind.sampleHistory(now);
   assert.equal(values.tws,15*1.94384);assert.equal(values.stw,2*1.94384);
-  now=base+6000;wind.processIncomingDelta('environment.wind.angleApparent',0,now);wind.sampleHistory(now);
+  now=base+6000;feedWindInput(wind,'environment.wind.angleApparent',0,now);wind.sampleHistory(now);
   assert.equal(values.tws,8*1.94384);assert.equal(values.stw,2*1.94384,'supplied expiry is authoritative');
   wind.applyNormalizedStw(null,now);now+=1000;wind.sampleHistory(now);assert.equal(values.tws,10*1.94384);
   wind.applyNormalizedTws({...m(0),timestamp:now,expiresAt:now+5000},now);now+=1000;wind.sampleHistory(now);assert.equal(values.tws,0);
