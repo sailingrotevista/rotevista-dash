@@ -152,13 +152,16 @@ class TargetMotionTracker {
         if (state && sourceTime < (state.lastFix.sourceTime ?? state.lastFix.t)) return this.get(id, now, historyMs);
         const isNewPosition = !state || sourceTime > (state.lastFix.sourceTime ?? state.lastFix.t);
         if (!state) {
+            const hasInitialSpeed = Number.isFinite(fix.sog) && fix.sog >= 0;
+            const initiallyStationary = hasInitialSpeed
+                ? fix.sog <= this.config.initialStationaryMaxSpeedKnots
+                : id === 'self';
             state = {
                 observations: [], trail: [], recentFixes: [], windEvidence: [], lastFix: { ...fix },
                 isOwnShip: id === 'self', departureWindowSince: fix.t,
-                // A valid slow received SOG initializes rest; missing/invalid
-                // values never become a synthetic zero-speed observation.
-                motionState: Number.isFinite(fix.sog) && fix.sog >= 0 &&
-                    fix.sog <= this.config.initialStationaryMaxSpeedKnots ? 'STATIONARY' : 'MOVING',
+                // Own startup may receive GPS before SOG: initialize rest without
+                // inventing speed. Other AIS targets retain conservative MOVING.
+                motionState: initiallyStationary ? 'STATIONARY' : 'MOVING',
                 movingSince: fix.t,
                 area: { lat: fix.lat, lon: fix.lon, since: fix.t },
                 areaContext: null, restAreaContext: null, departureThresholdMeters: this.config.departureOutsideAreaMeters,

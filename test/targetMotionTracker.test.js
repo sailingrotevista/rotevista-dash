@@ -96,3 +96,27 @@ test('valid reported zero is preserved rather than confused with missing SOG',()
   assert.equal(target.sog,0);assert.equal(target.motionState,'STATIONARY');
  }finally{Date.now=original;}
 });
+
+test('own startup without usable SOG is stationary without changing AIS startup or fabricating speed',()=>{
+ for(const sog of [undefined,null,NaN,Infinity,-1,'0',0,.5,.6,5]) {
+  const tracker=new TargetMotionTracker();const p=fix(0,0,sog);p.sog=sog;
+  const own=tracker.update('self',p,{now:0,historyMs:900000});
+  const validSpeed=Number.isFinite(sog)&&sog>=0;
+  assert.equal(own.motionState,validSpeed&&sog>.5?'MOVING':'STATIONARY');
+  assert.equal(tracker.targets.get('self').lastFix.sog,sog);
+  const target=tracker.update('other',p,{now:0,historyMs:900000});
+  assert.equal(target.motionState,validSpeed&&sog<=.5?'STATIONARY':'MOVING');
+ }
+});
+test('own initial rest still requires three distinct fixes and area displacement for departure',()=>{
+ for(const [kind,threshold] of [['PORT',50],['ANCHORAGE',150],[null,300]]) {
+  const tracker=new TargetMotionTracker({}, {harborDetector:{getAreaAtPosition(){return kind?{id:'area',kind}:null;}}});
+  const observeOwn=p=>tracker.update('self',p,{now:p.t,historyMs:900000});
+  assert.equal(observeOwn({...fix(0,0),sog:null}).motionState,'STATIONARY');
+  assert.equal(observeOwn(fix(1,threshold/2,3)).motionState,'STATIONARY');
+  // Polling/projection does not supply the missing third real observation.
+  observeOwn(fix(1,threshold,3));
+  assert.equal(tracker.get('self',1000,900000).motionState,'STATIONARY');
+  assert.equal(observeOwn(fix(2,threshold+1,3)).motionState,'MOVING');
+ }
+});

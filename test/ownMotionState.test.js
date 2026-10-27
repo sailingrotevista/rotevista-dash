@@ -106,3 +106,16 @@ test('mixed simulated targets use the same observed own rest as Live, without mu
  assert.equal(session.snapshot().ownMotion.relaxedCollision,false);
  assert.equal(live.ownMotion,ownMotion);
 });
+
+test('GPS-before-SOG startup keeps own stationary and nearby stationary target bubble-only',()=>{
+ const tracker=new TargetMotionTracker();const own=new OwnMotionState(tracker);
+ const m=measurement(0);delete m.raw['navigation.speedOverGround'];delete m.times['navigation.speedOverGround'];
+ const initial=own.update(m.raw,m.times,[],m.now,m.now+240000);
+ assert.equal(initial.motionState,'STATIONARY');assert.equal(initial.confirmedRest,false);assert.equal(initial.status,'STOPPED');
+ const policy=new CollisionPipeline().evaluateTarget({lat:36,lon:14,sog:null,motionState:initial.motionState},
+  {id:'neighbor',lat:36.00001,lon:14,sog:0,motionState:'STATIONARY'},m.now);
+ assert.equal(policy.alertPolicy.mode,'BUBBLE_ONLY');assert.equal(policy.alertState,'NO_DANGER');
+ const arrived=measurement(1);arrived.times['navigation.position']=m.now;
+ assert.equal(own.update(arrived.raw,arrived.times,[],arrived.now,m.now+240000).motionState,'STATIONARY');
+ assert.equal(tracker.targets.get('self').observations.length,1);
+});

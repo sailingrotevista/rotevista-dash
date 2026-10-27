@@ -12,7 +12,10 @@ Sono ammessi soltanto MOVING e STATIONARY.
 | --- | --- |
 | SOG numerica finita fra 0 e 0,5 kn inclusi | STATIONARY |
 | SOG maggiore di 0,5 kn | MOVING |
-| Mancante, null, non numerica, negativa o non finita | MOVING |
+| Mancante o invalida, target AIS | MOVING |
+| Mancante o invalida, nostra barca (self) | STATIONARY |
+
+Eccezione di avvio propria: il primo fix valido senza SOG utilizzabile inizializza STATIONARY, senza inventare una SOG zero né confermare una sosta osservata. Un primo fix con SOG valida sopra 0,5 kn inizializza invece MOVING. Non si modifica lo stato dei target AIS, né la successiva regola MOVING → STATIONARY di cinque fix/cinque minuti.
 
 La soglia iniziale è configurata da `initialStationaryMaxSpeedKnots`. Si applica soltanto al primo fix, non alle successive regole di arresto e ripartenza.
 

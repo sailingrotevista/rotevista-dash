@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Initialize own-ship motion as stationary when the first valid GPS fix arrives before usable SOG. Preserve missing speed, AIS target startup rules and subsequent motion transitions.
+
 - Simplify GPS source selection to freshness (50), accepted-fix reliability (30) and optional declared GNSS quality (20). Use a shared own-speed reference and a 50 m freshness window bounded to 15 seconds–4 minutes; missing speed uses 4 minutes.
 - Carry the original fix deadline through DerivedData, Wind, AIS, own-motion tracking, mixed sessions and the GUI; preserve source timestamps and expire during connection loss.
 - Add a read-only own GPS debug page with a bounded text log, copy and download; refresh the dev bridge every second.

@@ -85,7 +85,7 @@ Verifiche: [matrice completa](../test/alertMatrix.test.js), [ingressi bubble](..
 
 Il riconoscimento automatico usa la stessa istanza di `TargetMotionTracker` usata per i target AIS, con la chiave riservata `self`, alimentata esclusivamente da fix propri ricevuti con timestamp crescente e recente. SOG nulla, riletture e appartenenza a un porto da sole non confermano la sosta.
 
-- All’avvio, SOG fra 0 e 0,5 kn inizializza STATIONARY/STOPPED; SOG superiore o mancante inizializza MOVING/UNDERWAY. La conferma dell’arresto usa almeno 5 fix su almeno 5 minuti con diametro massimo di 50 m.
+- All’avvio, SOG fra 0 e 0,5 kn inizializza STATIONARY/STOPPED; SOG superiore inizializza MOVING/UNDERWAY; per la sola nostra barca, SOG assente o invalida al primo fix inizializza STATIONARY/STOPPED senza inventare velocità. La conferma dell’arresto usa almeno 5 fix su almeno 5 minuti con diametro massimo di 50 m.
 - Sosta confermata nel poligono di un’area PORT → IN PORT; fuori da un porto confermato → AT ANCHOR, come stato osservato compatibile con ancoraggio, senza aspettare di vedere oscillazioni.
 - La nostra barca non entra nell’elenco dei candidati del detector, non forma o estende aree e non incrementa i conteggi dei target.
 - La partenza confermata aggiorna MOVING e ricalcola la politica secondo la matrice, anche sotto 0,8 kn. Un’eventuale indicazione `anchored` rimasta sul bus non prevale sul movimento confermato.
