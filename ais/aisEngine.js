@@ -158,6 +158,7 @@ class AisEngine {
 
     updateWindEvidence(path, value, timestamp) {
         if (!['environment.wind.directionTrue', 'environment.wind.speedTrue'].includes(path)) return;
+        if (path === 'environment.wind.speedTrue' && this.windEngine.normalizedTwsManaged) return;
         const t = Date.parse(timestamp);
         if (!Number.isFinite(t)) return;
         if (!this.windEvidence[path] || t >= this.windEvidence[path].t) this.windEvidence[path] = { value, t };
@@ -458,6 +459,9 @@ class AisEngine {
 
                     const cachedTarget = this.aisPersistentCache[key];
                     if (cachedTarget && realAisTime < cachedTarget.lastSeen) continue;
+                    const windSpeedEvidence = this.windEngine.normalizedTwsManaged
+                        ? {value:this.windEngine.getNormalizedTws(now),t:this.windEngine.getRawTimes()['environment.wind.speedTrue']}
+                        : this.windEvidence['environment.wind.speedTrue'];
                     const motion = this.motionTracker.update(key, {
                         lat: vLat, lon: vLon, t: realAisTime, sourceTime: parsedTime, sog, sogTime:lastSogTime, cog, cogTime:lastCogTime, hdg, headingTime: motionTimestamp(hdgNode, hdgVal),
                     }, { now, historyMs: maxTrailAgeMs,
@@ -465,9 +469,9 @@ class AisEngine {
                             direction: Number.isFinite(this.windEvidence['environment.wind.directionTrue']?.value) ?
                                 (r2d(this.windEvidence['environment.wind.directionTrue'].value) + 360) % 360 : null,
                             directionTime: this.windEvidence['environment.wind.directionTrue']?.t,
-                            speedKnots: Number.isFinite(this.windEvidence['environment.wind.speedTrue']?.value) ?
-                                this.windEvidence['environment.wind.speedTrue'].value * 1.94384 : null,
-                            speedTime: this.windEvidence['environment.wind.speedTrue']?.t,
+                            speedKnots: Number.isFinite(windSpeedEvidence?.value) ?
+                                windSpeedEvidence.value * 1.94384 : null,
+                            speedTime: windSpeedEvidence?.t,
                             lat: myGps.lat, lon: myGps.lon,
                         } });
                     if (!motion) continue; // A rejected first fix must not abort other targets.

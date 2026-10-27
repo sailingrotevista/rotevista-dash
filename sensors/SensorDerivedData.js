@@ -1,6 +1,6 @@
 'use strict';
 
-// GPS, received own SOG and AWS pass through unchanged. Future derived values
+// GPS, SOG, AWS, STW, received TWS and depth pass through unchanged. Future derived values
 // belong here, keeping received measures and their provenance separate.
 class SensorDerivedData {
     constructor() { this.current = null; }

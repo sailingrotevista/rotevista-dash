@@ -48,7 +48,7 @@ test('Receiver requests raw all-source GPS and owns an idempotent subscription l
         calls++;
         assert.equal(command.context, 'vessels.self');
         assert.deepEqual(command.subscribe.map(row=>row.path), [path,'navigation.speedOverGround','navigation.courseOverGroundTrue',
-            'navigation.gnss.methodQuality','navigation.gnss.integrity','navigation.gnss.horizontalDilution','navigation.gnss.satellites','environment.wind.speedApparent']);
+            'navigation.gnss.methodQuality','navigation.gnss.integrity','navigation.gnss.horizontalDilution','navigation.gnss.satellites','environment.wind.speedApparent','navigation.speedThroughWater','environment.wind.speedTrue','environment.depth.belowTransducer']);
         assert.ok(command.subscribe.every(row=>row.policy==='instant'&&row.minPeriod===0));
         assert.equal(sourcePolicy, 'all');
         unsubscribes.push(() => disposed++);
@@ -195,6 +195,9 @@ test('plugin distributes only DerivedData GPS, blocks raw bypass and clears posi
             getRawTimes() { return {}; }
             processIncomingDelta(path, value, time) { production.writes.push({ path, value, time });production.raw[path] = value; }
             applyNormalizedPosition(measurement) { production.writes.push({normalized:true,measurement});production.raw[path] = measurement?.valid ? measurement.value : null; }
+            applyNormalizedStw(measurement) { production.raw['navigation.speedThroughWater']=measurement?.valid?measurement.value:null; }
+            applyNormalizedTws(measurement) { production.raw['environment.wind.speedTrue']=measurement?.valid?measurement.value:null; }
+            applyNormalizedDepth(measurement) { production.raw['environment.depth.belowTransducer']=measurement?.valid?measurement.value:null; }
             applyNormalizedAws(measurement) { production.raw['environment.wind.speedApparent']=measurement?.valid?measurement.value:null; }
             applyNormalizedSog(measurement) { production.raw['navigation.speedOverGround']=measurement?.valid?measurement.value:null; }
             sampleHistory() { production.samples++; }
@@ -249,6 +252,18 @@ test('plugin distributes only DerivedData GPS, blocks raw bypass and clears posi
     assert.equal(frame.normalizedPosition,true);
     assert.equal(frame.positionMeasurement.timestamp,now);
     assert.equal(frame.measurements,undefined);
+    for (const [sensorPath,name] of [
+        ['navigation.speedThroughWater','Stw',2],
+        ['environment.wind.speedTrue','Tws',8],
+        ['environment.depth.belowTransducer','Depth',4],
+    ]) {
+        // The actual normalized branch is called by index, and no legacy
+        // subscription may overwrite these selected values.
+        assert.equal(frame['normalized'+name],true);
+        assert.ok(!existing.command.subscribe.some(row=>row.path===sensorPath));
+        existing.callback({context:'vessels.self',updates:[{timestamp:new Date(now).toISOString(),values:[{path:sensorPath,value:999}]}]});
+        assert.notEqual(production.raw[sensorPath],999);
+    }
     existing.callback(incoming);
     assert.equal(production.writes.length,1);assert.deepEqual(production.raw[path],position);
     // Normalization failures invalidate GPS but do not stop the remaining 1Hz work.

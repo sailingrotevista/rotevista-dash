@@ -1,11 +1,25 @@
 'use strict';
-// Shared source scoring/lock for received speeds. No smoothing or derived values.
-class ReceivedSpeedNormalizer {
+const RECEIVED_VALUE_SELECTION_CONFIG=Object.freeze({
+    maxSources:16,
+    sourceRetentionMs:1800000,
+    historyWindowMs:60000,
+    maxSamplesPerSource:120,
+    referencePeriodMs:1000, // Frequency benefit saturates at 1 Hz.
+    frequencyWeight:50,
+    freshnessWeight:50,
+    promotionScoreMargin:15,
+    promotionHoldMs:5000,
+    promotionMinimumFixes:3,
+});
+
+// Shared source scoring/lock for received scalar measures. No smoothing or derived values.
+class ReceivedValueNormalizer {
     constructor(path,defaults,config={}) {
         this.path=path;
         this.config={...defaults,...config};
-        for(const [name,value] of Object.entries(this.config))if(!Number.isFinite(value)||value<=0)throw new TypeError(`Invalid sensor setting: ${name}`);
+        for(const [name,value] of Object.entries(this.config))if(!Number.isFinite(value)||(!['minimumValue','maximumValue'].includes(name)&&value<=0))throw new TypeError(`Invalid sensor setting: ${name}`);
         for(const name of ['maxSources','maxSamplesPerSource','promotionMinimumFixes'])if(!Number.isInteger(this.config[name]))throw new TypeError(`Invalid sensor count: ${name}`);
+        if(this.config.minimumValue>=this.config.maximumValue)throw new TypeError('Invalid sensor range');
         this.sources=new Map();this.selectedSource=null;this.lastObservationId=null;this.challenger=null;
     }
     ingest(measurement) {
@@ -21,7 +35,7 @@ class ReceivedSpeedNormalizer {
             const oldest=[...this.sources.values()].filter(state=>state.source!==this.selectedSource).sort((a,b)=>a.receivedAt-b.receivedAt)[0];
             if(!oldest)return false;this.sources.delete(oldest.source);
         }
-        const valid=typeof measurement.value==='number'&&Number.isFinite(measurement.value)&&measurement.value>=0&&measurement.value<=this.config.maximumSpeedMps;
+        const valid=typeof measurement.value==='number'&&Number.isFinite(measurement.value)&&measurement.value>=this.config.minimumValue&&measurement.value<=this.config.maximumValue;
         const timestamps=previous?.timestamps || [];
         if(valid&&time> (previous?.timestamp ?? -Infinity))timestamps.push(time);
         const recent=timestamps.filter(t=>t>=now-this.config.historyWindowMs&&!(time===t&&!valid)).slice(-this.config.maxSamplesPerSource);
@@ -76,4 +90,4 @@ class ReceivedSpeedNormalizer {
         return measurement;
     }
 }
-module.exports={ReceivedSpeedNormalizer};
+module.exports={ReceivedValueNormalizer,RECEIVED_VALUE_SELECTION_CONFIG};

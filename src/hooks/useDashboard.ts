@@ -1,3 +1,4 @@
+import { mergeDashboardConfig } from '../utils/dashboardConfig.mjs';
 import { applyNormalizedSessionSog, applyNormalizedSessionPosition, handleMeasurementReset, shouldApplySessionMeasurement } from '../utils/measurementReset.mjs';
 import { aggregateTwd, historyRetentionMs } from '../utils/twdHistory.mjs';
 import { resolveOwnShipNavigation, validOwnPosition } from '../utils/ownShipNavigation.mjs';
@@ -605,16 +606,16 @@ export function useDashboard() {
 
   // Process incoming data
   const normalizedSogRef = useRef(false);
-  const normalizedAwsRef = useRef(false);
+  const normalizedInputsRef = useRef<Record<string, string>>({});
   const realAisTargetsRef = useRef<AisTarget[]>([]);
   const simulatedAisTargetsRef = useRef<AisTarget[]>([]);
-  const processIncomingData = useCallback((path: string, val: any, timeMs?: number, authoritativeAws = false) => {
+  const processIncomingData = useCallback((path: string, val: any, timeMs?: number, authoritativeSensor = false) => {
     if (sharedSessionManagedRef.current && !applyingSessionRef.current) {
-      if (path.startsWith('environment.ais_') || path === 'environment.harbor_clusters' || path === 'navigation.position' || (normalizedSogRef.current && path === 'navigation.speedOverGround') || (normalizedAwsRef.current && path === 'environment.wind.speedApparent')) return;
+      if (path.startsWith('environment.ais_') || path === 'environment.harbor_clusters' || path === 'navigation.position' || (normalizedSogRef.current && path === 'navigation.speedOverGround') || Boolean(normalizedInputsRef.current[path])) return;
       if (sharedSessionModeRef.current === 'simulation' && (path.startsWith('navigation.') || path.startsWith('environment.wind.') || path.startsWith('environment.depth.'))) return;
     }
     // Ordered server frames may legitimately select an older backup source.
-    if (authoritativeAws && path === 'environment.wind.speedApparent') delete storeRef.current.timestamps[path];
+    if (authoritativeSensor) delete storeRef.current.timestamps[path];
     if (handleMeasurementReset(storeRef.current, path, val, timeMs, Date.now())) return;
     if (path === 'environment.depth.belowTransducer') {
       if (Number.isFinite(timeMs) && timeMs! < (storeRef.current.timestamps[path] ?? -Infinity)) return;
@@ -799,15 +800,7 @@ export function useDashboard() {
     }
 
     if (path === 'environment.rotevista_config' && val && typeof val === 'object') {
-      setConfig(prev => ({
-        ...prev,
-        ...val,
-        alarms: { ...prev.alarms, ...(val.alarms || {}) },
-        graphs: { ...prev.graphs, ...(val.graphs || {}) },
-        averaging: { ...prev.averaging, ...(val.averaging || {}) },
-        scales: { ...prev.scales, ...(val.scales || {}) },
-        aisAlerter: { ...prev.aisAlerter, ...(val.aisAlerter || {}) },
-      }));
+      setConfig(prev => mergeDashboardConfig(prev, val));
     }
   }, [manageHistory]);
 
@@ -825,15 +818,7 @@ export function useDashboard() {
       })
       .then(data => {
         if (data) {
-          setConfig(prev => ({
-            ...prev,
-            ...data,
-            alarms: { ...prev.alarms, ...(data.alarms || {}) },
-            graphs: { ...prev.graphs, ...(data.graphs || {}) },
-            averaging: { ...prev.averaging, ...(data.averaging || {}) },
-            scales: { ...prev.scales, ...(data.scales || {}) },
-            aisAlerter: { ...prev.aisAlerter, ...(data.aisAlerter || {}) },
-          }));
+          setConfig(prev => mergeDashboardConfig(prev, data));
         }
       })
       .catch(() => {});
@@ -1021,14 +1006,19 @@ export function useDashboard() {
         setOwnShipMotion(frame.ownMotion || null);
         sharedEnvironmentRef.current = frame.environment;
         normalizedSogRef.current = frame.normalizedSog === true;
-        normalizedAwsRef.current = frame.normalizedAws === true;
+        normalizedInputsRef.current = Object.fromEntries([
+          ['environment.wind.speedApparent','Aws'],
+          ['navigation.speedThroughWater','Stw'],
+          ['environment.wind.speedTrue','Tws'],
+          ['environment.depth.belowTransducer','Depth'],
+        ].filter(([,name]) => frame['normalized'+name] === true));
         applyingSessionRef.current = true;
         try {
           for (const [path, value] of Object.entries(frame.raw || {})) {
             const sourceTime = frame.rawTimes?.[path];
-            if (path === 'environment.wind.speedApparent' && frame.normalizedAws === true) {
+            if (normalizedInputsRef.current[path]) {
               const observedAt = Number.isFinite(sourceTime) && sourceTime <= frame.serverNow ? Date.now() - (frame.serverNow-sourceTime) : undefined;
-              const signature = JSON.stringify([value,sourceTime,frame.awsMeasurement?.source]);
+              const signature = JSON.stringify([value,sourceTime,frame[normalizedInputsRef.current[path].toLowerCase()+'Measurement']?.source]);
               if (sessionRawTimesRef.current[path]?.value !== signature) {
                 sessionRawTimesRef.current[path] = {time: sourceTime, value: signature};
                 processIncomingData(path,observedAt === undefined ? null : value,observedAt,true);

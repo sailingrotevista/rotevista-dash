@@ -2,7 +2,8 @@
 
 const { GPS_AUXILIARY_PATHS } = require('./sensorNormalizer/gpsQuality');
 const GPS_PATH = 'navigation.position';
-const SENSOR_INPUT_PATHS = Object.freeze([GPS_PATH, ...GPS_AUXILIARY_PATHS, 'environment.wind.speedApparent']);
+const SENSOR_INPUT_PATHS = Object.freeze([GPS_PATH, ...GPS_AUXILIARY_PATHS, 'environment.wind.speedApparent',
+    'navigation.speedThroughWater','environment.wind.speedTrue','environment.depth.belowTransducer']);
 
 function sourceReference(update) {
     if (typeof update.$source === 'string' && update.$source.trim()) return update.$source.trim();

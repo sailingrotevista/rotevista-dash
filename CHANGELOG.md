@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Normalize received STW, TWS and transducer depth through source selection at 1 Hz and DerivedData, with 5-second expiry and authoritative shared frames. Generalize the scalar source selector; preserve Wind fallback calculations, gust filtering and depth minima. AIS wind context consumes selected native TWS.
+
+- Preserve dashboard configuration identity on unchanged polling/websocket updates, avoiding extra immediate Wind display ticks when the 1 Hz timer restarts.
+
 - Route received AWS through source selection and normalization at 1 Hz, then DerivedData, Wind and shared clients. Keep source timestamps, 5-second expiry and the existing sustained-gust history filter; block direct AWS overwrites and retain pure simulation. Share speed-source scoring between SOG and AWS.
 
 - Route own received SOG through SogNormalizer and SensorDerivedData, selecting sources by frequency and freshness with hysteresis. Preserve zero, original timestamps and existing 5-second expiry; block direct SOG overwrites in Wind, AIS fallback and normalized dashboard clients. GPS-derived speed remains deferred.

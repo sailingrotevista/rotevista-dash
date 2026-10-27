@@ -160,3 +160,11 @@ convertendo l'età dall'orologio server a quello locale. Lo stesso fix non diven
 nuovo tramite polling. Dopo l'aggancio alla sessione, AWS da websocket non può
 sovrascrivere la misura autorevole. In simulazione pura `normalizedAws` è false
 ed `awsMeasurement` è null. Dev resta isolato e inoltra i sensori dal plugin.
+
+
+STW, TWS ricevuto e profondità seguono lo stesso contratto AWS: flag
+normalizedStw, normalizedTws, normalizedDepth e rispettivi metadati
+stwMeasurement, twsMeasurement, depthMeasurement. Live/mixed seguono la sorgente
+server anche in failover a timestamp precedente; websocket non sovrascrive i
+path gestiti. Polling non rinnova il timestamp. In simulazione pura i flag sono
+false e i metadati null: i valori sintetici mantengono il loro percorso.

@@ -297,3 +297,23 @@ assoluta anche ai calcoli vettoriali e ai pesi TWD. Il campionamento dello stori
 resta a 1 Hz: il filtro delle raffiche sostenute e le formule AWS/TWS non cambiano.
 La GUI live/mixed segue l'AWS selezionata dal server, senza sovrascrittura dal
 websocket; la simulazione pura mantiene il vento sintetico.
+
+### Cadenza della GUI e configurazione invariata
+
+La rilettura della configurazione ogni 10 secondi e gli aggiornamenti websocket
+mantengono la stessa identità dello stato React se il contenuto non cambia
+(anche con ordine diverso delle chiavi JSON). Il timer Wind a 1 Hz non viene
+quindi riavviato con un tick immediato aggiuntivo a ogni polling invariato.
+Le modifiche effettive restano applicate, conservando i valori delle sezioni
+omesse da aggiornamenti parziali. Frequenza sensori e normalizzazione non cambiano.
+
+
+### STW, TWS nativo e profondità normalizzati
+
+STW, TWS ricevuto e depthBelowTransducer sono applicati da SensorDerivedData
+tramite applyNormalizedStw/Tws/Depth, conservando i timestamp e la scadenza di
+5 secondi. Nessun ingresso delta diretto per questi canali. Storico e calcoli
+consumano le misure selezionate con la loro scadenza assoluta: il TWS nativo
+valido mantiene la priorità, poi resta il ripiego AWS/AWA/velocità già esistente.
+Il minimo profondità nel bucket, il filtro raffiche e la formula VMG non cambiano.
+Spostare i calcoli in SensorDerivedData resta un passo successivo.

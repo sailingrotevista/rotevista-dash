@@ -36,7 +36,7 @@ test('server preserves native timestamp and rejects stale native history',()=>{
   engine.manageHistory=(type,value)=>writes.push({type,value});
   feedWindInput(engine,TWS,8,now-6000);
   assert.equal(writes.length,0);
-  assert.equal(engine.getRawTimes()[TWS],now-6000);
+  assert.equal(engine.getRawTimes()[TWS],null,'the normalizer rejects a report already stale at receipt');
   feedWindInput(engine,AWA,0,now);
   feedWindInput(engine,AWS,4,now);engine.sampleHistory();
   assert.ok(writes.some(p=>p.type==='tws'&&Math.abs(p.value-4*1.94384)<1e-10));

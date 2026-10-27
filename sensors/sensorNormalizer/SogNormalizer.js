@@ -1,22 +1,14 @@
 'use strict';
 const {boatSpeedMaxAgeMs}=require('../../shared/windDataPolicy.json');
-const {ReceivedSpeedNormalizer}=require('./ReceivedSpeedNormalizer');
+const {ReceivedValueNormalizer,RECEIVED_VALUE_SELECTION_CONFIG}=require('./ReceivedValueNormalizer');
+// Received values only. Derivation and history filters remain outside this module.
 const SOG_NORMALIZER_CONFIG=Object.freeze({
+    ...RECEIVED_VALUE_SELECTION_CONFIG,
     maxAgeMs:boatSpeedMaxAgeMs,
-    maximumSpeedMps:25.72,
-    maxSources:16,
-    sourceRetentionMs:1800000,
-    historyWindowMs:60000,
-    maxSamplesPerSource:120,
-    referencePeriodMs:1000, // Frequency benefit saturates at 1 Hz.
-    frequencyWeight:50,
-    freshnessWeight:50,
-    promotionScoreMargin:15,
-    promotionHoldMs:5000,
-    promotionMinimumFixes:3,
+    minimumValue:0,
+    maximumValue:25.72,
 });
-
-class SogNormalizer extends ReceivedSpeedNormalizer {
+class SogNormalizer extends ReceivedValueNormalizer {
     constructor(config={}) { super('navigation.speedOverGround',SOG_NORMALIZER_CONFIG,config); }
 }
 module.exports={SogNormalizer,SOG_NORMALIZER_CONFIG};

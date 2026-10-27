@@ -1,6 +1,6 @@
 # Acquisizione, selezione e derivazione dei sensori
 
-Stato: migrazione della posizione GPS propria collegata il 26 ottobre 2026. SensorDerivedData alimenta WindEngine, quindi AIS, motion tracker e frame condivisi; la SOG ricevuta è migrata nello stesso flusso; gli altri sensori mantengono il percorso precedente.
+Stato: migrazione della posizione GPS propria collegata il 26 ottobre 2026. SensorDerivedData alimenta WindEngine, quindi AIS, motion tracker e frame condivisi; SOG, AWS, STW, TWS ricevuto e profondità seguono lo stesso flusso. Gli angoli e gli altri ingressi non migrati mantengono il percorso precedente.
 
 ## Confini dei moduli
 
@@ -12,12 +12,12 @@ Signal K (tutte le sorgenti disponibili, frequenza originale)
   → SensorNormalizer
   → snapshot a 1 Hz
   → SensorDerivedData
-  → WindEngine (GPS, SOG e AWS normalizzati) → AIS / motion tracker / frame → GUI
+  → WindEngine (GPS e scalari normalizzati) → AIS / motion tracker / frame → GUI
 ```
 
-- [SignalKReceiver](../sensors/SignalKReceiver.js): adattatore di ingresso. Acquisisce AWS e posizione propria con contesto opzionale della stessa sorgente: SOG, COG vero, metodo GNSS, integrità, HDOP e satelliti, alla frequenza originale. Inoltra percorso, valore, identità e metadati della sorgente, timestamp originale e istante di ricezione. Non conserva uno storico, non sceglie sorgenti, non media e non attribuisce “adesso” a un timestamp mancante. Le posizioni degli altri target sono escluse.
+- [SignalKReceiver](../sensors/SignalKReceiver.js): adattatore di ingresso. Acquisisce AWS, STW, TWS ricevuto, profondità e posizione propria con contesto opzionale della stessa sorgente: SOG, COG vero, metodo GNSS, integrità, HDOP e satelliti, alla frequenza originale. Inoltra percorso, valore, identità e metadati della sorgente, timestamp originale e istante di ricezione. Non conserva uno storico, non sceglie sorgenti, non media e non attribuisce “adesso” a un timestamp mancante. Le posizioni degli altri target sono escluse.
 - [SensorNormalizer](../sensors/SensorNormalizer.js): conserva lo storico breve per sorgente, valida coordinate e tempi, valuta continuità/cadenza, sceglie una sorgente con lock/failover e produce al massimo uno snapshot ogni secondo. Tutte le scelte sono locali al server e in RAM.
-- [SensorDerivedData](../sensors/SensorDerivedData.js): per ora copia lo snapshot GPS/SOG/AWS senza cambiare valore, validità, sorgente o timestamp. I calcoli e i ripieghi Wind non sono stati trasferiti. Il modulo non invia messaggi Signal K; index trasferisce la sua posizione selezionata allo store Wind.
+- [SensorDerivedData](../sensors/SensorDerivedData.js): per ora copia lo snapshot GPS/SOG/AWS/STW/TWS/profondità senza cambiare valore, validità, sorgente o timestamp. I calcoli e i ripieghi Wind non sono stati trasferiti. Il modulo non invia messaggi Signal K; index trasferisce la sua posizione selezionata allo store Wind.
 
 La connessione di ingresso è in `index.js`; il timer esistente a 1 Hz elabora il ramo parallelo. Gli errori di questo ramo invalidano la posizione operativa, senza interrompere gli altri sensori. Sottoscrizione propria idempotente e rimossa a stop del plugin. Nessun riavvio o modifica alle configurazioni di Signal K per attivare test automatici.
 
@@ -141,7 +141,7 @@ SignalKReceiver (tutte le sorgenti, cadenza originale) → SensorNormalizer →
   formule e regole di lock/failover della SOG sopra descritte. Storico degli
   istanti 60 secondi / 120 campioni / 16 sorgenti, rimozione dopo 30 minuti.
 - La logica comune di selezione è in
-  [ReceivedSpeedNormalizer](../sensors/sensorNormalizer/ReceivedSpeedNormalizer.js);
+  [ReceivedValueNormalizer](../sensors/sensorNormalizer/ReceivedValueNormalizer.js);
   SogNormalizer e AwsNormalizer dichiarano separatamente percorso, limiti e
   configurazione. Nessuna media fra sorgenti, correzione o filtro delle raffiche
   nel normalizer. L'uscita è l'ultimo valore della sorgente selezionata.
@@ -166,3 +166,53 @@ Verifiche automatiche: [AWS](../test/awsNormalizer.test.js),
 [raffiche](../test/windGust.test.js),
 [campionamento](../test/windSampling.test.js). La selezione e la variabilità delle
 sorgenti di vento reali restano da osservare dopo l'installazione della beta.
+
+
+## STW, TWS ricevuto e profondità — 27 ottobre 2026
+
+Tre normalizer di categoria riutilizzano ReceivedValueNormalizer, il selettore
+comune a SOG e AWS rinominato per includere misure scalari non di velocità.
+La configurazione comune di score/lock/memoria è in testa a quel modulo; ogni
+categoria dichiara percorso, unità implicita Signal K, limiti e scadenza.
+
+| Categoria | Path | Intervallo valido | Scadenza |
+| --- | --- | --- | --- |
+| STW | navigation.speedThroughWater | 0–25,72 m/s | 5 s |
+| TWS ricevuto | environment.wind.speedTrue | 0–51,44 m/s | 5 s |
+| Profondità | environment.depth.belowTransducer | −2–500 m | 5 s |
+
+Valgono gli stessi score frequenza/freschezza 50/50, lock, promozione
+15 punti / 5 secondi / 3 osservazioni reali e failover immediato delle altre
+misure scalari. Uno snapshot comune a 1 Hz conserva valori e timestamp originali;
+null, replay e polling non producono zero né nuova freschezza. In particolare
+zero profondità è valido, così come STW/TWS zero. I limiti sono quelli già usati
+in Wind: non vengono aggiunti filtri fisici, medie fra sorgenti o correzioni.
+La profondità resta riferita al trasduttore: nessuna fusione con depthBelowKeel o
+con valori riferiti alla superficie.
+
+Index inoltra esclusivamente le misure da SensorDerivedData tramite
+applyNormalizedStw/Tws/Depth. Le sottoscrizioni legacy e processIncomingDelta
+non alimentano più questi path. Anche il contesto vento del tracker AIS legge
+il TWS ricevuto dal nuovo ingresso, senza un ripiego alla cache Signal K.
+I consumatori rispettano expiresAt senza rinnovarlo al campionamento.
+
+I frame live/mixed aggiungono normalizedStw/Tws/Depth e
+stwMeasurement/twsMeasurement/depthMeasurement. La GUI accetta la scelta
+autorevole anche con riserva più vecchia, converte il timestamp rispetto
+all'orologio server ed esclude i delta websocket dei canali normalizzati.
+Simulazione pura e compatibilità con server precedenti restano separate.
+
+TWS calcolato: il normalizer tratta solo il valore ricevuto. Priorità TWS nativo
+valido, ripiego vettoriale e formula VMG restano negli attuali resolver Wind e
+frontend; lo spostamento dei calcoli in SensorDerivedData è un passo successivo.
+VMG non è oggi un ingresso strumentale: deriva da velocità utilizzabile e TWA.
+Il minimo della profondità nello storico e il filtro delle raffiche TWS/AWS
+rimangono invariati in WindEngine. Le altre misure principali ancora da migrare
+sono angolari (AWA, TWA, TWD, heading e COG) e l'assetto.
+
+Verifiche: [scalari e distribuzione](../test/scalarSensors.test.js),
+[flusso plugin](../test/sensorPipeline.test.js),
+[TWS nativo e ripiego](../test/windTwsValidity.test.js),
+[VMG](../test/windVmgValidity.test.js),
+[profondità](../test/windDepthValidity.test.js). La prova con i sensori reali
+richiede l'installazione della versione aggiornata, senza riavvii durante i test.

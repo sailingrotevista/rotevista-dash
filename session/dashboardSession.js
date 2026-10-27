@@ -127,6 +127,12 @@ class DashboardSession {
             revision:this.revision,serverNow:now,normalizedPosition:live.normalizedPosition===true && this.mode!=='simulation',
             normalizedSog:live.normalizedSog===true && this.mode!=='simulation',
             normalizedAws:live.normalizedAws===true && this.mode!=='simulation',
+            normalizedStw:live.normalizedStw===true && this.mode!=='simulation',
+            normalizedTws:live.normalizedTws===true && this.mode!=='simulation',
+            normalizedDepth:live.normalizedDepth===true && this.mode!=='simulation',
+            stwMeasurement:this.mode==='simulation'?null:live.stwMeasurement || null,
+            twsMeasurement:this.mode==='simulation'?null:live.twsMeasurement || null,
+            depthMeasurement:this.mode==='simulation'?null:live.depthMeasurement || null,
             awsMeasurement:this.mode==='simulation'?null:live.awsMeasurement || null,
             sogMeasurement:this.mode==='simulation'?null:live.sogMeasurement || null,positionMeasurement:this.mode==='simulation' ? null : live.positionMeasurement || null,raw:outRaw,rawTimes:this.mode==='simulation' ? Object.fromEntries(Object.keys(outRaw).map(path=>[path,now])) : (live.rawTimes || {}),own,ownMotion,targets,harborClusters:clusters,
             sharedAlerts:this.sharedAlerts.snapshot(now),waitingForLivePosition:this.mode==='mixed'&&!own};

@@ -6,11 +6,17 @@ Riordino concordato il 26 ottobre 2026. Le cartelle raggruppano le responsabilit
 
 ```text
 index.js                         ingresso e ciclo di vita del plugin Signal K
-sensors/                         acquisizione e selezione GPS propria collegata ai motori
+sensors/                         acquisizione e selezione GPS e misure scalari collegata ai motori
   SignalKReceiver.js
   SensorNormalizer.js            coordinatore
   sensorNormalizer/
     GpsNormalizer.js             selezione e validazione GPS
+    ReceivedValueNormalizer.js  selettore scalare comune
+    SogNormalizer.js            SOG ricevuta
+    AwsNormalizer.js            AWS ricevuta
+    StwNormalizer.js            STW ricevuta
+    TwsNormalizer.js            TWS ricevuto
+    DepthNormalizer.js          profondità sotto il trasduttore
     gpsQuality.js               qualità dichiarata e osservata
   SensorDerivedData.js
 ais/                             movimento, collisioni e aree di sosta

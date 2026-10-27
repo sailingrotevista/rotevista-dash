@@ -1,3 +1,4 @@
+const {feedWindInput}=require('./helpers/feedWindInput');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const create = require('../shared/magneticDeclination');
@@ -31,7 +32,7 @@ test('GUI and server ignore instrument variation; magnetic leeway uses model, no
  try {
   const e=new WindEngine({debug(){}},()=>({}));e.fetchOpenMeteoForecast=()=>{};
   e.applyNormalizedPosition({valid:true,value:position,timestamp:now,expiresAt:now+240000},now);
-  for(const [p,v] of Object.entries(raw))e.processIncomingDelta(p,v,now);
+  for(const [p,v] of Object.entries(raw))feedWindInput(e,p,v,now);
   e.sampleHistory();
   assert.ok(Math.abs(e.getRollingAngles().hdg.at(-1).val-expected)<0.00051);
  }finally{Date.now=original;}
@@ -64,7 +65,7 @@ test('server reconstructed TWD overrides received TWD without modifying raw data
  const e=new WindEngine({debug(){}},()=>({}));e.fetchOpenMeteoForecast=()=>{};
   e.applyNormalizedPosition({valid:true,value:position,timestamp:now,expiresAt:now+240000},now);
  let last; e.manageHistory=(k,v)=>{if(k==='twd')last=v;};
- for(const [p,v] of Object.entries({'navigation.position':position,'navigation.headingTrue':2,'navigation.headingMagnetic':1,'environment.wind.angleTrueWater':0.5,'environment.wind.directionTrue':4}))e.processIncomingDelta(p,v,now);
+ for(const [p,v] of Object.entries({'navigation.position':position,'navigation.headingTrue':2,'navigation.headingMagnetic':1,'environment.wind.angleTrueWater':0.5,'environment.wind.directionTrue':4}))feedWindInput(e,p,v,now);
  e.sampleHistory();
  assert.ok(Math.abs(last-(1.5+create(geomagnetism)({'navigation.position':position},now)))<1e-10);
  assert.equal(e.getRaw()['environment.wind.directionTrue'],4);
